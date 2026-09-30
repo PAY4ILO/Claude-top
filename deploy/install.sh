@@ -116,12 +116,17 @@ if [ "$WEB" = caddy ]; then
   SITE="# Сайт LWL (сделал deploy/install.sh из deploy/Caddyfile.template)
 $(sed -e '/^#/d' -e "s/__DOMAIN__/$DOMAIN/g" -e "s/__PORT__/$PORT/g" "$SRC/deploy/Caddyfile.template")"
   if [ -n "$CADDY_BIND" ]; then SITE="${SITE//__BIND__/$CADDY_BIND}"; else SITE="$(grep -v '__BIND__' <<<"$SITE")"; fi
-  CONF=/etc/caddy/Caddyfile
-  SNIPPET=/etc/caddy/lwl.caddy
-  # Сами правим только обычную установку Caddy: служба caddy с /etc/caddy/Caddyfile. Перезагружаем через
-  # systemctl — с окружением службы (в Caddyfile бывают {$ТОКЕН}); при ошибке Caddy остаётся на старых настройках.
-  if [ "$(systemctl show -p MainPID --value caddy 2>/dev/null || true)" = "$CADDY_PID" ] && [ -f "$CONF" ] \
-    && tr '\0' ' ' <"/proc/$CADDY_PID/cmdline" | grep -qF -- "$CONF"; then
+  CADDY_OK=""
+  # С каким файлом запущен Caddy — путь, как его видит сам Caddy (в Docker — путь внутри контейнера).
+  CADDY_CONF_IN="$(tr '\0' '\n' <"/proc/$CADDY_PID/cmdline" 2>/dev/null \
+    | awk 'f { print; exit } $0 == "--config" { f = 1 } /^--config=/ { sub(/^--config=/, ""); print; exit }' || true)"
+  CADDY_CID="$(grep -oE '[0-9a-f]{64}' "/proc/$CADDY_PID/cgroup" 2>/dev/null | head -n 1 || true)"
+
+  if [ "$(systemctl show -p MainPID --value caddy 2>/dev/null || true)" = "$CADDY_PID" ] && [ "$CADDY_CONF_IN" = /etc/caddy/Caddyfile ]; then
+    # Обычная установка Caddy: служба caddy с /etc/caddy/Caddyfile. Перезагружаем через systemctl —
+    # с окружением службы (в Caddyfile бывают {$ТОКЕН}); при ошибке Caddy остаётся на старых настройках.
+    CONF=/etc/caddy/Caddyfile
+    SNIPPET=/etc/caddy/lwl.caddy
     STAMP="$(date +%Y%m%d-%H%M%S)"
     [ -f "$SNIPPET" ] && cp -p "$SNIPPET" "$SNIPPET.bak-$STAMP"
     printf '%s\n' "$SITE" >"$SNIPPET"
@@ -142,8 +147,48 @@ $(sed -e '/^#/d' -e "s/__DOMAIN__/$DOMAIN/g" -e "s/__PORT__/$PORT/g" "$SRC/deplo
       if [ -f "$SNIPPET.bak-$STAMP" ]; then mv "$SNIPPET.bak-$STAMP" "$SNIPPET"; else rm -f "$SNIPPET"; fi
       echo "Caddy не принял настройку — всё вернул как было, ваши сайты работают. Причина: journalctl -u caddy -n 30"
     fi
+
+  elif [ -n "$CADDY_CID" ] && command -v docker >/dev/null 2>&1; then
+    # Caddy в Docker (так у владельца): находим его Caddyfile на машине по монтированиям контейнера,
+    # дописываем блок сайта между метками и перезагружаем Caddy изнутри контейнера (с его переменными).
+    CADDY_NAME="$(docker inspect --format '{{.Name}}' "$CADDY_CID" 2>/dev/null | sed 's#^/##' || true)"
+    CADDY_NET="$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$CADDY_CID" 2>/dev/null || true)"
+    HOST_CONF=""
+    BEST=""
+    while IFS=$'\t' read -r DST HSRC; do
+      [ -n "$DST" ] || continue
+      case "$CADDY_CONF_IN" in
+        "$DST" | "$DST"/*)
+          if [ "${#DST}" -gt "${#BEST}" ]; then BEST="$DST"; HOST_CONF="$HSRC${CADDY_CONF_IN#"$DST"}"; fi ;;
+      esac
+    done < <(docker inspect --format '{{range .Mounts}}{{.Destination}}{{"\t"}}{{.Source}}{{println}}{{end}}' "$CADDY_CID" 2>/dev/null || true)
+    if [ "$CADDY_NET" != host ]; then
+      echo "Caddy в Docker без network_mode: host — из контейнера не видно сайт на 127.0.0.1:$PORT, сам не подключаю."
+    elif [ -z "$HOST_CONF" ] || [ ! -f "$HOST_CONF" ] || [[ "$CADDY_CONF_IN" == *.json ]]; then
+      echo "Не нашёл на машине Caddyfile контейнера $CADDY_NAME ($CADDY_CONF_IN) — сам не подключаю."
+    else
+      BEGIN="# >>> Сайт LWL (deploy/install.sh; всё до строки «<<<» перезаписывается при установке)"
+      END="# <<< Сайт LWL"
+      BACKUP="$HOST_CONF.bak-$(date +%Y%m%d-%H%M%S)"
+      cp -p "$HOST_CONF" "$BACKUP"
+      KEEP="$(awk -v b="$BEGIN" -v e="$END" '$0 == b { skip = 1 } !skip { print } $0 == e { skip = 0 }' "$BACKUP")"
+      # Пишем в тот же файл (>, а не mv): в контейнер он часто примонтирован отдельным файлом,
+      # и новый файл на месте старого контейнер бы не увидел.
+      printf '%s\n\n%s\n%s\n%s\n' "$KEEP" "$BEGIN" "$(tail -n +2 <<<"$SITE")" "$END" >"$HOST_CONF"
+      if docker exec "$CADDY_CID" caddy reload --config "$CADDY_CONF_IN" --adapter caddyfile; then
+        CADDY_OK=1
+        if grep -qxF "$BEGIN" "$BACKUP"; then rm -f "$BACKUP"; fi   # повторная установка — копия не нужна
+        echo "Сайт подключён к Caddy (контейнер $CADDY_NAME): блок дописан в конец $HOST_CONF."
+        [ -f "$BACKUP" ] && echo "Копия Caddyfile до правки: $BACKUP"
+      else
+        cat "$BACKUP" >"$HOST_CONF"
+        rm -f "$BACKUP"
+        echo "Caddy не принял настройку — вернул Caddyfile как был, ваши сайты работают. Причина: docker logs --tail 30 $CADDY_NAME"
+      fi
+    fi
   fi
-  if [ -z "${CADDY_OK:-}" ]; then
+
+  if [ -z "$CADDY_OK" ]; then
     printf '%s\n' "$SITE" >/etc/lwl/lwl.caddy
     echo "Подключите сайт к Caddy вручную: добавьте этот блок (он же в /etc/lwl/lwl.caddy) в свой Caddyfile и перезагрузите Caddy."
     echo

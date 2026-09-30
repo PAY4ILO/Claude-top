@@ -68,9 +68,19 @@ sudo ./deploy/install.sh ваш-домен.ru ваша@почта.ru
 - Если Caddy слушает конкретный IP (`bind`), сайт слушает тот же.
 - Сертификат Caddy получает и продлевает сам.
 - Если Caddy не принял настройку, всё возвращается как было, и остальные сайты продолжают работать.
-- Если Caddy запущен не как служба `caddy` (например, в Docker), установщик ничего в нём не меняет,
-  а печатает блок, который нужно добавить в ваш Caddyfile вручную. Этот блок сохраняется в `/etc/lwl/lwl.caddy`.
 - Отключить сайт от Caddy: удалите строку `import /etc/caddy/lwl.caddy` и выполните `sudo systemctl reload caddy`.
+
+**Caddy в Docker** (контейнер с `network_mode: host`, Caddyfile примонтирован с машины) установщик тоже подключит сам.
+- По настройкам контейнера он находит, где на машине лежит Caddyfile.
+- Дописывает в его конец блок сайта между строками `# >>> Сайт LWL` и `# <<< Сайт LWL`.
+- Выполняет `docker exec <контейнер> caddy reload`.
+- Файл меняется на месте, поэтому примонтированный файл не отваливается.
+- Копия до правки сохраняется рядом (`Caddyfile.bak-ДАТА`). При ошибке файл возвращается как был.
+- Отключить сайт: удалите эти строки вместе с тем, что между ними, и выполните
+  `docker exec <контейнер> caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`.
+
+В остальных случаях (Caddy запущен вручную, в Docker без host-сети и т. п.) установщик ничего в Caddy
+не меняет. Он печатает блок, который нужно добавить в ваш Caddyfile вручную; этот блок сохраняется в `/etc/lwl/lwl.caddy`.
 
 Если порты 80/443 держит какая-то другая программа (не nginx и не Caddy), установщик остановится
 и покажет, какая именно.
@@ -79,8 +89,10 @@ sudo ./deploy/install.sh ваш-домен.ru ваша@почта.ru
 Когда `getent hosts ваш-домен.ru` покажет ваш IP, выполните:
 `sudo certbot --nginx -d ваш-домен.ru -d www.ваш-домен.ru --redirect`.
 С Caddy ничего запускать не нужно: он сам повторяет попытки. Если сертификата нет через полчаса
-после того, как домен заработал, выполните `sudo systemctl reload caddy`. Посмотреть, что происходит:
-`journalctl -u caddy --since "1 hour ago" | grep ваш-домен`.
+после того, как домен заработал, перезагрузите Caddy. Для службы: `sudo systemctl reload caddy`,
+посмотреть, что происходит: `journalctl -u caddy --since "1 hour ago" | grep ваш-домен`.
+Для Docker: `sudo docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`,
+а посмотреть: `sudo docker logs --since 1h caddy 2>&1 | grep ваш-домен`.
 
 Пока нет сертификата, войти на сайт не получится: кука входа передаётся только по HTTPS.
 
@@ -159,8 +171,8 @@ sudo systemctl start lwl
 
 - **502 Bad Gateway** — сайт не запущен: `systemctl status lwl`, `journalctl -u lwl -n 50`.
 - **Сайт открывается только по http** — не выдан сертификат (см. пункт 3).
-- **Сайт за Caddy не открывается** — `journalctl -u caddy -n 50`; проверьте, что в `/etc/caddy/Caddyfile`
-  есть строка `import /etc/caddy/lwl.caddy`.
+- **Сайт за Caddy не открывается** — логи Caddy: `journalctl -u caddy -n 50` (служба) или
+  `sudo docker logs --tail 50 caddy` (Docker); проверьте, что блок сайта есть в Caddyfile.
 - **certbot: `DNS problem: NXDOMAIN`** — интернет пока не знает ваш домен: не добавлены A-записи или домен
   ещё не делегирован (см. пункт 2). Сайт и сертификат тут ни при чём, подождите и повторите.
 - **certbot: `Timeout during connect` / `Connection refused`** — домен уже указывает на ваш IP, но порт 80
