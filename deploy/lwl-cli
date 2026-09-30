@@ -1,0 +1,6 @@
+#!/bin/sh
+# Команды админа сайта на машине: sudo lwl-cli users | role <ник> admin | reset-link <ник> | backup <файл>
+set -eu
+set -a; . /etc/lwl/lwl.env; set +a
+exec runuser -u lwl -- env LWL_DATA_DIR="$LWL_DATA_DIR" LWL_PUBLIC_URL="${LWL_PUBLIC_URL:-}" \
+  /usr/bin/node --disable-warning=ExperimentalWarning /opt/lwl/server/cli.js "$@"

@@ -1,0 +1,52 @@
+# nginx перед сайтом LWL. install.sh подставляет домен и кладёт файл в /etc/nginx/sites-available/lwl.
+# HTTPS (сертификат Let's Encrypt, блок listen 443 и редирект с http) добавляет certbot --nginx.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __DOMAIN__ www.__DOMAIN__;
+
+    # Сборки бывают большими — чуть больше, чем LWL_MAX_UPLOAD_MB
+    client_max_body_size 2100m;
+
+    gzip on;
+    gzip_types text/css application/javascript text/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # Загрузка файла сборки: отдаём сайту потоком, без буфера на диске nginx.
+    # (Точный путь регуляркой: префикс «/api/admin/packs/» заставил бы nginx отвечать 301 на /api/admin/packs.)
+    location ~ ^/api/admin/packs/[^/]+/file$ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # Скачивание сборки: без временного файла у nginx, с докачкой
+    location ~ ^/api/packs/[^/]+/download$ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Range $http_range;
+        proxy_buffering off;
+        proxy_max_temp_file_size 0;
+        proxy_read_timeout 3600s;
+    }
+}

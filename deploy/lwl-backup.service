@@ -1,0 +1,9 @@
+[Unit]
+Description=LWL — снимок базы сайта
+
+[Service]
+Type=oneshot
+# от имени сайта: иначе root создаст рядом с базой файлы, в которые сайт потом не сможет писать
+User=lwl
+Group=lwl
+ExecStart=/bin/sh /opt/lwl/deploy/backup.sh

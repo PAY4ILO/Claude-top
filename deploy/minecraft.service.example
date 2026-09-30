@@ -1,0 +1,24 @@
+# (Необязательно) Автозапуск самого Minecraft-сервера, если он на этой же машине.
+# 1) Поправьте пути ниже (папка сервера, имя jar, память).
+# 2) sudo cp minecraft.service.example /etc/systemd/system/minecraft.service
+# 3) sudo systemctl daemon-reload && sudo systemctl enable --now minecraft
+# Консоль: команды (например, /wl add <ник>) удобнее вводить в игре от оператора
+# или через RCON (enable-rcon=true в server.properties).
+[Unit]
+Description=Minecraft-сервер LWL
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=minecraft
+WorkingDirectory=/opt/minecraft
+ExecStart=/usr/bin/java -Xms2G -Xmx6G -jar fabric-server-launch.jar nogui
+# Сохранить мир перед остановкой: сервер корректно выключается по SIGTERM
+KillSignal=SIGTERM
+TimeoutStopSec=90
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
