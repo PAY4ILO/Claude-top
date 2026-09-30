@@ -27,6 +27,14 @@ export function loadConfig(env = process.env) {
     trustProxy: env.LWL_TRUST_PROXY === '1',
     secureCookies: env.LWL_SECURE_COOKIES ? env.LWL_SECURE_COOKIES === '1' : publicUrl.startsWith('https://'),
     maxUploadBytes: Number(env.LWL_MAX_UPLOAD_MB || 2048) * 1024 * 1024,
+    // RCON Minecraft-сервера: при одобрении заявки сайт сам выполняет /wl add <ник> [cracked].
+    // Без пароля выключено — тогда команду вводят вручную (она показывается в одобренной заявке).
+    rcon: {
+      host: env.LWL_RCON_HOST || '127.0.0.1',
+      port: Number(env.LWL_RCON_PORT || 25575),
+      password: env.LWL_RCON_PASSWORD || '',
+      timeoutMs: Number(env.LWL_RCON_TIMEOUT_MS || 5000),
+    },
     staticRoot: ROOT,
     // Для тестов: ускорить хеширование паролей (никогда не включать на проде)
     fastHash: env.LWL_FAST_HASH === '1',

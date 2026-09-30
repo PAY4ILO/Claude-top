@@ -1131,6 +1131,138 @@ body:not(.lk--app) .app {
   color: #fff;
 }
 
+.segmented button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* «Создатель» — владелец сайта, выше админа */
+.role--creator {
+  background: linear-gradient(90deg, rgba(242, 193, 78, 0.22), rgba(255, 150, 60, 0.22));
+  color: #ffd66b;
+}
+
+/* Права админа (видит и меняет только создатель) */
+.perms__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+.perms__item {
+  padding: 14px 16px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-field);
+}
+.perms__item:has(input:checked) {
+  border-color: rgba(30, 197, 220, 0.45);
+}
+.perms__title {
+  display: block;
+  font-weight: 600;
+}
+.perms__text {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--c-text-3);
+}
+
+.detail__foot {
+  margin-top: 28px;
+}
+
+/* Связь с Minecraft-сервером (RCON) во вкладке «Сервер» у админа */
+.rcon {
+  display: grid;
+  gap: 14px;
+}
+.rcon .callout {
+  margin-top: 0;
+}
+.rcon .cmd {
+  margin-top: 0;
+}
+.rcon__reply {
+  color: var(--c-text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.rcon__reply--error {
+  color: var(--c-danger);
+}
+.how-list--plain {
+  margin: 0;
+  padding-left: 22px;
+  list-style: decimal;
+  color: var(--c-text-2);
+  line-height: 1.55;
+}
+.inline-code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--c-field);
+  color: var(--c-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+/* Обрезка аватарки */
+.crop {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+}
+.crop__stage {
+  position: relative;
+  width: min(320px, 100%);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--c-field);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.crop__stage.is-dragging {
+  cursor: grabbing;
+}
+.crop__stage:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 3px;
+}
+.crop__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* Затемнение вокруг круга — так аватарку увидят другие */
+.crop__mask {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.55);
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+.crop__controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(320px, 100%);
+}
+.crop__range {
+  flex: 1;
+  accent-color: var(--c-blue-2);
+}
+.crop__hint {
+  text-align: center;
+}
+.crop .modal__actions {
+  justify-self: stretch;
+}
+
 /* ---------------------------------------------------------------- вход */
 
 .gate {
@@ -1611,6 +1743,15 @@ body:not(.lk--app) .app {
 .msg__meta svg {
   width: 14px;
   height: 14px;
+}
+.msg--mine:not(.msg--read) .msg__meta svg {
+  opacity: 0.7;
+}
+.msg--read .msg__meta svg {
+  width: 19px;
+  height: 19px;
+  margin: -3px -2px -3px 0;
+  color: #fff;
 }
 .msg--pending .msg__bubble {
   opacity: 0.7;

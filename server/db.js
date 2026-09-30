@@ -135,6 +135,19 @@ const MIGRATIONS = [
     updated_at INTEGER NOT NULL
   );
   `,
+
+  /* 2: права админов, автодобавление в вайтлист по RCON, ссылка на Telegram */
+  `
+  -- JSON-список прав админа (server/lib/permissions.js); NULL — права по умолчанию
+  ALTER TABLE users ADD COLUMN admin_perms TEXT;
+
+  -- Автодобавление в вайтлист при одобрении: 'ok' | 'error' | NULL (RCON не настроен или не пробовали)
+  ALTER TABLE applications ADD COLUMN whitelist_status TEXT;
+  ALTER TABLE applications ADD COLUMN whitelist_note TEXT NOT NULL DEFAULT '';
+  ALTER TABLE applications ADD COLUMN whitelist_at INTEGER;
+
+  UPDATE settings SET value = 'https://t.me/LWL_MINECRAFT' WHERE key = 'telegramUrl' AND value = '';
+  `,
 ];
 
 export function openDb(file) {

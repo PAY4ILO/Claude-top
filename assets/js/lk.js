@@ -1,6 +1,8 @@
 /*
  * Личный кабинет: каркас приложения, роутер и экраны.
  * Роли: user «Пользователь» (после регистрации) → player «Игрок» (заявку одобрили) → admin «Админ».
+ * «Создатель» (me.creator) — владелец из LWL_ADMINS: админ со всеми правами, раздаёт права другим админам.
+ * Что видит админ, решают его права (me.permissions): разделы без прав скрыты из меню.
  *   #/                          — главная (пользователь/игрок | админ)
  *   #/server                    — «Сервер»: адрес, как зайти, сборки (игрок); у админа — управление
  *   #/application               — моя заявка (анкета, если заявки ещё нет)
@@ -31,6 +33,9 @@
   let links = { telegramUrl: '', discordUrl: '' };
   const telegramUrl = () => (/^https:\/\//.test(links.telegramUrl || '') ? links.telegramUrl : '');
   const isPlayer = () => me && (me.role === 'player' || me.role === 'admin');
+  /** Есть ли у админа право (applications, tickets, users, server, delete, admins). */
+  const can = (key) => !!(me && me.role === 'admin' && me.permissions && me.permissions.includes(key));
+  const canPeople = () => can('users') || can('admins');
 
   /* ============================================================ запуск */
 
@@ -65,7 +70,7 @@
       me = null;
       return renderGate();
     }
-    const changed = me.role !== user.role || me.id !== user.id;
+    const changed = me.role !== user.role || me.id !== user.id || String(me.permissions) !== String(user.permissions);
     const updated = me.nickname !== user.nickname || me.avatar !== user.avatar;
     me = user;
     if (changed) {
@@ -124,10 +129,11 @@
     if (a === 'profile') return renderProfile();
     if (a === 'server') {
       if (!isPlayer()) return renderServerLocked();
-      return me.role === 'admin' && query.get('preview') !== '1' ? renderServerAdmin() : renderServer();
+      return can('server') && query.get('preview') !== '1' ? renderServerAdmin() : renderServer();
     }
     if (splitName) {
-      if (me.role !== 'admin') return renderForbidden();
+      const allowed = splitName === 'users' ? canPeople() : can(splitName);
+      if (!allowed) return renderForbidden();
       if (splitName === 'users') return renderUsers(query, c);
       return splitName === 'applications' ? renderApplications(query, c) : renderTickets(query, c);
     }
@@ -138,14 +144,15 @@
 
   function navItems() {
     if (me.role === 'admin') {
+      // Разделы — по правам админа; «Сервер» есть всегда (без права «Сервер» — как у игроков).
       return [
         { key: 'home', href: '#/', icon: 'home', label: 'Главная' },
-        { key: 'applications', href: '#/admin/applications', icon: 'file', label: 'Заявки', badge: summary.pendingApplications },
-        { key: 'tickets', href: '#/admin/tickets', icon: 'chat', label: 'Обращения', short: 'Чаты', badge: summary.unreadConversations },
-        { key: 'users', href: '#/admin/users', icon: 'users', label: 'Люди', badge: summary.resetRequests },
+        can('applications') && { key: 'applications', href: '#/admin/applications', icon: 'file', label: 'Заявки', badge: summary.pendingApplications },
+        can('tickets') && { key: 'tickets', href: '#/admin/tickets', icon: 'chat', label: 'Обращения', short: 'Чаты', badge: summary.unreadConversations },
+        canPeople() && { key: 'users', href: '#/admin/users', icon: 'users', label: 'Люди', badge: summary.resetRequests },
         { key: 'server', href: '#/server', icon: 'server', label: 'Сервер' },
         { key: 'profile', href: '#/profile', icon: 'user', label: 'Профиль' },
-      ];
+      ].filter(Boolean);
     }
     // «Сервер» (адрес, сборки) открывается, когда заявку одобрили и выдали роль «Игрок».
     return [
@@ -172,7 +179,7 @@
         'a',
         { class: 'nav-profile', href: '#/profile' },
         UI.avatar(me, 48),
-        h('span', { class: 'nav-profile__text' }, h('span', { class: 'nav-profile__name', text: me.nickname }), roleBadge(me.role))
+        h('span', { class: 'nav-profile__text' }, h('span', { class: 'nav-profile__name', text: me.nickname }), roleBadge(me.role, me.creator))
       ),
       h(
         'nav',
@@ -195,7 +202,7 @@
     const menu = h(
       'div',
       { class: 'menu', role: 'menu', hidden: true },
-      h('div', { class: 'menu__head' }, h('p', { class: 'menu__name' }, me.nickname, ' ', roleBadge(me.role)), h('p', { class: 'menu__email', text: me.email })),
+      h('div', { class: 'menu__head' }, h('p', { class: 'menu__name' }, me.nickname, ' ', roleBadge(me.role, me.creator)), h('p', { class: 'menu__email', text: me.email })),
       h('a', { class: 'menu__item', role: 'menuitem', href: '#/profile' }, icon('user'), 'Профиль'),
       h('a', { class: 'menu__item', role: 'menuitem', href: 'index.html' }, icon('external'), 'На сайт'),
       h('button', { class: 'menu__item', role: 'menuitem', type: 'button', onclick: onLogout }, icon('logout'), 'Выйти')
@@ -261,8 +268,9 @@
     } catch (e) {
       return;
     }
-    // Роль поменяли на сервере (одобрили заявку, выдали/сняли админа) — перестраиваем кабинет.
-    if (summary.role && summary.role !== me.role) {
+    // Роль или права поменяли на сервере (одобрили заявку, выдали/сняли админа, создатель изменил права) — перестраиваем кабинет.
+    const permsChanged = summary.role === 'admin' && me.role === 'admin' && String(summary.permissions) !== String(me.permissions);
+    if ((summary.role && summary.role !== me.role) || permsChanged) {
       const user = await Api.auth.me().catch(() => null);
       if (!user) return;
       me = user;
@@ -326,8 +334,9 @@
     return h('span', { class: 'pill pill--' + status, text: STATUS[status] || status });
   }
 
-  /** «Префикс» роли: Пользователь / Игрок / Админ. */
-  function roleBadge(role) {
+  /** «Префикс» роли: Пользователь / Игрок / Админ / Создатель. */
+  function roleBadge(role, creator) {
+    if (creator) return h('span', { class: 'role role--creator', text: Api.CREATOR_LABEL });
     return h('span', { class: 'role role--' + role, text: ROLE[role] || role });
   }
 
@@ -338,7 +347,19 @@
 
   function renderForbidden() {
     const p = page({ title: 'Нет доступа' });
-    p.body.append(h('div', { class: 'card' }, stateBlock({ iconName: 'lock', title: 'Раздел только для администраторов', text: 'Если вы админ, попросите выдать права.', action: h('a', { class: 'btn', href: '#/', text: 'На главную' }) })));
+    const admin = me && me.role === 'admin';
+    p.body.append(
+      h(
+        'div',
+        { class: 'card' },
+        stateBlock({
+          iconName: 'lock',
+          title: admin ? 'Нет прав на этот раздел' : 'Раздел только для администраторов',
+          text: admin ? 'Права админов раздаёт создатель сайта — попросите его.' : 'Если вы админ, попросите выдать права.',
+          action: h('a', { class: 'btn', href: '#/', text: 'На главную' }),
+        })
+      )
+    );
   }
 
   function renderNotFound() {
@@ -492,7 +513,13 @@
   }
 
   function renderAdminHome() {
-    const p = page({ title: 'Панель администратора', sub: 'Заявки игроков и обращения в поддержку.', key: 'home' });
+    const p = page({ title: 'Панель администратора', sub: me.creator ? 'Вы создатель сайта: все разделы и права других админов.' : 'Заявки игроков и обращения в поддержку.', key: 'home' });
+    const showApps = can('applications');
+    const showTickets = can('tickets');
+    if (!showApps && !showTickets) {
+      p.body.append(h('div', { class: 'card' }, stateBlock({ iconName: 'users', title: 'Заявки и обращения вам недоступны', text: 'В меню — разделы, на которые создатель сайта выдал вам права.' })));
+      return;
+    }
     const stat = (href, label, img, key) =>
       h(
         'a',
@@ -504,23 +531,29 @@
       );
     const apps = h('div', {}, skeleton(3));
     const tickets = h('div', {}, skeleton(3));
-    p.body.append(
-      h('div', { class: 'grid-2' }, stat('#/admin/applications', 'Новые заявки', 'assets/img/lk-progress.webp', 'apps'), stat('#/admin/tickets', 'Непрочитанные обращения', 'assets/img/lk-support.webp', 'tickets')),
+    UI.append(p.body, [
+      h('div', { class: 'grid-2' }, [showApps && stat('#/admin/applications', 'Новые заявки', 'assets/img/lk-progress.webp', 'apps'), showTickets && stat('#/admin/tickets', 'Непрочитанные обращения', 'assets/img/lk-support.webp', 'tickets')].filter(Boolean)),
       h(
         'div',
         { class: 'grid-2' },
-        h('section', { class: 'card list-card' }, h('header', { class: 'list-card__head' }, h('h2', { text: 'Ждут решения' }), h('a', { class: 'link-btn', href: '#/admin/applications', text: 'Все заявки' })), apps),
-        h('section', { class: 'card list-card' }, h('header', { class: 'list-card__head' }, h('h2', { text: 'Последние обращения' }), h('a', { class: 'link-btn', href: '#/admin/tickets', text: 'Все обращения' })), tickets)
-      )
-    );
+        [
+          showApps && h('section', { class: 'card list-card' }, h('header', { class: 'list-card__head' }, h('h2', { text: 'Ждут решения' }), h('a', { class: 'link-btn', href: '#/admin/applications', text: 'Все заявки' })), apps),
+          showTickets && h('section', { class: 'card list-card' }, h('header', { class: 'list-card__head' }, h('h2', { text: 'Последние обращения' }), h('a', { class: 'link-btn', href: '#/admin/tickets', text: 'Все обращения' })), tickets),
+        ].filter(Boolean)
+      ),
+    ]);
 
     const load = async () => {
       try {
-        const [s, a, t] = await Promise.all([Api.summary(), Api.applications.list({ status: 'pending' }), Api.chats.list({ status: 'open' })]);
-        p.body.querySelector('[data-stat=apps]').textContent = s.pendingApplications;
-        p.body.querySelector('[data-stat=tickets]').textContent = s.unreadConversations;
-        clear(apps).append(a.items.length ? h('ul', { class: 'list' }, a.items.slice(0, 5).map(applicationRow)) : stateBlock({ compact: true, iconName: 'check', title: 'Новых заявок нет', text: 'Как только игрок подаст анкету, она появится здесь.' }));
-        clear(tickets).append(t.length ? h('ul', { class: 'list' }, t.slice(0, 5).map((c) => ticketRow(c))) : stateBlock({ compact: true, iconName: 'check', title: 'Все обращения разобраны', text: 'Новые вопросы игроков появятся здесь.' }));
+        const [s, a, t] = await Promise.all([Api.summary(), showApps ? Api.applications.list({ status: 'pending' }) : null, showTickets ? Api.chats.list({ status: 'open' }) : null]);
+        if (showApps) {
+          p.body.querySelector('[data-stat=apps]').textContent = s.pendingApplications;
+          clear(apps).append(a.items.length ? h('ul', { class: 'list' }, a.items.slice(0, 5).map(applicationRow)) : stateBlock({ compact: true, iconName: 'check', title: 'Новых заявок нет', text: 'Как только игрок подаст анкету, она появится здесь.' }));
+        }
+        if (showTickets) {
+          p.body.querySelector('[data-stat=tickets]').textContent = s.unreadConversations;
+          clear(tickets).append(t.length ? h('ul', { class: 'list' }, t.slice(0, 5).map((c) => ticketRow(c))) : stateBlock({ compact: true, iconName: 'check', title: 'Все обращения разобраны', text: 'Новые вопросы игроков появятся здесь.' }));
+        }
       } catch (err) {
         clear(apps).append(errorState(err, load));
         clear(tickets);
@@ -642,9 +675,45 @@
     return wrap;
   }
 
-  /** Команда для консоли сервера (мод LWL Auth): добавить игрока в вайтлист. */
+  /** Команда для консоли сервера (мод LWL Auth): добавить игрока в вайтлист. Ник — текущий (после одобрения он не меняется). */
   function serverCommand(a) {
-    return '/wl add ' + a.nickname + (a.license === 'cracked' ? ' cracked' : '');
+    return '/wl add ' + ((a.applicant && a.applicant.nickname) || a.nickname) + (a.license === 'cracked' ? ' cracked' : '');
+  }
+
+  /** Одобренная заявка: добавлен ли игрок в вайтлист (сайт делает это сам через RCON, если он настроен). */
+  function whitelistBox(a) {
+    const w = a.whitelist || {};
+    if (w.status === 'ok') return callout('success', 'check', 'Добавлен в вайтлист сервера автоматически', w.note, w.at && h('p', { class: 'field__hint', text: UI.fullDate(w.at) }));
+    if (w.status !== 'error') return commandBox(a);
+    const retry = h('button', { class: 'btn btn--sm btn--secondary', type: 'button' }, icon('retry'), 'Повторить');
+    retry.addEventListener('click', async () => {
+      UI.setLoading(retry, true);
+      try {
+        const r = await Api.applications.retryWhitelist(a.id);
+        UI.toast(r.whitelist.status === 'ok' ? 'Игрок добавлен в вайтлист.' : 'Снова не получилось: ' + r.whitelist.note, { type: r.whitelist.status === 'ok' ? 'success' : 'error' });
+      } catch (err) {
+        UI.toast(err.message, { type: 'error' });
+        UI.setLoading(retry, false);
+      }
+    });
+    return [callout('danger', 'alert', 'Не получилось добавить в вайтлист автоматически', w.note, h('div', { class: 'actions-row' }, retry)), commandBox(a)];
+  }
+
+  async function removeApplication(a, done) {
+    const ok = await UI.confirm({
+      title: `Удалить заявку ${a.nickname}?`,
+      text: a.status === 'approved' ? 'Анкета удалится насовсем. Роль «Игрок» и вайтлист сервера останутся как есть.' : 'Анкета удалится насовсем. Игрок сможет подать новую.',
+      confirmText: 'Удалить',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await Api.applications.remove(a.id);
+      UI.toast('Заявка удалена.');
+      done();
+    } catch (err) {
+      UI.toast(err.message, { type: 'error' });
+    }
   }
 
   function commandBox(a) {
@@ -1027,7 +1096,8 @@
           ),
           detailsList(a),
           a.status === 'pending' ? reviewForm(a, comment) : decisionInfo(a),
-          a.status === 'approved' && commandBox(a)
+          a.status === 'approved' && whitelistBox(a),
+          can('delete') && h('div', { class: 'actions-row detail__foot' }, h('button', { class: 'btn btn--ghost', type: 'button', onclick: () => removeApplication(a, back) }, icon('trash'), 'Удалить заявку'))
         )
       );
     };
@@ -1065,8 +1135,12 @@
       form.querySelectorAll('button').forEach((b) => (b.disabled = true));
       UI.setLoading(btn, true);
       try {
-        await Api.applications.review(a.id, { status: decision, comment: form.comment.value });
-        UI.toast(decision === 'approved' ? `Заявка ${a.nickname} одобрена.` : `Заявка ${a.nickname} отклонена.`, { type: 'success' });
+        const r = await Api.applications.review(a.id, { status: decision, comment: form.comment.value });
+        const wl = r.whitelist && r.whitelist.status;
+        if (decision === 'rejected') UI.toast(`Заявка ${a.nickname} отклонена.`, { type: 'success' });
+        else if (wl === 'ok') UI.toast(`Заявка ${a.nickname} одобрена, ник добавлен в вайтлист сервера.`, { type: 'success' });
+        else if (wl === 'error') UI.toast(`Заявка ${a.nickname} одобрена, но в вайтлист добавить не вышло — подробности в карточке.`, { type: 'error' });
+        else UI.toast(`Заявка ${a.nickname} одобрена. Добавьте ник в вайтлист командой из карточки.`, { type: 'success' });
       } catch (err) {
         UI.showFormError(form, err);
         form.querySelectorAll('button').forEach((b) => (b.disabled = false));
@@ -1134,7 +1208,8 @@
   }
 
   async function renderServer() {
-    const preview = me.role === 'admin';
+    // Админ с правом «Сервер» смотрит «как видят игроки»; остальные админы — просто игроки здесь.
+    const preview = can('server');
     const p = page({ title: 'Сервер', sub: 'Адрес, как зайти и сборки для лаунчеров.', key: 'server', actions: preview && h('a', { class: 'btn btn--secondary', href: '#/server' }, icon('back'), 'К управлению') });
     const load = async () => {
       clear(p.body).append(skeleton(3, 'skeleton-list--tall'));
@@ -1168,8 +1243,7 @@
     ];
     return h(
       'section',
-      { class: 'card card--pad card--art server-card' },
-      h('img', { class: 'card__art', src: 'assets/img/lk-progress.webp', alt: '', width: '255', height: '223' }),
+      { class: 'card card--pad server-card' },
       h(
         'div',
         { class: 'card-head' },
@@ -1224,12 +1298,14 @@
       actions: h('a', { class: 'btn btn--secondary', href: '#/server?preview=1' }, icon('eyeView'), 'Как видят игроки'),
     });
     const settingsBox = h('div', {}, skeleton(2));
+    const rconBox = h('div', {}, skeleton(1));
     const packsBox = h('div', {}, skeleton(2));
     p.body.append(
       h(
         'div',
         { class: 'stack' },
         section('Настройки сервера', 'Адрес для подключения, версия и подсказка, которую увидят игроки.', settingsBox),
+        section('Автодобавление в вайтлист', 'Сайт сам добавляет одобренных игроков на Minecraft-сервер (через RCON).', rconBox),
         h(
           'section',
           { class: 'card card--pad' },
@@ -1247,8 +1323,11 @@
     async function loadSettings() {
       let st;
       try {
-        st = await Api.admin.settings.get();
+        const res = await Api.admin.settings.get();
+        st = res.settings;
+        clear(rconBox).append(rconStatus(res.rcon));
       } catch (err) {
+        clear(rconBox);
         return clear(settingsBox).append(errorState(err, loadSettings));
       }
       const form = h(
@@ -1305,6 +1384,46 @@
     loadSettings();
     loadPacks();
     cleanup = Api.admin.packs.onChange(loadPacks);
+  }
+
+  /** Связь с Minecraft-сервером по RCON: включена ли, проверка, как включить. */
+  function rconStatus(rcon) {
+    if (!rcon.enabled) {
+      const code = (t) => h('code', { class: 'inline-code', text: t });
+      return h(
+        'div',
+        { class: 'rcon' },
+        callout('info', 'info', 'Выключено — ник в вайтлист добавляют вручную', 'Команда показывается в карточке одобренной заявки. Чтобы сайт делал это сам:'),
+        h(
+          'ol',
+          { class: 'how-list how-list--plain' },
+          h('li', {}, 'В ', code('server.properties'), ' Minecraft-сервера: ', code('enable-rcon=true'), ', ', code('rcon.port=25575'), ', ', code('rcon.password=…'), ' (длинный случайный пароль). Перезапустите сервер.'),
+          h('li', {}, 'На машине с сайтом допишите в ', code('/etc/lwl/lwl.env'), ' строку ', code('LWL_RCON_PASSWORD=тот же пароль'), ' (и ', code('LWL_RCON_HOST=…'), ', если сервер на другой машине), затем ', code('sudo systemctl restart lwl'), '.'),
+          h('li', {}, 'Порт 25575 на роутере не открывайте — RCON нужен только сайту.')
+        )
+      );
+    }
+    const out = h('div', { class: 'cmd', hidden: true });
+    const btn = h('button', { class: 'btn btn--secondary', type: 'button' }, icon('retry'), 'Проверить связь');
+    btn.addEventListener('click', async () => {
+      UI.setLoading(btn, true);
+      try {
+        const r = await Api.admin.rcon.test();
+        clear(out).append(h('p', { class: 'cmd__title', text: r.ok ? 'Сервер ответил на /wl list:' : 'Не получилось:' }), h('p', { class: r.ok ? 'rcon__reply' : 'rcon__reply rcon__reply--error', text: r.reply }));
+        out.hidden = false;
+      } catch (err) {
+        UI.toast(err.message, { type: 'error' });
+      } finally {
+        UI.setLoading(btn, false);
+      }
+    });
+    return h(
+      'div',
+      { class: 'rcon' },
+      callout('success', 'check', 'Включено', `При одобрении заявки сайт сам выполняет /wl add на сервере (RCON ${rcon.address}). Если сервер был выключен — в карточке заявки будет кнопка «Повторить».`),
+      h('div', { class: 'actions-row' }, btn),
+      out
+    );
   }
 
   function adminPackCard(pk) {
@@ -1440,7 +1559,7 @@
       },
       renderRow: userRow,
       emptyFor: (st) => (st === 'reset' ? { iconName: 'check', title: 'Запросов на сброс пароля нет' } : { title: 'Здесь пока никого' }),
-      placeholder: { iconName: 'users', title: 'Выберите человека', text: 'Здесь можно поменять роль и выдать ссылку для сброса пароля.' },
+      placeholder: { iconName: 'users', title: 'Выберите человека', text: me.creator ? 'Здесь можно поменять роль, права админа и выдать ссылку для сброса пароля.' : 'Здесь можно поменять роль и выдать ссылку для сброса пароля.' },
       selectedId: id,
       renderDetail: userDetail,
     });
@@ -1454,7 +1573,7 @@
         'a',
         { class: 'row', href: '#/admin/users/' + encodeURIComponent(u.id) + (selected !== undefined ? location.hash.replace(/^[^?]*/, '') : ''), 'aria-current': selected ? 'true' : null, dataset: { id: u.id } },
         h('span', { class: 'row__avatar' }, UI.avatar(u, 44), u.online && h('span', { class: 'online-dot', title: 'В сети' })),
-        h('span', { class: 'row__main' }, h('span', { class: 'row__title' }, h('span', { class: 'row__name', text: u.nickname }), roleBadge(u.role)), h('span', { class: 'row__text', text: u.email })),
+        h('span', { class: 'row__main' }, h('span', { class: 'row__title' }, h('span', { class: 'row__name', text: u.nickname }), roleBadge(u.role, u.creator)), h('span', { class: 'row__text', text: u.email })),
         h('span', { class: 'row__side' }, h('span', { text: UI.shortTime(u.createdAt), title: 'Регистрация: ' + UI.fullDate(u.createdAt) }), u.resetRequestedAt && h('span', { class: 'pill pill--pending', text: 'Сброс' }))
       )
     );
@@ -1478,6 +1597,9 @@
       const u = data.user;
       const last = data.applications[0];
       const row = (k, v) => [h('dt', { text: k }), h('dd', {}, v || '—')];
+      const self = u.id === me.id;
+      // Создателя трогает только он сам; другого админа — только с правом «Админы» (как на сервере).
+      const protectedTarget = !self && (u.creator || (u.role === 'admin' && !can('admins')));
       clear(el).append(
         h(
           'div',
@@ -1488,7 +1610,7 @@
             h('button', { class: 'icon-btn detail__back', type: 'button', 'aria-label': 'К списку', onclick: back }, icon('back')),
             UI.avatar(u, 56),
             h('div', { class: 'detail__who' }, h('h2', { class: 'detail__name', text: u.nickname }), h('p', { class: 'detail__meta', text: `${UI.presenceText(u)} · с нами с ${UI.fullDate(u.createdAt)}` })),
-            roleBadge(u.role)
+            roleBadge(u.role, u.creator)
           ),
           u.resetRequestedAt && callout('info', 'lock', 'Просит сбросить пароль', `Запрос от ${UI.fullDate(u.resetRequestedAt)}. Создайте ссылку ниже и отправьте её игроку.`),
           h(
@@ -1499,8 +1621,9 @@
             row('Лицензия', last && Api.LICENSES[last.license])
           ),
           roleEditor(u),
-          resetLinkBox(u),
-          u.id !== me.id && !u.owner && h('div', { class: 'actions-row' }, h('button', { class: 'btn btn--ghost', type: 'button', onclick: () => removeUser(u) }, icon('trash'), 'Удалить аккаунт'))
+          me.creator && u.role === 'admin' && !u.creator && permissionsEditor(u, data.permissionCatalog),
+          can('users') && !protectedTarget && resetLinkBox(u),
+          !self && !protectedTarget && can('users') && can('delete') && h('div', { class: 'actions-row' }, h('button', { class: 'btn btn--ghost', type: 'button', onclick: () => removeUser(u) }, icon('trash'), 'Удалить аккаунт'))
         )
       );
     };
@@ -1516,10 +1639,16 @@
       'section',
       { class: 'review' },
       h('h3', { class: 'review__title', text: 'Роль' }),
-      h('p', { class: 'field__hint', text: 'Пользователь — заявка и поддержка. Игрок — плюс вкладка «Сервер» с адресом и сборками (выдаётся сама при одобрении заявки). Админ — всё, включая эту панель.' })
+      h('p', { class: 'field__hint', text: 'Пользователь — заявка и поддержка. Игрок — плюс вкладка «Сервер» с адресом и сборками (выдаётся сама при одобрении заявки). Админ — эта панель, в пределах выданных прав.' })
     );
-    if (u.owner) {
-      box.append(h('p', { class: 'field__hint', text: 'Это владелец сайта (задан в LWL_ADMINS на сервере) — он всегда админ.' }));
+    if (u.creator) {
+      box.append(h('p', { class: 'field__hint', text: 'Это создатель сайта (задан в LWL_ADMINS на сервере): у него все права, его нельзя понизить или удалить.' }));
+      return box;
+    }
+    // Выдать/снять админа — право «Админы», остальные роли — «Люди».
+    const allowed = (role) => (u.role === 'admin' || role === 'admin' ? can('admins') : can('users'));
+    if (u.role === 'admin' && !can('admins')) {
+      box.append(h('p', { class: 'field__hint', text: 'Менять роль админа может только тот, у кого есть право «Админы».' }));
       return box;
     }
     box.append(
@@ -1532,10 +1661,12 @@
             'aria-pressed': String(u.role === role),
             text: label,
             dataset: { role },
+            disabled: u.role !== role && !allowed(role),
+            title: u.role !== role && !allowed(role) ? 'Нужно право «Админы»' : null,
             onclick: async (e) => {
               if (u.role === role) return;
               const btn = e.currentTarget;
-              if (role === 'admin' && !(await UI.confirm({ title: `Сделать ${u.nickname} админом?`, text: 'Админ видит все заявки и обращения и может менять роли.', confirmText: 'Сделать админом' }))) return;
+              if (role === 'admin' && !(await UI.confirm({ title: `Сделать ${u.nickname} админом?`, text: 'По умолчанию админ разбирает заявки и обращения, меняет роли «Пользователь»/«Игрок» и настраивает вкладку «Сервер». Удалять и назначать админов — только если создатель выдаст эти права.', confirmText: 'Сделать админом' }))) return;
               if (u.id === me.id && !(await UI.confirm({ title: 'Снять с себя админа?', text: 'Вы потеряете доступ к этой панели.', confirmText: 'Снять', danger: true }))) return;
               UI.setLoading(btn, true);
               try {
@@ -1552,6 +1683,44 @@
       )
     );
     return box;
+  }
+
+  /** Права админа — настраивает только создатель. */
+  function permissionsEditor(u, catalog) {
+    const form = h(
+      'form',
+      { class: 'review perms', novalidate: true },
+      h('h3', { class: 'review__title', text: 'Права админа' }),
+      h('p', { class: 'field__hint', text: 'Отметьте, что может этот админ. Без права раздел пропадает у него из меню.' }),
+      h(
+        'div',
+        { class: 'perms__list' },
+        catalog.map((p) =>
+          h(
+            'label',
+            { class: 'checkbox perms__item' },
+            h('input', { type: 'checkbox', name: 'perm', value: p.key, checked: u.permissions.includes(p.key) }),
+            h('span', {}, h('span', { class: 'perms__title', text: p.title }), h('span', { class: 'perms__text', text: p.text }))
+          )
+        )
+      ),
+      h('div', { class: 'actions-row' }, h('button', { class: 'btn', type: 'submit', text: 'Сохранить права', disabled: true }))
+    );
+    const btn = form.querySelector('[type=submit]');
+    const picked = () => [...form.querySelectorAll('input[name=perm]:checked')].map((i) => i.value);
+    form.addEventListener('change', () => (btn.disabled = String(picked()) === String(u.permissions)));
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      UI.setLoading(btn, true);
+      try {
+        await Api.admin.users.setPermissions(u.id, picked());
+        UI.toast(`Права ${u.nickname} сохранены.`, { type: 'success' });
+      } catch (err) {
+        UI.toast(err.message, { type: 'error' });
+        UI.setLoading(btn, false);
+      }
+    });
+    return form;
   }
 
   // Выданные ссылки помним до перезагрузки страницы: карточка перерисовывается, а ссылка должна остаться на экране.
@@ -1687,17 +1856,24 @@
             h('button', { class: 'btn', type: 'button', onclick: () => fileInput.click() }, icon('upload'), me.avatar ? 'Заменить фото' : 'Загрузить фото'),
             me.avatar && h('button', { class: 'btn btn--ghost', type: 'button', onclick: removeAvatar }, icon('trash'), 'Удалить')
           ),
-          h('p', { class: 'field__hint', text: 'JPG, PNG, WebP или GIF до 8 МБ — обрежем до квадрата. Можно перетащить файл сюда.' })
+          h('p', { class: 'field__hint', text: 'JPG, PNG, WebP или GIF до 8 МБ. После выбора покажете, какую часть фото взять. Можно перетащить файл сюда.' })
         ),
         fileInput
       );
     }
     async function setAvatar(file) {
+      let data;
+      try {
+        data = await UI.cropImage(file, 400);
+      } catch (err) {
+        return UI.toast(err.message, { type: 'error' });
+      }
+      if (!data) return; // передумали
       const btn = avatarBox.querySelector('.btn');
       UI.setLoading(btn, true);
       try {
-        const data = await UI.resizeImage(file, 400);
         me = await Api.profile.update({ avatar: data });
+        renderShell(); // аватар и ник в меню и шапке
         UI.toast('Фото обновлено.', { type: 'success' });
       } catch (err) {
         UI.toast(err.message, { type: 'error' });
@@ -1709,6 +1885,7 @@
       UI.setLoading(e.currentTarget, true);
       try {
         me = await Api.profile.update({ avatar: null });
+        renderShell(); // аватар и ник в меню и шапке
         UI.toast('Фото удалено.');
       } catch (err) {
         UI.toast(err.message, { type: 'error' });
@@ -1716,7 +1893,11 @@
         drawAvatar();
       }
     }
-    fileInput.addEventListener('change', () => fileInput.files[0] && setAvatar(fileInput.files[0]));
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      fileInput.value = ''; // чтобы тот же файл можно было выбрать снова
+      if (file) setAvatar(file);
+    });
     ['dragenter', 'dragover'].forEach((t) =>
       avatarBox.addEventListener(t, (e) => {
         e.preventDefault();
@@ -1757,6 +1938,7 @@
       UI.setLoading(nickBtn, true);
       try {
         me = await Api.profile.update({ nickname: nickForm.nickname.value });
+        renderShell(); // аватар и ник в меню и шапке
         UI.toast('Никнейм сохранён.', { type: 'success' });
         UI.setLoading(nickBtn, false);
         nickBtn.disabled = true;

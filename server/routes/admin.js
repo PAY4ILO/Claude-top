@@ -1,6 +1,11 @@
-/** Админка: пользователи и роли, ссылки для сброса пароля, настройки сервера. Плюс публичные настройки сайта. */
+/**
+ * Админка: пользователи, роли и права админов, ссылки для сброса пароля, настройки сервера.
+ * Плюс публичные настройки сайта. Кто что может — server/lib/permissions.js.
+ */
 import { tx } from '../db.js';
 import { fail } from '../lib/http.js';
+import { PERMISSIONS, PERMISSION_KEYS } from '../lib/permissions.js';
+import { rconConfigured, whitelistList } from '../lib/rcon.js';
 import { randomToken, sha256 } from '../lib/security.js';
 import { LIMITS, ROLES } from '../lib/validate.js';
 
@@ -16,15 +21,22 @@ export default function register(router, s) {
     return Object.assign(views.brief(u), {
       email: u.email,
       createdAt: u.created_at,
-      owner: s.isOwner(u),
+      permissions: s.permsOf(u),
       applicationStatus: app ? app.status : null,
       license: app ? app.license : null,
       resetRequestedAt: reset ? reset.created_at : null,
     });
   }
 
+  // Список людей нужен и тем, кто работает с ролями, и тем, кто назначает админов.
+  const needPeople = (ctx) => {
+    const admin = need.admin(ctx);
+    if (!s.can(admin, 'users') && !s.can(admin, 'admins')) need.perm(ctx, 'users');
+    return admin;
+  };
+
   router.add('GET', '/api/admin/users', (ctx) => {
-    need.admin(ctx);
+    needPeople(ctx);
     const role = ctx.query.get('role') || 'all';
     const q = (ctx.query.get('q') || '').trim().toLowerCase();
     const counts = { user: 0, player: 0, admin: 0, reset: 0 };
@@ -50,12 +62,22 @@ export default function register(router, s) {
   });
 
   router.add('GET', '/api/admin/users/:id', (ctx) => {
-    need.admin(ctx);
+    needPeople(ctx);
     const u = s.getUser(ctx.params.id);
     if (!u) throw fail.notFound('Пользователь не найден.');
     const apps = db.prepare('SELECT * FROM applications WHERE user_id = ? ORDER BY created_at DESC').all(u.id);
-    return { user: userRow(u), applications: apps.map(s.applicationView) };
+    return { user: userRow(u), applications: apps.map(s.applicationView), permissionCatalog: PERMISSIONS };
   });
+
+  /**
+   * Трогать чужой аккаунт (роль, удаление, ссылка на сброс пароля) можно не всегда:
+   * создателя — никому, кроме него самого; другого админа — только с правом «Админы»
+   * (иначе админ с меньшими правами мог бы через сброс пароля войти в аккаунт админа с большими).
+   */
+  function guardTarget(admin, u, action) {
+    if (s.isOwner(u) && u.id !== admin.id) throw fail.forbidden(`Это создатель сайта — ${action} нельзя.`);
+    if (u.role === 'admin' && u.id !== admin.id && !s.can(admin, 'admins')) throw fail.forbidden(`${u.nickname} — админ: ${action} может только тот, у кого есть право «Админы».`);
+  }
 
   router.add('PATCH', '/api/admin/users/:id', (ctx) => {
     const admin = need.admin(ctx);
@@ -65,31 +87,50 @@ export default function register(router, s) {
       const u = s.getUser(ctx.params.id);
       if (!u) throw fail.notFound('Пользователь не найден.');
       if (u.role === role) return;
-      if (s.isOwner(u) && role !== 'admin') throw fail.forbidden('Это владелец сайта (LWL_ADMINS) — он всегда админ.');
+      if (s.isOwner(u)) throw fail.forbidden('Это создатель сайта (LWL_ADMINS) — он всегда админ.');
+      // Выдать или снять админа — право «Админы», остальные роли — право «Люди».
+      need.perm(ctx, u.role === 'admin' || role === 'admin' ? 'admins' : 'users');
+      guardTarget(admin, u, 'менять роль');
       if (u.id === admin.id && role !== 'admin') {
         const admins = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").get().n;
         if (admins <= 1) throw fail.conflict('Вы единственный админ — сначала назначьте другого.');
       }
-      db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, u.id);
+      // Новый админ получает права по умолчанию; снятый — теряет настройки.
+      db.prepare('UPDATE users SET role = ?, admin_perms = NULL WHERE id = ?').run(role, u.id);
     });
     return { user: userRow(s.getUser(ctx.params.id)) };
   });
 
+  // Права админа настраивает только создатель.
+  router.add('PUT', '/api/admin/users/:id/permissions', (ctx) => {
+    need.creator(ctx);
+    const list = ctx.body.permissions;
+    if (!Array.isArray(list) || list.some((k) => !PERMISSION_KEYS.includes(k))) throw fail.validation({ permissions: 'Неизвестное право.' });
+    const u = s.getUser(ctx.params.id);
+    if (!u) throw fail.notFound('Пользователь не найден.');
+    if (u.role !== 'admin') throw fail.conflict('Права настраиваются только у админов.');
+    if (s.isOwner(u)) throw fail.conflict('У создателя всегда все права.');
+    const perms = PERMISSION_KEYS.filter((k) => list.includes(k));
+    db.prepare('UPDATE users SET admin_perms = ? WHERE id = ?').run(JSON.stringify(perms), u.id);
+    return { user: userRow(s.getUser(u.id)) };
+  });
+
   router.add('DELETE', '/api/admin/users/:id', (ctx) => {
-    const admin = need.admin(ctx);
+    const admin = need.perm(ctx, 'users', 'delete');
     const u = s.getUser(ctx.params.id);
     if (!u) throw fail.notFound('Пользователь не найден.');
     if (u.id === admin.id) throw fail.conflict('Свой аккаунт удаляйте в профиле.');
-    if (s.isOwner(u)) throw fail.forbidden('Владельца сайта удалить нельзя.');
+    guardTarget(admin, u, 'удалить аккаунт');
     db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
     return null;
   });
 
   // Одноразовая ссылка на сутки. Письма сайт не шлёт — админ отправляет ссылку сам (Telegram, Discord).
   router.add('POST', '/api/admin/users/:id/reset-link', (ctx) => {
-    const admin = need.admin(ctx);
+    const admin = need.perm(ctx, 'users');
     const u = s.getUser(ctx.params.id);
     if (!u) throw fail.notFound('Пользователь не найден.');
+    guardTarget(admin, u, 'выдавать ссылку для сброса пароля');
     const token = randomToken();
     const now = Date.now();
     tx(db, () => {
@@ -104,12 +145,12 @@ export default function register(router, s) {
   /* ------------------------------------------------------------ настройки */
 
   router.add('GET', '/api/admin/settings', (ctx) => {
-    need.admin(ctx);
-    return { settings: s.settings.all() };
+    need.perm(ctx, 'server');
+    return { settings: s.settings.all(), rcon: rconStatus() };
   });
 
   router.add('PUT', '/api/admin/settings', (ctx) => {
-    need.admin(ctx);
+    need.perm(ctx, 'server');
     const values = {};
     const f = {};
     for (const key of s.settings.keys) {
@@ -122,6 +163,24 @@ export default function register(router, s) {
     if (Object.keys(f).length) throw fail.validation(f);
     s.settings.set(values);
     return { settings: s.settings.all() };
+  });
+
+  /* ------------------------------------------------------------ связь с Minecraft-сервером (RCON) */
+
+  // Пароль RCON — только в lwl.env на машине; в браузер уходит лишь адрес и включено ли.
+  function rconStatus() {
+    return rconConfigured(config.rcon) ? { enabled: true, address: `${config.rcon.host}:${config.rcon.port}` } : { enabled: false };
+  }
+
+  router.add('POST', '/api/admin/rcon/test', async (ctx) => {
+    need.perm(ctx, 'server');
+    need.rate(ctx, 'rcon-test', 20, 60_000);
+    if (!rconConfigured(config.rcon)) throw fail.conflict('Связь с сервером не настроена: добавьте LWL_RCON_PASSWORD в /etc/lwl/lwl.env.');
+    try {
+      return { ok: true, reply: await whitelistList(config.rcon) };
+    } catch (err) {
+      return { ok: false, reply: err.message };
+    }
   });
 
   // Для главной страницы: ссылки на соцсети. Адрес сервера сюда не входит — его видят только игроки.

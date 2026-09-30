@@ -1,6 +1,8 @@
 /**
  * Поддержка: у каждого пользователя одно обращение (переписка с администрацией).
- * Непрочитанное считается для каждого читателя отдельно (conversation_reads).
+ * Непрочитанное считается для каждого читателя отдельно (conversation_reads); оттуда же «прочитано» (две галочки):
+ * сообщения игрока прочитаны, когда их открыл кто-то из админов, сообщения админов — когда их открыл игрок.
+ * Отвечать в обращениях могут админы с правом «Обращения».
  * Новые сообщения клиент забирает опросом раз в несколько секунд (Api.chats.subscribe).
  */
 import { tx } from '../db.js';
@@ -16,23 +18,30 @@ export default function register(router, s) {
 
   const convById = db.prepare('SELECT * FROM conversations WHERE id = ?');
   const readAt = db.prepare('SELECT read_at FROM conversation_reads WHERE conversation_id = ? AND user_id = ?');
+  const supportReadAt = db.prepare('SELECT MAX(read_at) AS t FROM conversation_reads WHERE conversation_id = ? AND user_id != ?');
   const setRead = db.prepare('INSERT INTO conversation_reads (conversation_id, user_id, read_at) VALUES (?, ?, ?) ON CONFLICT(conversation_id, user_id) DO UPDATE SET read_at = MAX(read_at, excluded.read_at)');
 
   function unreadFor(user, c) {
     const since = (readAt.get(c.id, user.id) || {}).read_at || 0;
     // Приветствие-автоответ админам как «непрочитанное» не показываем.
     const row = db
-      .prepare(`SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND created_at > ? AND (author_id IS NULL OR author_id != ?) ${user.role === 'admin' ? 'AND system = 0' : ''}`)
+      .prepare(`SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND created_at > ? AND (author_id IS NULL OR author_id != ?) ${user.id !== c.player_id ? 'AND system = 0' : ''}`)
       .get(c.id, since, user.id);
     return row.n;
   }
 
   function canAccess(user, c) {
-    return !!c && (user.role === 'admin' || c.player_id === user.id);
+    return !!c && (c.player_id === user.id || s.can(user, 'tickets'));
+  }
+
+  /** До какого момента собеседник прочитал переписку: для игрока — любой из админов, для админа — игрок. */
+  function peerReadAt(user, c) {
+    if (user.id === c.player_id) return supportReadAt.get(c.id, c.player_id).t || 0;
+    return (readAt.get(c.id, c.player_id) || {}).read_at || 0;
   }
 
   function partnerFor(user, c) {
-    if (user.role === 'admin' && c.player_id !== user.id) return views.brief(s.getUser(c.player_id));
+    if (c.player_id !== user.id) return views.brief(s.getUser(c.player_id));
     // Для игрока собеседник — последний ответивший администратор.
     const last = db.prepare('SELECT author_id FROM messages WHERE conversation_id = ? AND system = 0 AND author_id IS NOT NULL AND author_id != ? ORDER BY created_at DESC LIMIT 1').get(c.id, user.id);
     return last ? views.brief(s.getUser(last.author_id)) : null;
@@ -50,6 +59,7 @@ export default function register(router, s) {
       lastMessage: last && { text: last.text, authorId: last.system ? 'system' : last.author_id, createdAt: last.created_at },
       messageCount: db.prepare('SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?').get(c.id).n,
       unread: unreadFor(user, c),
+      peerReadAt: peerReadAt(user, c),
     };
   }
 
@@ -91,7 +101,7 @@ export default function register(router, s) {
   });
 
   router.add('GET', '/api/conversations', (ctx) => {
-    const admin = need.admin(ctx);
+    const admin = need.perm(ctx, 'tickets');
     const status = ctx.query.get('status') || 'open';
     const q = (ctx.query.get('q') || '').trim().toLowerCase();
     const rows = db
@@ -167,11 +177,20 @@ export default function register(router, s) {
     ['reopen', 'open'],
   ]) {
     router.add('POST', `/api/conversations/:id/${action}`, (ctx) => {
-      need.admin(ctx);
+      need.perm(ctx, 'tickets');
       const c = convById.get(ctx.params.id);
       if (!c) throw fail.notFound('Обращение не найдено.');
       db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run(status, Date.now(), c.id);
       return null;
     });
   }
+
+  // Удалить обращение вместе с перепиской. Игрок сможет написать снова — начнётся новое.
+  router.add('DELETE', '/api/conversations/:id', (ctx) => {
+    need.perm(ctx, 'tickets', 'delete');
+    const c = convById.get(ctx.params.id);
+    if (!c) throw fail.notFound('Обращение не найдено.');
+    db.prepare('DELETE FROM conversations WHERE id = ?').run(c.id);
+    return null;
+  });
 }

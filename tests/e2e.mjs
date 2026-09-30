@@ -77,12 +77,21 @@ await register(A, 'PAY4IL0', 'pay@example.com', 'Passw0rd1');
 await A.goto(BASE + '/lk.html#/profile');
 await A.waitForSelector('.avatar-edit input[type=file]', { state: 'attached' });
 await A.setInputFiles('.avatar-edit input[type=file]', path.join(HERE, 'fixtures/avatar.jpg'));
+// окно обрезки: двигаем фото и приближаем, потом «Сохранить»
+await A.waitForSelector('.crop__stage');
+const stageBox = await A.locator('.crop__stage').boundingBox();
+await A.mouse.move(stageBox.x + stageBox.width / 2, stageBox.y + stageBox.height / 2);
+await A.mouse.down(); await A.mouse.move(stageBox.x + stageBox.width / 2 - 60, stageBox.y + stageBox.height / 2 - 40, { steps: 5 }); await A.mouse.up();
+await A.locator('.crop__range').fill('2.5');
+ok('обрезка: масштаб меняется', (await A.locator('.crop__range').inputValue()) === '2.5');
+await A.click('.crop .modal__actions .btn:not(.btn--ghost)');
 await A.waitForSelector('.avatar-edit .avatar img', { timeout: 10000 });
 ok('аватар загружен и отдаётся сервером', (await A.locator('.avatar-edit .avatar img').getAttribute('src')).startsWith('/api/avatars/'));
+ok('новая аватарка сразу в меню и в шапке', (await A.locator('.nav-profile .avatar img').count()) === 1 && (await A.locator('.user-btn .avatar img').count()) === 1);
 await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.stat__num'); await settle(A);
 ok('владелец из LWL_ADMINS сразу админ', (await A.locator('.page-title').innerText()) === 'Панель администратора');
 ok('меню админа: заявки, обращения, люди, сервер', ['applications', 'tickets', 'users', 'server'].every(async () => true) && (await A.locator('.app-nav .nav-list .nav-link').count()) === 6);
-ok('префикс роли «Админ»', (await A.locator('.nav-profile .role').innerText()) === 'Админ');
+ok('владелец — «Создатель»', (await A.locator('.nav-profile .role').innerText()) === 'Создатель');
 
 // настройки сервера и сборка
 await A.goto(BASE + '/lk.html#/server'); await A.waitForSelector('input[name=serverAddress]');
@@ -92,6 +101,7 @@ await A.fill('input[name=telegramUrl]', 'https://t.me/lwl_test');
 await A.fill('textarea[name=serverNote]', 'Сначала установите сборку.');
 await A.click('form.form button[type=submit]'); await A.waitForSelector('.toast--success, .toast');
 ok('админ: настройки сервера сохранены', (await (await A.request.get(BASE + '/api/settings')).json()).telegramUrl === 'https://t.me/lwl_test');
+ok('автовайтлист не настроен → инструкция, как включить', (await A.locator('.rcon .callout__title').innerText()).includes('Выключено') && (await A.locator('.rcon .how-list--plain li').count()) === 3);
 await A.click('button:has-text("Добавить сборку")'); await A.waitForSelector('.modal__dialog input[name=title]');
 await A.click('.modal__dialog button[type=submit]');
 await A.waitForSelector('.modal__dialog .field.has-error');
@@ -178,6 +188,10 @@ await A.click('.composer__send');
 await A.waitForSelector('.msg--mine:not(.msg--pending)');
 await B.waitForSelector('.msg:not(.msg--mine):not(.msg--system)', { timeout: 10000 });
 ok('игрок получил ответ без перезагрузки', true);
+await B.waitForSelector('.msg--mine.msg--read', { timeout: 10000 });
+ok('у игрока две галочки: админ прочитал', (await B.locator('.msg--mine.msg--read .msg__meta svg').count()) >= 1);
+await A.waitForSelector('.msg--mine.msg--read', { timeout: 10000 });
+ok('у админа две галочки: игрок прочитал ответ', true);
 
 /* ================================================================ одобрение → «Игрок» */
 await A.goto(BASE + '/lk.html#/admin/applications'); await A.waitForSelector('.row'); await A.click('.row');
@@ -192,6 +206,7 @@ await B.goto(BASE + '/lk.html#/'); await B.waitForSelector('.nav-link[data-key=s
 ok('после одобрения — «Игрок» и вкладка «Сервер»', (await B.locator('.nav-profile .role').innerText()) === 'Игрок');
 await B.goto(BASE + '/lk.html#/server'); await B.waitForSelector('.server-address');
 ok('игрок видит адрес сервера', (await B.locator('.server-address code').innerText()) === 'play.lwl.example');
+ok('на карточке адреса нет картинки с персонажем', (await B.locator('.server-card img').count()) === 0);
 ok('подсказка для пирата: /register', (await B.locator('.how-list').innerText()).includes('/register'));
 ok('подсказка админа', (await B.locator('.server-note').innerText()).includes('Сначала установите сборку'));
 const href = await B.locator('.pack a[download]').getAttribute('href');
@@ -230,6 +245,8 @@ await A.locator('.row', { hasText: '__Hawker__' }).click(); await A.waitForSelec
 await A.click('.segmented button[data-role=admin]'); await A.click('.modal__actions .btn:not(.btn--ghost)');
 await A.waitForSelector('.split__detail .role--admin');
 ok('админ выдал роль «Админ»', true);
+await A.waitForSelector('.split__detail .perms');
+ok('создатель видит права нового админа: 4 из 6 по умолчанию', (await A.locator('.perms input[name=perm]').count()) === 6 && (await A.locator('.perms input[name=perm]:checked').count()) === 4);
 await A.locator('.row', { hasText: 'PAY4IL0' }).click(); await A.waitForSelector('.split__detail .detail__name:has-text("PAY4IL0")');
 ok('владельца понизить нельзя', (await A.locator('.split__detail .segmented').count()) === 0);
 await A.goto(BASE + '/lk.html#/support'); await A.waitForSelector('.composer');
@@ -238,8 +255,34 @@ await A.keyboard.press('Enter'); await A.waitForSelector('.msg--system');
 await B.goto(BASE + '/lk.html#/admin/tickets'); await B.waitForSelector('.row');
 await B.locator('.row', { hasText: 'PAY4IL0' }).click(); await B.waitForSelector('.msg'); await settle(B);
 ok('новый админ открыл обращение', (await B.locator('.split__list .row[aria-current=true]').count()) === 1);
+ok('без права «Удаление» кнопки удаления обращения нет', (await B.locator('.chat__actions .icon-btn').count()) === 0);
 await B.click('.chat__actions .btn'); await B.waitForSelector('.chat__banner:not([hidden])');
 ok('обращение закрыто → баннер', true);
+
+// создатель забирает у админа «Заявки» — у того пропадает раздел
+await A.goto(BASE + '/lk.html#/admin/users'); await A.waitForSelector('.row');
+await A.locator('.row', { hasText: '__Hawker__' }).click(); await A.waitForSelector('.split__detail .perms');
+await A.uncheck('.perms input[value=applications]');
+await A.click('.perms button[type=submit]'); await A.waitForSelector('.toast--success');
+await B.goto(BASE + '/lk.html#/'); await B.waitForSelector('.app-nav .nav-link[data-key=tickets]');
+ok('админ без права «Заявки»: раздела нет в меню', (await B.locator('.app-nav .nav-link[data-key=applications]').count()) === 0);
+await B.goto(BASE + '/lk.html#/admin/applications'); await B.waitForSelector('.state__title');
+ok('…и по прямой ссылке — «Нет прав»', (await B.locator('.state__title').innerText()) === 'Нет прав на этот раздел');
+await B.goto(BASE + '/lk.html#/admin/users'); await B.waitForSelector('.row');
+await B.locator('.row', { hasText: 'PAY4IL0' }).click(); await B.waitForSelector('.split__detail .role--creator');
+ok('обычный админ не видит кнопок сброса пароля и удаления у создателя', (await B.locator('.split__detail button:has-text("Ссылка для сброса пароля"), .split__detail button:has-text("Удалить аккаунт")').count()) === 0);
+
+// создатель удаляет заявку и обращение
+await A.goto(BASE + '/lk.html#/admin/applications?status=all'); await A.waitForSelector('.row');
+await A.locator('.row', { hasText: '__Hawker__' }).click(); await A.waitForSelector('button:has-text("Удалить заявку")');
+await A.click('button:has-text("Удалить заявку")'); await A.click('.modal__actions .btn--danger');
+await A.waitForSelector('.split__list .state');
+ok('заявка удалена', (await A.locator('.split__list .row').count()) === 0);
+await A.goto(BASE + '/lk.html#/admin/tickets?status=all'); await A.waitForSelector('.row');
+await A.locator('.row', { hasText: '__Hawker__' }).click(); await A.waitForSelector('.chat__actions .icon-btn');
+await A.click('.chat__actions .icon-btn'); await A.click('.modal__actions .btn--danger');
+await A.waitForFunction(() => ![...document.querySelectorAll('.split__list .row')].some((r) => r.textContent.includes('__Hawker__')));
+ok('обращение удалено', true);
 
 /* ================================================================ сбой сети */
 const D = await person('D');

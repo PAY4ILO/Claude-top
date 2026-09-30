@@ -22,7 +22,7 @@
 LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 ```
 
-Зарегистрируйтесь с почтой из `LWL_ADMINS` — аккаунт сразу станет админом. База и загруженные сборки
+Зарегистрируйтесь с почтой из `LWL_ADMINS` — аккаунт сразу станет «Создателем» (админ со всеми правами). База и загруженные сборки
 лежат в `./data/` (папка в `.gitignore`, в репозиторий не попадает). Нужен Node.js 22.13 или новее.
 Все настройки — переменные окружения, см. `server/config.js` и `deploy/lwl.env.example`.
 
@@ -35,9 +35,13 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 | --- | --- | --- |
 | **Пользователь** | каждый после регистрации | заявку, поддержку, профиль |
 | **Игрок** | заявку одобрили (или выдал админ) | + вкладку «Сервер»: адрес с кнопкой «Скопировать», как зайти (с лицензией или с паролем), сборки для Prism Launcher, CurseForge и Modrinth |
-| **Админ** | выдаёт админ; владельцы из `LWL_ADMINS` — всегда | + заявки, обращения, «Люди» (роли, ссылки сброса пароля), «Сервер» (адрес, подсказка, Telegram/Discord, загрузка и публикация сборок) |
+| **Админ** | выдаёт создатель (или админ с правом «Админы») | разделы по выданным правам: заявки, обращения, «Люди» (роли, ссылки сброса пароля), «Сервер» (адрес, подсказка, Telegram/Discord, сборки), удаление, назначение админов |
+| **Создатель** | владельцы из `LWL_ADMINS` | всё; раздаёт права админам; его нельзя понизить, удалить или выдать на него ссылку сброса пароля |
 
-Роль видна под ником («префикс»). Когда роль меняют, открытый кабинет перестраивается сам —
+Права админа (`server/lib/permissions.js`): «Заявки», «Обращения», «Люди», «Сервер» — выдаются по умолчанию,
+«Удаление» и «Админы» — только если создатель отметит их в «Люди» → админ → «Права админа».
+
+Роль видна под ником («префикс»). Когда роль или права меняют, открытый кабинет перестраивается сам —
 перезагружать страницу не нужно.
 
 ## Экраны кабинета
@@ -45,14 +49,14 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 | Маршрут | Экран |
 | --- | --- |
 | `#/` | Главная: у пользователя/игрока — статус заявки и быстрые действия, у админа — счётчики и последние заявки и обращения |
-| `#/server` | Игрок: адрес сервера, «как зайти», сборки с инструкциями. Админ: настройки сервера и сборки (`?preview=1` — «как видят игроки») |
+| `#/server` | Игрок: адрес сервера, «как зайти», сборки с инструкциями. Админ с правом «Сервер»: настройки, автовайтлист (RCON), сборки (`?preview=1` — «как видят игроки») |
 | `#/application` | Моя заявка: этапы, решение, причина отказа, отзыв; если заявки нет — сразу анкета |
 | `#/apply` | Анкета (в том числе «Есть лицензия / Нет лицензии») |
 | `#/support` | Чат с тех поддержкой |
-| `#/profile` | Фото (загрузка, перетаскивание, удаление), ник (у игрока — только через поддержку), пароль, удаление аккаунта |
-| `#/admin/applications[/:id]` | Заявки: фильтры и поиск слева, анкета, решение и команда вайтлиста справа |
-| `#/admin/tickets[/:id]` | Обращения: список с непрочитанными и «в сети» слева, чат справа |
-| `#/admin/users[/:id]` | Люди: роли, запросы «Забыли пароль?», одноразовые ссылки сброса, удаление |
+| `#/profile` | Фото (загрузка, перетаскивание, обрезка — какую часть взять, удаление), ник (у игрока — только через поддержку), пароль, удаление аккаунта |
+| `#/admin/applications[/:id]` | Заявки: фильтры и поиск слева, анкета, решение, вайтлист (добавлен сам / «Повторить» / команда) и удаление справа |
+| `#/admin/tickets[/:id]` | Обращения: список с непрочитанными и «в сети» слева, чат справа (закрыть, удалить) |
+| `#/admin/users[/:id]` | Люди: роли, права админов (для создателя), запросы «Забыли пароль?», одноразовые ссылки сброса, удаление |
 | `#/reset/:токен` | Новый пароль по ссылке от администратора (без входа) |
 
 Что продумано:
@@ -66,11 +70,11 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
   - при прокрутке вверх подгружается история, есть разделители по дням;
   - сообщения группируются по автору;
   - кнопка «N новых сообщений», если вы прокрутили ленту вверх;
-  - статус «в сети / был(а) N минут назад», отметки о прочтении, бейджи непрочитанного в меню и в заголовке вкладки;
+  - статус «в сети / был(а) N минут назад», галочки у своих сообщений (одна — доставлено, две — прочитано), бейджи непрочитанного в меню и в заголовке вкладки;
   - ссылки кликабельны, HTML из сообщений не выполняется;
   - черновик сохраняется, поле растёт по высоте, счётчик символов;
   - Enter отправляет сообщение, Shift+Enter переносит строку (на телефоне Enter переносит строку);
-  - админ может закрыть обращение и открыть его снова.
+  - админ может закрыть обращение и открыть его снова, а с правом «Удаление» — удалить.
 - **Мобильная версия.** Нижние вкладки, чат на весь экран с кнопкой «назад», учёт безопасных зон экрана, окна открываются снизу, на лендинге меню-бургер.
 - **Доступность.** Ловушка фокуса в окнах и меню, Esc, aria-атрибуты, видимый фокус, `prefers-reduced-motion`.
 
@@ -105,7 +109,7 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 | POST | `/api/me/password` | вошедший | `{currentPassword, newPassword}` → 204 |
 | DELETE | `/api/me` | вошедший | `{password}` → 204 |
 | POST | `/api/me/presence` | вошедший | → 204 (раз в 25 с, пока вкладка открыта) |
-| GET | `/api/me/summary` | вошедший | → `{role, unreadMessages, applicationStatus}`, админ — `{role, pendingApplications, unreadConversations, resetRequests}` |
+| GET | `/api/me/summary` | вошедший | → `{role, unreadMessages, applicationStatus}`, админ — `{role, permissions, pendingApplications, unreadConversations, resetRequests}` |
 | GET | `/api/me/server` | игрок | → `{server, me, packs}` |
 | GET | `/api/avatars/:userId` | все | картинка (ссылка с `?v=` из `user.avatar`, кешируется навсегда) |
 | GET | `/api/packs/:id/download` | игрок | файл сборки (поддерживается `Range`) |
@@ -113,38 +117,47 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 | GET | `/api/applications/mine` | вошедший | → `{application}` (последняя или `null`) |
 | POST | `/api/applications` | вошедший | `{age, license, source, about, contact, agree}` → `{application}` |
 | POST | `/api/applications/:id/withdraw` | автор | → `{application}` |
-| GET | `/api/applications?status=pending\|approved\|rejected\|all&q=` | админ | → `{items, counts}` |
-| GET | `/api/applications/:id` | автор, админ | → `{application}` |
-| POST | `/api/applications/:id/review` | админ | `{status: 'approved'\|'rejected', comment}` → `{application}`; одобрение делает «Игроком» |
+| GET | `/api/applications?status=pending\|approved\|rejected\|all&q=` | «Заявки» | → `{items, counts}` |
+| GET | `/api/applications/:id` | автор, «Заявки» | → `{application}` (с `whitelist: {status, note, at}`) |
+| POST | `/api/applications/:id/review` | «Заявки» | `{status: 'approved'\|'rejected', comment}` → `{application}`; одобрение делает «Игроком» и добавляет в вайтлист (RCON) |
+| POST | `/api/applications/:id/whitelist` | «Заявки» | → `{application}` — повторить `/wl add` через RCON |
+| DELETE | `/api/applications/:id` | «Заявки» + «Удаление» | → 204 |
 | POST | `/api/support/conversation` | вошедший | → `{conversation}` (создаёт, если ещё нет) |
-| GET | `/api/conversations?status=open\|closed\|all&q=` | админ | → `{items}` |
-| GET | `/api/conversations/:id` | участник, админ | → `{conversation}` |
+| GET | `/api/conversations?status=open\|closed\|all&q=` | «Обращения» | → `{items}` |
+| GET | `/api/conversations/:id` | участник, «Обращения» | → `{conversation}` (`peerReadAt` — до какого времени прочитал собеседник) |
 | GET | `/api/conversations/:id/messages?before=&limit=` | участник, админ | → `{items, hasMore}` (по возрастанию времени) |
 | POST | `/api/conversations/:id/messages` | участник, админ | `{text, clientId}` → `{message}` (повтор с тем же `clientId` не создаёт дубль) |
 | POST | `/api/conversations/:id/read` | участник, админ | → 204 |
-| POST | `/api/conversations/:id/close`, `/reopen` | админ | → 204 |
-| GET | `/api/admin/users?role=all\|reset\|user\|player\|admin&q=` | админ | → `{items, counts}` |
-| GET / PATCH / DELETE | `/api/admin/users/:id` | админ | → `{user, applications}` / `{role}` → `{user}` / 204 |
-| POST | `/api/admin/users/:id/reset-link` | админ | → `{url, expiresAt}` |
-| GET / PUT | `/api/admin/settings` | админ | → `{settings}` / `{serverAddress, serverVersion, serverNote, telegramUrl, discordUrl}` → `{settings}` |
-| GET / POST | `/api/admin/packs` | админ | → `{items}` / `{title, launcher, version, description, sort}` → `{pack}` |
-| PATCH / DELETE | `/api/admin/packs/:id` | админ | `{…, published}` → `{pack}` / 204 |
-| PUT | `/api/admin/packs/:id/file` | админ | сырое тело файла, заголовок `X-File-Name` → `{pack}` |
+| POST | `/api/conversations/:id/close`, `/reopen` | «Обращения» | → 204 |
+| DELETE | `/api/conversations/:id` | «Обращения» + «Удаление» | → 204 |
+| GET | `/api/admin/users?role=all\|reset\|user\|player\|admin&q=` | «Люди» или «Админы» | → `{items, counts}` |
+| GET | `/api/admin/users/:id` | «Люди» или «Админы» | → `{user, applications, permissionCatalog}` |
+| PATCH | `/api/admin/users/:id` | «Люди» (роли user/player), «Админы» (выдать/снять админа) | `{role}` → `{user}` |
+| PUT | `/api/admin/users/:id/permissions` | создатель | `{permissions: [...]}` → `{user}` |
+| DELETE | `/api/admin/users/:id` | «Люди» + «Удаление» (админа — ещё «Админы») | → 204 |
+| POST | `/api/admin/users/:id/reset-link` | «Люди» (для админа — ещё «Админы»; создателю — никто) | → `{url, expiresAt}` |
+| GET / PUT | `/api/admin/settings` | «Сервер» | → `{settings, rcon: {enabled, address}}` / `{serverAddress, serverVersion, serverNote, telegramUrl, discordUrl}` → `{settings}` |
+| POST | `/api/admin/rcon/test` | «Сервер» | → `{ok, reply}` — ответ сервера на `wl list` |
+| GET / POST | `/api/admin/packs` | «Сервер» | → `{items}` / `{title, launcher, version, description, sort}` → `{pack}` |
+| PATCH / DELETE | `/api/admin/packs/:id` | «Сервер» | `{…, published}` → `{pack}` / 204 |
+| PUT | `/api/admin/packs/:id/file` | «Сервер» | сырое тело файла, заголовок `X-File-Name` → `{pack}` |
+
+В колонке «Кто» в кавычках — права админа (у создателя есть все).
 
 Новые сообщения в открытом чате подтягиваются опросом раз в 4 с (`pollIntervalMs` в `api.js`).
 Для WebSocket/SSE заменить нужно только `Api.chats.subscribe`.
 
 ### Заявка и сервер Minecraft
 
-В анкете игрок обязательно указывает, есть ли у него лицензия (`license`). Когда админ одобряет
-заявку, кабинет показывает готовую команду для мода LWL Auth (см. `minecraft/README.md`) с кнопкой
-«Скопировать»:
+В анкете игрок обязательно указывает, есть ли у него лицензия (`license`). Когда админ одобряет заявку,
+сайт сам добавляет ник в вайтлист мода LWL Auth (см. `minecraft/README.md`) через RCON сервера:
 
-- есть лицензия → `/wl add <ник>`: игрок заходит без пароля, лицензию проверяет Mojang;
-- нет лицензии → `/wl add <ник> cracked`: вход по паролю, даже если такой ник есть у чьей-то лицензии.
+- есть лицензия → `wl add <ник>`: игрок заходит без пароля, лицензию проверяет Mojang;
+- нет лицензии → `wl add <ник> cracked`: вход по паролю, даже если такой ник есть у чьей-то лицензии.
 
-Автоматическое добавление в вайтлист при одобрении — следующий шаг: всё нужное (`nickname`, `license`,
-`status`) уже есть в базе (см. `CLAUDE.md`, «Что дальше»).
+Результат виден в карточке заявки. Если сервер был выключен — там ошибка и кнопка «Повторить».
+Если RCON не настроен (`LWL_RCON_PASSWORD` пустой), вместо этого показывается готовая команда
+с кнопкой «Скопировать» — её вводят в консоль сервера вручную. Как включить — `deploy/README.md`, пункт 9.
 
 ## Что изменено относительно макета
 

@@ -35,8 +35,13 @@
   const APPLICATION_SOURCES = ['Друзья', 'YouTube', 'TikTok', 'Telegram', 'Другое'];
   /** Есть ли у игрока лицензия: от этого зависит, как добавить его на сервер. */
   const LICENSES = { premium: 'Есть лицензия', cracked: 'Нет лицензии' };
-  /** Роли: «Пользователь» после регистрации, «Игрок» после одобрения заявки, «Админ». */
+  /**
+   * Роли: «Пользователь» после регистрации, «Игрок» после одобрения заявки, «Админ».
+   * «Создатель» — владелец сайта (LWL_ADMINS на сервере): админ со всеми правами, у пользователя поле creator.
+   * Права админов (permissions) и их подписи приходят с сервера — см. server/lib/permissions.js.
+   */
   const ROLES = { user: 'Пользователь', player: 'Игрок', admin: 'Админ' };
+  const CREATOR_LABEL = 'Создатель';
   const LAUNCHERS = { prism: 'Prism Launcher', curseforge: 'CurseForge', modrinth: 'Modrinth', other: 'Другой лаунчер' };
 
   /* ------------------------------------------------------------------ ошибки */
@@ -247,6 +252,7 @@
     APPLICATION_SOURCES,
     LICENSES,
     ROLES,
+    CREATOR_LABEL,
     LAUNCHERS,
     ApiError,
     validate,
@@ -314,6 +320,9 @@
         emit('users');
         return d.application;
       },
+      /** Ещё раз добавить в вайтлист через RCON (например, сервер был выключен). */
+      retryWhitelist: (id) => http('POST', `/applications/${enc(id)}/whitelist`).then((d) => (emit('applications'), d.application)),
+      remove: (id) => http('DELETE', `/applications/${enc(id)}`).then(() => (emit('applications'), emit('users'), true)),
       onChange: (cb) => on('applications', cb),
     },
 
@@ -326,6 +335,7 @@
       markRead: (id) => http('POST', `/conversations/${enc(id)}/read`).then(() => emit('conversations')).catch(() => null),
       close: (id) => http('POST', `/conversations/${enc(id)}/close`).then(() => (emit('conversations'), emit('messages', { conversationId: id }), true)),
       reopen: (id) => http('POST', `/conversations/${enc(id)}/reopen`).then(() => (emit('conversations'), emit('messages', { conversationId: id }), true)),
+      remove: (id) => http('DELETE', `/conversations/${enc(id)}`).then(() => (emit('conversations'), true)),
       onListChange: (cb) => on('conversations', cb),
       /** Новые сообщения в диалоге: cb() вызывается, когда стоит перечитать ленту. */
       subscribe(id, cb) {
@@ -356,18 +366,25 @@
         list: ({ role = 'all', query = '' } = {}) => http('GET', '/admin/users' + q({ role, q: query })),
         get: (id) => http('GET', `/admin/users/${enc(id)}`),
         setRole: (id, role) => http('PATCH', `/admin/users/${enc(id)}`, { role }).then((d) => (emit('users'), d.user)),
+        /** Права админа — меняет только создатель. permissions — список ключей из permissionCatalog. */
+        setPermissions: (id, permissions) => http('PUT', `/admin/users/${enc(id)}/permissions`, { permissions }).then((d) => (emit('users'), d.user)),
         resetLink: (id) => http('POST', `/admin/users/${enc(id)}/reset-link`).then((d) => (emit('users'), d)),
         remove: (id) => http('DELETE', `/admin/users/${enc(id)}`).then(() => (emit('users'), emit('applications'), emit('conversations'), true)),
         onChange: (cb) => on('users', cb),
       },
       settings: {
-        get: () => http('GET', '/admin/settings').then((d) => d.settings),
+        /** { settings, rcon: { enabled, address? } } */
+        get: () => http('GET', '/admin/settings'),
         save: (values) =>
           http('PUT', '/admin/settings', values).then((d) => {
             publicSettings = null;
             emit('settings');
             return d.settings;
           }),
+      },
+      /** Проверка связи с Minecraft-сервером: { ok, reply } (ответ на /wl list). */
+      rcon: {
+        test: () => http('POST', '/admin/rcon/test'),
       },
       packs: {
         list: () => http('GET', '/admin/packs').then((d) => d.items),

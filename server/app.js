@@ -7,6 +7,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { openDb } from './db.js';
 import { HANDLED, HttpError, Router, clientIp, cookie, fail, parseCookies, readJson, securityHeaders, sendError, sendJson, serveStatic } from './lib/http.js';
+import { PERMISSIONS, PERMISSION_KEYS, parsePermissions } from './lib/permissions.js';
 import { RateLimiter, randomToken, sha256, useFastHashing } from './lib/security.js';
 import registerAuth from './routes/auth.js';
 import registerMe from './routes/me.js';
@@ -20,6 +21,7 @@ const DAY = 24 * 3600 * 1000;
 const ONLINE_MS = 70 * 1000;
 
 export const ROLE_LABELS = { user: 'Пользователь', player: 'Игрок', admin: 'Админ' };
+// «Создатель» — не отдельная роль в базе, а владелец из LWL_ADMINS (role = 'admin' + все права).
 
 export function createApp(config) {
   fs.mkdirSync(path.join(config.dataDir, 'packs'), { recursive: true });
@@ -30,7 +32,10 @@ export function createApp(config) {
   /* ------------------------------------------------------------ владельцы */
 
   const isOwner = (u) => !!u && (config.admins.includes(String(u.email).toLowerCase()) || config.admins.includes(String(u.nickname).toLowerCase()));
-  // Владельцы из LWL_ADMINS всегда админы — даже если их понизили прямо в базе.
+  /** Права админа: у создателя — все, у остальных админов — что выдал создатель, у игроков — никаких. */
+  const permsOf = (u) => (!u || u.role !== 'admin' ? [] : isOwner(u) ? PERMISSION_KEYS.slice() : parsePermissions(u.admin_perms));
+  const can = (u, key) => permsOf(u).includes(key);
+  // Владельцы из LWL_ADMINS (создатели) всегда админы — даже если их понизили прямо в базе.
   if (config.admins.length) {
     const marks = config.admins.map(() => '?').join(',');
     db.prepare(`UPDATE users SET role = 'admin' WHERE role != 'admin' AND (lower(email) IN (${marks}) OR lower(nickname) IN (${marks}))`).run(...config.admins, ...config.admins);
@@ -50,7 +55,8 @@ export function createApp(config) {
         avatar: avatarUrl(u),
         createdAt: u.created_at,
         lastSeenAt: u.last_seen_at,
-        owner: isOwner(u),
+        creator: isOwner(u),
+        permissions: permsOf(u),
       },
     brief: (u) =>
       u
@@ -58,6 +64,7 @@ export function createApp(config) {
             id: u.id,
             nickname: u.nickname,
             role: u.role,
+            creator: isOwner(u),
             avatar: avatarUrl(u),
             online: Date.now() - (u.last_seen_at || 0) < ONLINE_MS,
             lastSeenAt: u.last_seen_at || null,
@@ -132,6 +139,18 @@ export function createApp(config) {
       if (u.role !== 'admin') throw fail.forbidden();
       return u;
     },
+    /** Админ с этими правами (все перечисленные). */
+    perm(ctx, ...keys) {
+      const u = need.admin(ctx);
+      const missing = keys.find((k) => !can(u, k));
+      if (missing) throw fail.forbidden(`Нет права «${PERMISSIONS.find((p) => p.key === missing).title}». Его выдаёт создатель сайта.`);
+      return u;
+    },
+    creator(ctx) {
+      const u = need.admin(ctx);
+      if (!isOwner(u)) throw fail.forbidden('Это может только создатель сайта.');
+      return u;
+    },
     /** Игрок сервера (или админ): вкладка «Сервер», сборки. */
     player(ctx) {
       const u = need.user(ctx);
@@ -150,7 +169,7 @@ export function createApp(config) {
     serverAddress: '',
     serverVersion: '',
     serverNote: '',
-    telegramUrl: '',
+    telegramUrl: 'https://t.me/LWL_MINECRAFT',
     discordUrl: '',
   };
   const settings = {
@@ -166,7 +185,7 @@ export function createApp(config) {
     keys: Object.keys(SETTINGS_DEFAULTS),
   };
 
-  const s = { db, config, limiter, views, getUser, startSession, endSession, need, settings, isOwner, ROLE_LABELS };
+  const s = { db, config, limiter, views, getUser, startSession, endSession, need, settings, isOwner, permsOf, can, ROLE_LABELS };
 
   /* ------------------------------------------------------------ маршруты */
 

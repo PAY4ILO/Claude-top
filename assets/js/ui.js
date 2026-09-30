@@ -70,6 +70,8 @@
     link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1|M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
     edit: 'M4 20h4L19 9l-4-4L4 16z|M13.5 6.5l4 4',
     eyeView: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z|C12 12 3',
+    plus: 'M12 5v14M5 12h14',
+    minus: 'M5 12h14',
   };
 
   function icon(name, size) {
@@ -429,24 +431,16 @@
     return el;
   }
 
-  /** Сжимает выбранную картинку в квадрат size×size (обрезка по центру). */
-  function resizeImage(file, size = 400) {
+  /** Открыть выбранный файл как картинку (с проверкой типа и размера). */
+  function loadImage(file) {
     return new Promise((resolve, reject) => {
       if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) return reject(new Error('Поддерживаются JPG, PNG, WebP и GIF.'));
       if (file.size > 8 * 1024 * 1024) return reject(new Error('Файл больше 8 МБ.'));
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
-        const s = Math.min(img.naturalWidth, img.naturalHeight);
-        const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, size, size);
         URL.revokeObjectURL(url);
-        let data = canvas.toDataURL('image/webp', 0.86);
-        if (!data.startsWith('data:image/webp')) data = canvas.toDataURL('image/jpeg', 0.86);
-        resolve(data);
+        resolve(img);
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
@@ -454,6 +448,162 @@
       };
       img.src = url;
     });
+  }
+
+  /** Квадрат size×size из картинки: sx, sy — левый верхний угол, side — сторона (в пикселях картинки). */
+  function squareDataUrl(img, sx, sy, side, size) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+    let data = canvas.toDataURL('image/webp', 0.86);
+    if (!data.startsWith('data:image/webp')) data = canvas.toDataURL('image/jpeg', 0.86);
+    return data;
+  }
+
+  /** Сжимает выбранную картинку в квадрат size×size (обрезка по центру). */
+  async function resizeImage(file, size = 400) {
+    const img = await loadImage(file);
+    const s = Math.min(img.naturalWidth, img.naturalHeight);
+    return squareDataUrl(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, size);
+  }
+
+  /**
+   * Обрезка фото для аватарки: окно, где фото двигают (мышью, пальцем, стрелками) и приближают
+   * (ползунок, колёсико, щипок, + и −). В кружке — то, что увидят другие.
+   * Возвращает Promise<data:URL size×size> или null, если нажали «Отмена».
+   */
+  async function cropImage(file, size = 400) {
+    const img = await loadImage(file);
+    const iw = img.naturalWidth;
+    const ih = img.naturalHeight;
+    const MAX_ZOOM = 5;
+    // Видимый квадрат в пикселях картинки: сторона min(iw, ih) / zoom, центр (cx, cy).
+    let zoom = 1;
+    let cx = iw / 2;
+    let cy = ih / 2;
+    const side = () => Math.min(iw, ih) / zoom;
+    const clamp = () => {
+      const half = side() / 2;
+      cx = Math.min(Math.max(cx, half), iw - half);
+      cy = Math.min(Math.max(cy, half), ih - half);
+    };
+
+    const canvas = h('canvas', { class: 'crop__canvas' });
+    const stage = h(
+      'div',
+      { class: 'crop__stage', tabindex: '0', autofocus: true, role: 'img', 'aria-label': 'Фото. Перетащите, чтобы выбрать часть; стрелки — сдвиг, плюс и минус — масштаб.' },
+      canvas,
+      h('div', { class: 'crop__mask', 'aria-hidden': 'true' })
+    );
+    const range = h('input', { class: 'crop__range', type: 'range', min: '1', max: String(MAX_ZOOM), step: '0.01', value: '1', 'aria-label': 'Масштаб' });
+    const zoomBtn = (name, label, k) => h('button', { class: 'icon-btn', type: 'button', 'aria-label': label, onclick: () => setZoom(zoom * k) }, icon(name));
+    let result = null;
+    const save = h('button', { class: 'btn', type: 'button', text: 'Сохранить' });
+    const content = h(
+      'div',
+      { class: 'crop' },
+      stage,
+      h('div', { class: 'crop__controls' }, zoomBtn('minus', 'Отдалить', 1 / 1.2), range, zoomBtn('plus', 'Приблизить', 1.2)),
+      h('p', { class: 'field__hint crop__hint', text: 'Перетащите фото и приблизьте — в кружке то, что будет на аватарке.' }),
+      h('div', { class: 'modal__actions' }, h('button', { class: 'btn btn--ghost', type: 'button', text: 'Отмена', onclick: () => m.close() }), save)
+    );
+
+    function draw() {
+      const rect = stage.getBoundingClientRect();
+      const px = Math.max(1, Math.round(rect.width * (window.devicePixelRatio || 1)));
+      if (canvas.width !== px) canvas.width = canvas.height = px;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      const s = side();
+      ctx.clearRect(0, 0, px, px);
+      ctx.drawImage(img, cx - s / 2, cy - s / 2, s, s, 0, 0, px, px);
+    }
+    function setZoom(z) {
+      zoom = Math.min(Math.max(z, 1), MAX_ZOOM);
+      range.value = String(zoom);
+      clamp();
+      draw();
+    }
+    /** Сдвиг на dx, dy экранных пикселей. */
+    function pan(dx, dy) {
+      const k = side() / stage.getBoundingClientRect().width;
+      cx -= dx * k;
+      cy -= dy * k;
+      clamp();
+      draw();
+    }
+
+    range.addEventListener('input', () => setZoom(Number(range.value)));
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      setZoom(zoom * Math.exp(-e.deltaY * 0.0015));
+    }, { passive: false });
+    stage.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 40 : 10;
+      const moves = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
+      if (moves[e.key]) pan(...moves[e.key]);
+      else if (e.key === '+' || e.key === '=') setZoom(zoom * 1.1);
+      else if (e.key === '-') setZoom(zoom / 1.1);
+      else return;
+      e.preventDefault();
+    });
+    // Один палец/мышь — двигаем; два пальца — масштаб щипком.
+    const pointers = new Map();
+    let pinch = 0;
+    const dist = () => {
+      const [a, b] = [...pointers.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+    stage.addEventListener('pointerdown', (e) => {
+      stage.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) pinch = dist();
+      stage.classList.add('is-dragging');
+    });
+    stage.addEventListener('pointermove', (e) => {
+      const p = pointers.get(e.pointerId);
+      if (!p) return;
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      p.x = e.clientX;
+      p.y = e.clientY;
+      if (pointers.size === 1) pan(dx, dy);
+      else if (pointers.size === 2 && pinch) {
+        const d = dist();
+        setZoom(zoom * (d / pinch));
+        pinch = d;
+      }
+    });
+    const up = (e) => {
+      pointers.delete(e.pointerId);
+      pinch = pointers.size === 2 ? dist() : 0;
+      if (!pointers.size) stage.classList.remove('is-dragging');
+    };
+    stage.addEventListener('pointerup', up);
+    stage.addEventListener('pointercancel', up);
+
+    const resize = new ResizeObserver(draw);
+    let m;
+    const done = new Promise((resolve) => {
+      m = modal({
+        title: 'Какую часть фото взять',
+        content,
+        onClose: () => {
+          resize.disconnect();
+          resolve(result);
+        },
+      });
+    });
+    save.addEventListener('click', () => {
+      const s = side();
+      result = squareDataUrl(img, cx - s / 2, cy - s / 2, s, size);
+      m.close();
+    });
+    resize.observe(stage);
+    draw();
+    return done;
   }
 
   function debounce(fn, ms) {
@@ -490,6 +640,7 @@
     linkify,
     avatar,
     resizeImage,
+    cropImage,
     debounce,
   };
 })();

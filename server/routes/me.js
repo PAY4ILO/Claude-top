@@ -104,11 +104,14 @@ export default function register(router, s) {
   router.add('GET', '/api/me/summary', (ctx) => {
     const user = need.user(ctx);
     if (user.role === 'admin') {
+      // Счётчики — только по разделам, на которые у админа есть права; permissions — чтобы кабинет
+      // заметил, что создатель поменял права, и перестроил меню.
       return {
         role: user.role,
-        pendingApplications: db.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").get().n,
-        unreadConversations: s.chat.unreadConversationsFor(user),
-        resetRequests: db.prepare('SELECT COUNT(*) AS n FROM reset_requests').get().n,
+        permissions: s.permsOf(user),
+        pendingApplications: s.can(user, 'applications') ? db.prepare("SELECT COUNT(*) AS n FROM applications WHERE status = 'pending'").get().n : 0,
+        unreadConversations: s.can(user, 'tickets') ? s.chat.unreadConversationsFor(user) : 0,
+        resetRequests: s.can(user, 'users') ? db.prepare('SELECT COUNT(*) AS n FROM reset_requests').get().n : 0,
       };
     }
     const app = db.prepare('SELECT status FROM applications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').get(user.id);

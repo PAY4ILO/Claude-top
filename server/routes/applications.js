@@ -1,6 +1,10 @@
-/** Заявки на сервер. Одобрение делает «Пользователя» «Игроком». */
+/**
+ * Заявки на сервер. Одобрение делает «Пользователя» «Игроком» и, если настроен RCON,
+ * сразу добавляет его в вайтлист Minecraft-сервера (мод LWL Auth, /wl add).
+ */
 import { tx } from '../db.js';
 import { fail } from '../lib/http.js';
+import { rconConfigured, whitelistAdd } from '../lib/rcon.js';
 import { newId } from '../lib/security.js';
 import { LIMITS, clean, validate } from '../lib/validate.js';
 
@@ -8,7 +12,7 @@ const str = (v) => (typeof v === 'string' ? v : '');
 const STATUSES = ['pending', 'approved', 'rejected', 'withdrawn'];
 
 export default function register(router, s) {
-  const { db, need, views } = s;
+  const { db, need, views, config } = s;
 
   const historyOf = db.prepare('SELECT status, at, by FROM application_history WHERE application_id = ? ORDER BY id');
 
@@ -28,6 +32,8 @@ export default function register(router, s) {
       createdAt: a.created_at,
       updatedAt: a.updated_at,
       history: historyOf.all(a.id).map((h) => ({ status: h.status, at: h.at, by: h.by || undefined })),
+      // Автодобавление в вайтлист: status 'ok' | 'error' | null (RCON не настроен — добавляют вручную)
+      whitelist: { status: a.whitelist_status || null, note: a.whitelist_note || '', at: a.whitelist_at || null },
       applicant: views.brief(s.getUser(a.user_id)),
       reviewer: views.brief(s.getUser(a.reviewer_id)),
     };
@@ -35,6 +41,24 @@ export default function register(router, s) {
   s.applicationView = view;
 
   const addHistory = db.prepare('INSERT INTO application_history (application_id, status, at, by) VALUES (?, ?, ?, ?)');
+  const byId = db.prepare('SELECT * FROM applications WHERE id = ?');
+
+  /** /wl add через RCON; результат запоминается в заявке (его видно в карточке, можно повторить). */
+  async function syncWhitelist(a) {
+    if (!rconConfigured(config.rcon)) return;
+    // Ник игрока после одобрения больше не меняется — берём текущий (с ним он и зайдёт в игру).
+    const user = s.getUser(a.user_id);
+    const nickname = user ? user.nickname : a.nickname;
+    let status = 'ok';
+    let note;
+    try {
+      note = await whitelistAdd(config.rcon, nickname, a.license);
+    } catch (err) {
+      status = 'error';
+      note = err.message;
+    }
+    db.prepare('UPDATE applications SET whitelist_status = ?, whitelist_note = ?, whitelist_at = ? WHERE id = ?').run(status, String(note).slice(0, 500), Date.now(), a.id);
+  }
 
   router.add('GET', '/api/applications/mine', (ctx) => {
     const user = need.user(ctx);
@@ -85,7 +109,7 @@ export default function register(router, s) {
   });
 
   router.add('GET', '/api/applications', (ctx) => {
-    need.admin(ctx);
+    need.perm(ctx, 'applications');
     const status = ctx.query.get('status') || 'pending';
     const q = (ctx.query.get('q') || '').trim().toLowerCase();
     const counts = { pending: 0, approved: 0, rejected: 0, withdrawn: 0 };
@@ -109,12 +133,12 @@ export default function register(router, s) {
   router.add('GET', '/api/applications/:id', (ctx) => {
     const user = need.user(ctx);
     const a = db.prepare('SELECT * FROM applications WHERE id = ?').get(ctx.params.id);
-    if (!a || (user.role !== 'admin' && a.user_id !== user.id)) throw fail.notFound('Заявка не найдена.');
+    if (!a || (a.user_id !== user.id && !s.can(user, 'applications'))) throw fail.notFound('Заявка не найдена.');
     return { application: view(a) };
   });
 
-  router.add('POST', '/api/applications/:id/review', (ctx) => {
-    const admin = need.admin(ctx);
+  router.add('POST', '/api/applications/:id/review', async (ctx) => {
+    const admin = need.perm(ctx, 'applications');
     const status = ctx.body.status;
     const comment = str(ctx.body.comment).trim();
     const f = {};
@@ -132,6 +156,29 @@ export default function register(router, s) {
       // Одобрили — открываем вкладку «Сервер». Админа не понижаем.
       if (status === 'approved') db.prepare("UPDATE users SET role = 'player' WHERE id = ? AND role = 'user'").run(a.user_id);
     });
-    return { application: view(db.prepare('SELECT * FROM applications WHERE id = ?').get(ctx.params.id)) };
+    // Решение уже сохранено; вайтлист — после, и его ошибка решение не отменяет.
+    if (status === 'approved') await syncWhitelist(byId.get(ctx.params.id));
+    return { application: view(byId.get(ctx.params.id)) };
+  });
+
+  // Повторить автодобавление (сервер был выключен и т. п.).
+  router.add('POST', '/api/applications/:id/whitelist', async (ctx) => {
+    need.perm(ctx, 'applications');
+    need.rate(ctx, 'whitelist', 30, 60_000);
+    const a = byId.get(ctx.params.id);
+    if (!a) throw fail.notFound('Заявка не найдена.');
+    if (a.status !== 'approved') throw fail.conflict('Добавить в вайтлист можно только одобренную заявку.');
+    if (!rconConfigured(config.rcon)) throw fail.conflict('Связь с сервером не настроена: добавьте LWL_RCON_PASSWORD в /etc/lwl/lwl.env.');
+    await syncWhitelist(a);
+    return { application: view(byId.get(a.id)) };
+  });
+
+  // Удалить заявку (например, старую). Роль игрока и вайтлист не меняются.
+  router.add('DELETE', '/api/applications/:id', (ctx) => {
+    need.perm(ctx, 'applications', 'delete');
+    const a = byId.get(ctx.params.id);
+    if (!a) throw fail.notFound('Заявка не найдена.');
+    db.prepare('DELETE FROM applications WHERE id = ?').run(a.id);
+    return null;
   });
 }

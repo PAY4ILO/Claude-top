@@ -1,6 +1,8 @@
 /*
  * Чат с поддержкой. Монтируется в любой контейнер (он получает класс .chat).
  *   const destroy = Chat.mount(el, { conversationId, me, onBack });
+ * Свои сообщения: часы — отправляется, одна галочка — доставлено, две — собеседник прочитал
+ * (conversation.peerReadAt: для игрока — любой админ, для админа — игрок).
  */
 (function () {
   'use strict';
@@ -17,7 +19,10 @@
     let loadingOlder = false;
     let destroyed = false;
     let unseen = 0;
+    let peerReadAt = 0;
+    // Сторона поддержки — админ в чужом обращении (своё обращение админ видит как игрок).
     const isAdmin = me.role === 'admin';
+    const canDelete = isAdmin && (me.permissions || []).includes('delete');
     const draftKey = 'lwl.draft.' + conversationId;
 
     /* ------------------------------------------------------------- разметка */
@@ -64,6 +69,7 @@
         const [conv, page] = await Promise.all([Api.chats.get(conversationId), Api.chats.messages(conversationId, { limit: PAGE })]);
         if (destroyed) return;
         conversation = conv;
+        peerReadAt = conv.peerReadAt || 0;
         messages = page.items;
         hasMore = page.hasMore;
         renderHead();
@@ -83,9 +89,15 @@
         if (destroyed) return;
         conversation = conv;
         renderHead();
+        const readChanged = (conv.peerReadAt || 0) !== peerReadAt;
+        peerReadAt = conv.peerReadAt || 0;
         const known = new Set(messages.map((m) => m.id));
         const fresh = page.items.filter((m) => !known.has(m.id));
-        if (!fresh.length) return;
+        if (!fresh.length) {
+          // Собеседник прочитал — перерисовываем галочки, не сдвигая ленту.
+          if (readChanged) render({ stick: isAtBottom() });
+          return;
+        }
         const atBottom = isAtBottom();
         messages = messages.concat(fresh).sort((a, b) => a.createdAt - b.createdAt);
         // пришедшие с сервера копии наших «отправляемых» сообщений
@@ -159,6 +171,9 @@
             onclick: (e) => toggleStatus(e.currentTarget, closed),
           })
         );
+        if (canDelete) actions.append(h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Удалить обращение', title: 'Удалить обращение', onclick: removeConversation }, icon('trash')));
+      } else if (isAdmin && !conversation.player && canDelete) {
+        actions.append(h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Удалить обращение', title: 'Удалить обращение', onclick: removeConversation }, icon('trash')));
       }
       const closed = conversation.status === 'closed';
       banner.hidden = !closed;
@@ -166,6 +181,19 @@
         clear(banner).append(
           h('span', { text: isAdmin ? 'Обращение закрыто. Игрок может написать снова — тогда оно откроется.' : 'Обращение закрыто. Если вопрос остался — просто напишите, и мы откроем его снова.' })
         );
+      }
+    }
+
+    async function removeConversation() {
+      const who = conversation.player ? conversation.player.nickname : 'удалённого аккаунта';
+      const ok = await UI.confirm({ title: `Удалить обращение ${who}?`, text: 'Переписка удалится насовсем. Если игрок напишет снова, начнётся новое обращение.', confirmText: 'Удалить', danger: true });
+      if (!ok) return;
+      try {
+        await Api.chats.remove(conversationId);
+        UI.toast('Обращение удалено.');
+        onBack();
+      } catch (err) {
+        UI.toast(err.message, { type: 'error' });
       }
     }
 
@@ -261,9 +289,11 @@
 
     function message(m, first, last) {
       const mine = m.authorId === me.id;
-      const cls = ['msg', mine && 'msg--mine', first && 'msg--first', last && 'msg--last', m.pending && 'msg--pending', m.failed && 'msg--failed'].filter(Boolean).join(' ');
-      const status = mine ? (m.failed ? icon('alert') : m.pending ? icon('clock') : icon('check')) : null;
-      const meta = h('span', { class: 'msg__meta', title: UI.fullDate(m.createdAt) }, UI.time(m.createdAt), status);
+      const read = mine && m.id && m.createdAt <= peerReadAt;
+      const cls = ['msg', mine && 'msg--mine', first && 'msg--first', last && 'msg--last', m.pending && 'msg--pending', m.failed && 'msg--failed', read && 'msg--read'].filter(Boolean).join(' ');
+      const status = mine ? (m.failed ? icon('alert') : m.pending ? icon('clock') : read ? icon('checks') : icon('check')) : null;
+      const state = mine ? (m.failed ? 'не отправлено' : m.pending ? 'отправляется' : read ? 'прочитано' : 'доставлено') : '';
+      const meta = h('span', { class: 'msg__meta', title: UI.fullDate(m.createdAt) + (state ? ' · ' + state : '') }, UI.time(m.createdAt), status, state && h('span', { class: 'visually-hidden', text: ', ' + state }));
       const bubble = h('div', { class: 'msg__bubble' }, UI.linkify(m.text), meta);
       const authorName = m.author ? m.author.nickname : 'Удалённый аккаунт';
       const body = h(

@@ -74,12 +74,12 @@ export default function register(router, s) {
   }
 
   router.add('GET', '/api/admin/packs', (ctx) => {
-    need.admin(ctx);
+    need.perm(ctx, 'server');
     return { items: db.prepare('SELECT * FROM packs ORDER BY sort, created_at').all().map(view) };
   });
 
   router.add('POST', '/api/admin/packs', (ctx) => {
-    need.admin(ctx);
+    need.perm(ctx, 'server');
     const v = readFields(Object.assign({}, ctx.body, { published: undefined }), null);
     const now = Date.now();
     const id = newId('p');
@@ -97,7 +97,7 @@ export default function register(router, s) {
   });
 
   router.add('PATCH', '/api/admin/packs/:id', (ctx) => {
-    need.admin(ctx);
+    need.perm(ctx, 'server');
     const current = byId.get(ctx.params.id);
     if (!current) throw fail.notFound('Сборка не найдена.');
     const v = readFields(ctx.body, current);
@@ -109,7 +109,7 @@ export default function register(router, s) {
   });
 
   router.add('DELETE', '/api/admin/packs/:id', (ctx) => {
-    need.admin(ctx);
+    need.perm(ctx, 'server');
     const p = byId.get(ctx.params.id);
     if (!p) throw fail.notFound('Сборка не найдена.');
     db.prepare('DELETE FROM packs WHERE id = ?').run(p.id);
@@ -121,7 +121,7 @@ export default function register(router, s) {
     'PUT',
     '/api/admin/packs/:id/file',
     async (ctx) => {
-      need.admin(ctx);
+      need.perm(ctx, 'server');
       const p = byId.get(ctx.params.id);
       if (!p) throw fail.notFound('Сборка не найдена.');
       let name;
