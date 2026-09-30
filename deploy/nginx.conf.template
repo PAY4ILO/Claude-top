@@ -1,4 +1,4 @@
-# nginx перед сайтом LWL. install.sh подставляет домен и кладёт файл в /etc/nginx/sites-available/lwl.
+# nginx перед сайтом LWL. install.sh подставляет домен и порт сайта (LWL_PORT) и кладёт файл в /etc/nginx/sites-available/lwl.
 # HTTPS (сертификат Let's Encrypt, блок listen 443 и редирект с http) добавляет certbot --nginx.
 server {
     listen 80;
@@ -13,7 +13,7 @@ server {
     gzip_min_length 1024;
 
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:__PORT__;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -25,7 +25,7 @@ server {
     # Загрузка файла сборки: отдаём сайту потоком, без буфера на диске nginx.
     # (Точный путь регуляркой: префикс «/api/admin/packs/» заставил бы nginx отвечать 301 на /api/admin/packs.)
     location ~ ^/api/admin/packs/[^/]+/file$ {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:__PORT__;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -38,7 +38,7 @@ server {
 
     # Скачивание сборки: без временного файла у nginx, с докачкой
     location ~ ^/api/packs/[^/]+/download$ {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:__PORT__;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

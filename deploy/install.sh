@@ -16,6 +16,27 @@ DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%%/*}"
 [ -n "$DOMAIN" ] && [ -n "$ADMIN" ] || { echo "Нужны домен и почта."; exit 1; }
 
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
+port_busy() { ss -Htln "( sport = :$1 )" 2>/dev/null | grep -q .; }
+
+# Машина может быть общей (другие сайты, прокси, медиасервер): чужое не трогаем.
+step "Проверка портов"
+OTHER_WEB="$(ss -Htlnp '( sport = :80 or sport = :443 )' 2>/dev/null | grep -v '"nginx"' || true)"
+if [ -n "$OTHER_WEB" ]; then
+  echo "Порты 80/443 заняты другой программой (не nginx):"
+  echo "$OTHER_WEB"
+  echo "Они нужны nginx для сайта и HTTPS. Остановите эту программу или перенесите её на другой порт и запустите установку снова."
+  exit 1
+fi
+# Порт, на котором сайт слушает локально (nginx ходит к нему). Уже установлен — берём из настроек,
+# иначе 8080, а если он занят (часто им пользуются другие программы) — следующий свободный.
+if [ -f /etc/lwl/lwl.env ]; then
+  PORT="$(sed -n 's/^LWL_PORT=//p' /etc/lwl/lwl.env | tail -n 1)"
+fi
+if [ -z "${PORT:-}" ]; then
+  PORT=8080
+  while port_busy "$PORT"; do PORT=$((PORT + 1)); done
+fi
+echo "80/443 свободны или у nginx. Сайт будет слушать 127.0.0.1:$PORT."
 
 step "Пакеты (nginx, certbot, rsync)"
 apt-get update -qq
@@ -47,7 +68,8 @@ sed -i "s#/usr/bin/node#$NODE_BIN#" /opt/lwl/deploy/backup.sh
 
 step "Настройки /etc/lwl/lwl.env"
 if [ ! -f /etc/lwl/lwl.env ]; then
-  sed -e "s#^LWL_PUBLIC_URL=.*#LWL_PUBLIC_URL=https://$DOMAIN#" -e "s#^LWL_ADMINS=.*#LWL_ADMINS=$ADMIN#" "$SRC/deploy/lwl.env.example" > /etc/lwl/lwl.env
+  sed -e "s#^LWL_PUBLIC_URL=.*#LWL_PUBLIC_URL=https://$DOMAIN#" -e "s#^LWL_ADMINS=.*#LWL_ADMINS=$ADMIN#" \
+    -e "s#^LWL_PORT=.*#LWL_PORT=$PORT#" "$SRC/deploy/lwl.env.example" > /etc/lwl/lwl.env
   echo "Создан. Поменять потом: sudo nano /etc/lwl/lwl.env && sudo systemctl restart lwl"
 else
   echo "Уже есть — оставляю как есть."
@@ -64,19 +86,19 @@ systemctl daemon-reload
 systemctl enable --now lwl.service lwl-backup.timer
 systemctl restart lwl.service
 for _ in $(seq 1 20); do
-  curl -fsS http://127.0.0.1:8080/api/settings >/dev/null 2>&1 && break
+  curl -fsS "http://127.0.0.1:$PORT/api/settings" >/dev/null 2>&1 && break
   sleep 0.5
 done
-if curl -fsS http://127.0.0.1:8080/api/settings >/dev/null 2>&1; then
+if curl -fsS "http://127.0.0.1:$PORT/api/settings" >/dev/null 2>&1; then
   echo "Сайт запущен."
 else
   echo "Сайт не отвечает. Логи: journalctl -u lwl -n 50"; exit 1
 fi
 
 step "nginx"
-sed "s/__DOMAIN__/$DOMAIN/g" "$SRC/deploy/nginx.conf.template" > /etc/nginx/sites-available/lwl
+# Остальные сайты nginx (в том числе default) не трогаем: наш отвечает только на свой домен.
+sed -e "s/__DOMAIN__/$DOMAIN/g" -e "s/__PORT__/$PORT/g" "$SRC/deploy/nginx.conf.template" > /etc/nginx/sites-available/lwl
 ln -sf /etc/nginx/sites-available/lwl /etc/nginx/sites-enabled/lwl
-rm -f /etc/nginx/sites-enabled/default
 nginx -t
 systemctl enable nginx >/dev/null 2>&1
 systemctl reload nginx

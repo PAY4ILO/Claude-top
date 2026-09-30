@@ -57,7 +57,9 @@ npm test                               # браузер (Playwright) проти�
 ## Деплой
 
 `sudo ./deploy/install.sh домен почта` на Ubuntu/Debian; обновление — `git pull && sudo ./deploy/update.sh`.
-Служба `lwl` (Restart=always, автозапуск), nginx → `127.0.0.1:8080`, HTTPS certbot, бэкап базы каждую ночь в `/var/backups/lwl`.
+Служба `lwl` (Restart=always, автозапуск), nginx → `127.0.0.1:LWL_PORT` (8080 или следующий свободный — выбирает `install.sh`,
+`update.sh` читает из `lwl.env`), HTTPS certbot, бэкап базы каждую ночь в `/var/backups/lwl`.
+Машина владельца общая (домашний сервер с другими программами): установщик не трогает чужие сайты nginx и порты.
 Загрузка сборок идёт потоком (`proxy_request_buffering off` на `…/packs/<id>/file`), скачивание — без буфера nginx, с `Range`.
 Если добавляешь зависимость, переменную окружения или системный пакет — обнови `deploy/install.sh`, `deploy/lwl.env.example` и `deploy/README.md`.
 
