@@ -561,10 +561,11 @@ body:not(.lk--app) .app {
   object-position: bottom right;
   pointer-events: none;
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.35));
+  transform-origin: bottom center;
   transition: transform 0.3s var(--ease);
 }
 .tile:hover .tile__art {
-  transform: translateY(-4px);
+  transform: scale(1.05);
 }
 .tile--stat {
   min-height: 200px;

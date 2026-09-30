@@ -272,6 +272,8 @@
   filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.4));
   pointer-events: none;
   user-select: none;
+  /* растём от нижнего края — персонаж не отрывается от карточки */
+  transform-origin: bottom center;
   transition: transform 0.35s var(--ease);
 }
 .feature--reverse .feature__art {
@@ -279,7 +281,7 @@
   left: 5%;
 }
 .feature:hover .feature__art {
-  transform: translateY(-6px);
+  transform: scale(1.05);
 }
 .feature--freedom {
   --pop: 100px;
