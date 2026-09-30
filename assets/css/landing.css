@@ -225,50 +225,80 @@
   height: auto;
 }
 
+/* Карточки с персонажами: как в макете, персонаж стоит на нижнем крае карточки,
+   а голова выглядывает над верхним краем. Стороны чередуются. */
 .features {
+  --pop: 90px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24px;
+  gap: 104px;
+  margin-top: 150px;
 }
 .feature {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40%;
+  align-items: center;
+  min-height: 270px;
+  padding: 44px 52px;
   border: 1px solid var(--c-border);
   border-radius: var(--r-xl);
-  background: var(--c-surface);
+  background: radial-gradient(55% 110% at 82% 100%, rgba(30, 197, 220, 0.2) 0%, rgba(30, 197, 220, 0) 70%), var(--c-surface);
   box-shadow: var(--shadow-1);
-  transition: transform 0.25s var(--ease), border-color 0.25s;
+  transition: border-color 0.25s;
+}
+.feature--reverse {
+  grid-template-columns: 40% minmax(0, 1fr);
+  background: radial-gradient(55% 110% at 18% 100%, rgba(30, 197, 220, 0.2) 0%, rgba(30, 197, 220, 0) 70%), var(--c-surface);
 }
 .feature:hover {
-  transform: translateY(-4px);
   border-color: rgba(30, 197, 220, 0.35);
 }
-.feature__media {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  height: 250px;
-  padding-top: 20px;
-  border-bottom: 1px solid var(--c-border);
-  background: radial-gradient(90% 100% at 50% 100%, rgba(30, 197, 220, 0.22) 0%, rgba(30, 197, 220, 0) 65%), #2f2f2f;
-}
-.feature__media img {
-  width: auto;
-  height: 100%;
-  max-width: 88%;
-  object-fit: contain;
-  object-position: bottom;
-}
 .feature__body {
-  padding: 26px 30px 30px;
+  grid-column: 1;
+  max-width: 600px;
+}
+.feature--reverse .feature__body {
+  grid-column: 2;
+}
+.feature__art {
+  position: absolute;
+  bottom: 0;
+  right: 5%;
+  width: auto;
+  height: calc(100% + var(--pop));
+  max-width: 36%;
+  object-fit: contain;
+  object-position: bottom center;
+  filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.4));
+  pointer-events: none;
+  user-select: none;
+  transition: transform 0.35s var(--ease);
+}
+.feature--reverse .feature__art {
+  right: auto;
+  left: 5%;
+}
+.feature:hover .feature__art {
+  transform: translateY(-6px);
+}
+.feature--freedom {
+  --pop: 100px;
+}
+.feature--build {
+  --pop: 130px;
+}
+.feature--team {
+  --pop: 50px;
+}
+.feature--rewards {
+  --pop: 60px;
 }
 .feature__title {
-  margin-bottom: 10px;
-  font-size: 24px;
+  margin-bottom: 12px;
+  font-size: 26px;
 }
 .feature__body p {
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.65;
   color: var(--c-text-2);
 }
@@ -458,6 +488,20 @@
   .about-intro__art {
     display: none;
   }
+  .features {
+    gap: 90px;
+    margin-top: 130px;
+  }
+  .feature {
+    padding: 34px 32px;
+    grid-template-columns: minmax(0, 1fr) 38%;
+  }
+  .feature--reverse {
+    grid-template-columns: 38% minmax(0, 1fr);
+  }
+  .feature__art {
+    max-width: 38%;
+  }
   .how__steps {
     grid-template-columns: 1fr;
     gap: 14px;
@@ -499,18 +543,33 @@
   .hero__actions .btn {
     flex: 1 1 100%;
   }
+  /* на телефоне персонаж по центру и выглядывает над карточкой */
   .features {
-    grid-template-columns: 1fr;
-    gap: 16px;
+    gap: 96px;
+    margin-top: 110px;
   }
-  .feature__media {
+  .feature,
+  .feature--reverse {
+    display: block;
+    min-height: 0;
+    padding: 150px 22px 26px;
+    background: radial-gradient(90% 60% at 50% 0%, rgba(30, 197, 220, 0.2) 0%, rgba(30, 197, 220, 0) 70%), var(--c-surface);
+  }
+  .feature__art,
+  .feature--reverse .feature__art {
+    top: -64px;
+    bottom: auto;
+    left: 50%;
+    right: auto;
     height: 200px;
+    max-width: 86%;
+    transform: translateX(-50%);
   }
-  .feature__body {
-    padding: 20px 22px 24px;
+  .feature:hover .feature__art {
+    transform: translateX(-50%);
   }
   .feature__title {
-    font-size: 21px;
+    font-size: 22px;
   }
   .lead {
     font-size: 16.5px;

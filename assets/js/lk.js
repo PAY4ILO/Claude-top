@@ -361,7 +361,7 @@
     const supportMeta = h('span', { class: 'tile__meta' }, 'Открыть чат', icon('arrowRight'));
     const support = h(
       'a',
-      { class: 'tile card', href: '#/support' },
+      { class: 'tile tile--art card', href: '#/support' },
       h('span', { class: 'tile__icon' }, icon('chat')),
       h('h2', { class: 'tile__title', text: 'Тех поддержка' }),
       h('p', { class: 'tile__text', text: 'Вопросы по заявке, серверу или аккаунту — ответим прямо в чате.' }),
@@ -451,7 +451,7 @@
     const stat = (href, label, img, key) =>
       h(
         'a',
-        { class: 'tile tile--stat card', href },
+        { class: 'tile tile--stat tile--art card', href },
         h('span', { class: 'tile__muted', text: label }),
         h('span', { class: 'stat__num', dataset: { stat: key }, text: '—' }),
         h('span', { class: 'tile__meta' }, 'Открыть', icon('arrowRight')),
@@ -502,8 +502,9 @@
       clear(p.body).append(
         h(
           'section',
-          { class: 'card card--pad' },
-          h('div', { class: 'card-head' }, h('div', {}, h('h2', { class: 'card-title', text: 'Статус' }), h('p', { class: 'card-sub', text: `Отправлена ${UI.fullDate(a.createdAt)}` })), pill(a.status)),
+          { class: 'card card--pad card--art' },
+          h('img', { class: 'card__art', src: 'assets/img/lk-progress.webp', alt: '', width: '255', height: '223' }),
+          h('div', { class: 'card-head' }, h('div', {}, h('div', { class: 'card-title-row' }, h('h2', { class: 'card-title', text: 'Статус' }), pill(a.status)), h('p', { class: 'card-sub', text: `Отправлена ${UI.fullDate(a.createdAt)}` }))),
           steps(a),
           statusCallout(a),
           progressActions(a)
@@ -679,7 +680,7 @@
     p.head.classList.add('page-head--compact-mobile');
     document.body.classList.add('lk--chat');
     const chatEl = h('section', { class: 'card chat-card' }, skeleton(4));
-    p.body.append(chatEl);
+    p.body.append(h('div', { class: 'chat-wrap chat-wrap--art' }, h('img', { class: 'chat-wrap__art', src: 'assets/img/lk-support.webp', alt: '', width: '281', height: '224' }), chatEl));
     try {
       const conv = await Api.chats.support();
       if (!document.contains(chatEl)) return;
