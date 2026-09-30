@@ -54,7 +54,15 @@
     trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
     chat: 'M4 5h16v11H9l-5 4z',
     arrowDown: 'M12 5v14M6 13l6 6 6-6',
+    arrowRight: 'M5 12h14M13 6l6 6-6 6',
     lock: 'M6 11h12v10H6z|M8 11V8a4 4 0 0 1 8 0v3',
+    home: 'M3 11l9-7 9 7|M5 9.5V20h5v-6h4v6h5V9.5',
+    file: 'M6 3h8l4 4v14H6z|M14 3v4h4|M9 12h6M9 16h6',
+    logout: 'M14 4h5v16h-5|M10 12h10|M7 8l-4 4 4 4',
+    external: 'M14 4h6v6|M20 4l-9 9|M18 14v6H4V6h6',
+    chevronDown: 'M6 9l6 6 6-6',
+    chevronRight: 'M9 6l6 6-6 6',
+    inbox: 'M3 13l3-8h12l3 8v6H3z|M3 13h5l1 3h6l1-3h5',
   };
 
   function icon(name, size) {
@@ -366,9 +374,9 @@
 
   function presenceText(user) {
     if (!user) return '';
-    if (user.online) return 'В сети...';
-    if (!user.lastSeenAt) return 'Не в сети';
-    return 'Был(а) в сети ' + relative(user.lastSeenAt);
+    if (user.online) return 'в сети';
+    if (!user.lastSeenAt) return 'не в сети';
+    return 'был(а) в сети ' + relative(user.lastSeenAt);
   }
 
   /** Текст → фрагмент со ссылками (только http/https), без HTML. */

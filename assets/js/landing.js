@@ -20,24 +20,25 @@
     }
   });
   document.addEventListener('click', (e) => !menu.hidden && !e.target.closest('.site-header') && setMenu(false));
-  window.matchMedia('(min-width: 861px)').addEventListener('change', (e) => e.matches && setMenu(false));
+  window.matchMedia('(min-width: 901px)').addEventListener('change', (e) => e.matches && setMenu(false));
 
   /* ----------------------------------------------- ссылки, которым нужен вход */
   let user = null;
   let checked = false;
+
+  function applyUser(u) {
+    user = u;
+    document.querySelectorAll('[data-account-label]').forEach((el) => (el.textContent = u ? 'Личный кабинет' : 'Войти'));
+  }
+
   const ready = Api.auth
     .me()
-    .then((u) => (user = u))
+    .then(applyUser)
     .catch(() => null)
     .finally(() => (checked = true));
 
   // событие может прийти из другой вкладки — перечитываем пользователя этой вкладки
-  Api.auth.onChange(() =>
-    Api.auth
-      .me()
-      .then((u) => (user = u))
-      .catch(() => null)
-  );
+  Api.auth.onChange(() => Api.auth.me().then(applyUser).catch(() => null));
 
   document.addEventListener('click', async (e) => {
     const link = e.target.closest('[data-auth-link]');
@@ -51,7 +52,7 @@
     const apply = link.dataset.authLink === 'apply';
     Auth.open({
       mode: apply ? 'register' : 'login',
-      reason: apply ? 'Чтобы подать заявку на сервер, создайте аккаунт или войдите.' : '',
+      reason: apply ? 'Чтобы подать заявку на сервер, создайте аккаунт — это займёт минуту.' : '',
       onSuccess: () => (location.href = link.href),
     });
   });
@@ -63,9 +64,10 @@
     ready.then(() => !user && Auth.open({ mode: hash, onSuccess: () => (location.href = 'lk.html') }));
   }
 
-  /* ------------------------------------------------------------- Telegram */
+  /* ------------------------------------------------------------- прочее */
   const tg = (window.LWL_CONFIG && window.LWL_CONFIG.telegramUrl) || '';
   document.querySelectorAll('[data-telegram-link]').forEach((a) => {
     if (/^https:\/\//.test(tg)) a.href = tg;
   });
+  document.querySelectorAll('[data-year]').forEach((el) => (el.textContent = new Date().getFullYear()));
 })();

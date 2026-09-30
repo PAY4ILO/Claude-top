@@ -15,7 +15,6 @@
 * После генерации SVG стоит прогнать через svgo (см. README).
 """
 import re
-import shutil
 from pathlib import Path
 
 from PIL import Image
@@ -132,5 +131,3 @@ if __name__ == "__main__":
     print("Векторные:")
     build_logos()
     build_telegram()
-    shutil.copy(SRC / "lk-group1.svg", OUT / "lk-stroke.svg")
-    print("  lk-stroke.svg (исходный вектор из Figma, без изменений)")

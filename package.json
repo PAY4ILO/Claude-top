@@ -7,13 +7,10 @@
   "scripts": {
     "start": "node tools/static-server.mjs 8080",
     "test": "node tests/e2e.mjs",
-    "compare": "node tools/compare.mjs",
     "figma:export": "node tools/figma-export.mjs"
   },
   "devDependencies": {
-    "pixelmatch": "^7.1.0",
-    "playwright": "1.56.1",
-    "pngjs": "^7.0.0"
+    "playwright": "1.56.1"
   },
   "engines": {
     "node": ">=20"

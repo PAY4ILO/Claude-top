@@ -39,7 +39,7 @@ async function register(p, nick, email, pw) {
   await p.fill('input[name=password2]', pw);
   await p.uncheck('input[name=remember]');
   await p.click('.auth__form button[type=submit]');
-  await p.waitForSelector('.dash', { timeout: 10000 });
+  await p.waitForSelector('.app-nav:not([hidden]) .nav-link', { timeout: 10000 });
   ok(`${nick}: регистрация → кабинет`, true);
 }
 
@@ -62,19 +62,23 @@ async function setRole(p, label) {
 const A = await ctx.newPage(); watch(A, 'A');
 await register(A, 'PAY4IL0', 'pay@example.com', 'Passw0rd1');
 await uploadAvatar(A);
-await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.dash'); await settle(A);
-ok('дашборд игрока: 2 карточки', (await A.locator('.lk-card').count()) === 2);
-ok('дашборд игрока: заголовки', (await A.locator('.lk-card__title').allInnerTexts()).join('|').replace(/\n/g, ' ') === 'Прогресс заявки|Тех поддержка');
+await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.hero-card:not(.hero-card--loading)'); await settle(A);
+ok('главная игрока: приветствие', (await A.locator('.page-title').innerText()) === 'Привет, PAY4IL0!');
+ok('главная игрока: призыв подать заявку', (await A.locator('.hero-card__title').innerText()) === 'Подайте заявку на сервер');
+ok('главная игрока: плитки поддержки и профиля', (await A.locator('.tile').count()) === 2);
+ok('меню игрока: 4 раздела', (await A.locator('.app-nav .nav-list .nav-link').count()) === 4);
 
-// пустой прогресс заявки
-await A.goto(BASE + '/lk.html#/application'); await A.waitForSelector('.state');
-ok('прогресс без заявки → пустое состояние', (await A.locator('.state__title').innerText()).includes('не подавали'));
+// «Заявка» без заявки сразу открывает анкету
+await A.goto(BASE + '/lk.html#/application'); await A.waitForSelector('form.form');
+ok('раздел «Заявка» без заявки → анкета', (await A.locator('.page-title').innerText()) === 'Подать заявку');
 
 await setRole(A, 'Админ');
-await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.dash'); await settle(A);
-ok('дашборд админа: заголовки', (await A.locator('.lk-card__title').allInnerTexts()).join('|').replace(/\n/g, ' ') === 'Просмотр Заявок|Просмотр Обращений');
-await A.goto(BASE + '/lk.html#/admin/applications'); await A.waitForSelector('.state');
-ok('админ: пустой список заявок', (await A.locator('.state__title').innerText()).includes('Новых заявок нет'));
+await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.stat__num'); await settle(A);
+ok('главная админа: панель', (await A.locator('.page-title').innerText()) === 'Панель администратора');
+ok('меню админа: заявки и обращения', (await A.locator('.app-nav .nav-link[data-key=applications]').count()) === 1 && (await A.locator('.app-nav .nav-link[data-key=tickets]').count()) === 1);
+await A.goto(BASE + '/lk.html#/admin/applications'); await A.waitForSelector('.split__list .state');
+ok('админ: пустой список заявок', (await A.locator('.split__list .state__title').innerText()).includes('Новых заявок нет'));
+ok('админ: подсказка «Выберите заявку»', (await A.locator('.split__detail .state__title').innerText()) === 'Выберите заявку');
 
 // ---------- B: __Hawker__
 const B = await ctx.newPage(); watch(B, 'B');
@@ -113,8 +117,8 @@ await B.check('input[name=agree]');
 await B.click('form.form button[type=submit]');
 await B.waitForSelector('.steps');
 ok('заявка отправлена → прогресс', (await B.locator('.callout__title').innerText()).includes('на рассмотрении'));
-await B.goto(BASE + '/lk.html#/'); await B.waitForSelector('.lk-card__badge:not([hidden])');
-ok('бейдж статуса заявки на дашборде', (await B.locator('.lk-card__badge:not([hidden])').first().innerText()) === 'На рассмотрении');
+await B.goto(BASE + '/lk.html#/'); await B.waitForSelector('.hero-card .pill');
+ok('статус заявки на главной', (await B.locator('.hero-card .pill').innerText()) === 'На рассмотрении');
 
 // поддержка: пустой чат, отправка
 await B.goto(BASE + '/lk.html#/support'); await B.waitForSelector('.composer');
@@ -131,11 +135,13 @@ ok('HTML в сообщении не исполняется', (await B.locator('.
 ok('ссылка в сообщении кликабельна', (await B.locator('.msg--mine .msg__bubble a[href="https://example.com/"]').count()) === 1);
 
 // A (админ) видит обращение и заявку
-await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.lk-card__badge:not([hidden])');
-const badges = await A.locator('.lk-card__badge:not([hidden])').allInnerTexts();
-ok('админ: бейджи новых заявок и непрочитанных', badges.length === 2, badges.join(', '));
+await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.app-nav .nav-link[data-key=tickets] .nav-badge:not([hidden])');
+await A.waitForFunction(() => [...document.querySelectorAll('.stat__num')].every((n) => n.textContent !== '—'));
+const stats = await A.locator('.stat__num').allInnerTexts();
+ok('админ: счётчики на главной', stats.join(',') === '1,1', stats.join(','));
+ok('админ: бейджи в меню', (await A.locator('.app-nav .nav-badge:not([hidden])').count()) === 2);
 await A.goto(BASE + '/lk.html#/admin/tickets'); await A.waitForSelector('.row');
-ok('админ: обращение в списке с непрочитанным', (await A.locator('.row .unread').count()) === 1);
+ok('админ: обращение в списке с непрочитанным', (await A.locator('.row .nav-badge').count()) === 1);
 await A.click('.row'); await A.waitForSelector('.composer');
 await A.waitForSelector('.msg');
 ok('админ видит сообщение игрока', (await A.locator('.msg__bubble').first().innerText()).includes('Не могу зайти'));
@@ -147,7 +153,7 @@ await A.waitForSelector('.msg--mine:not(.msg--pending)');
 await B.waitForSelector('.msg:not(.msg--mine):not(.msg--system)', { timeout: 8000 });
 ok('игрок получил ответ без перезагрузки', true);
 await settle(B, 500);
-ok('шапка чата игрока: ник админа и «В сети...»', (await B.locator('.panel__title').innerText()) === 'PAY4IL0' && (await B.locator('.panel__subtitle').innerText()) === 'В сети...');
+ok('шапка чата игрока: ник админа и «в сети»', (await B.locator('.chat__title').innerText()) === 'PAY4IL0' && (await B.locator('.chat__subtitle').innerText()) === 'в сети');
 
 // решение по заявке
 await A.goto(BASE + '/lk.html#/admin/applications'); await A.waitForSelector('.row'); await A.click('.row');
@@ -155,16 +161,13 @@ await A.waitForSelector('.review');
 await A.click('.review button[value=rejected]');
 ok('отказ без причины → ошибка', (await A.locator('.review .field.has-error').count()) === 1);
 await A.click('.review button[value=approved]');
-await A.waitForSelector('.callout--success');
+await A.waitForSelector('.split__detail .callout--success');
 ok('заявка одобрена админом', true);
+ok('админ: одобренная заявка ушла из «Новых»', (await A.locator('.split__list .row').count()) === 0);
 await B.goto(BASE + '/lk.html#/application'); await B.waitForSelector('.callout--success');
 ok('игрок видит «одобрена»', true);
 
-// ---------- кадры чатов как в макете: пустая лента
-// Frame 5: я — __Hawker__ (Игрок), собеседник PAY4IL0. Нужна «чистая» переписка: новый игрок.
-await B.goto(BASE + '/lk.html#/support'); await B.waitForSelector('.msg'); await settle(B);
-
-// Frame 6: я — __Hawker__ (Админ), собеседник PAY4IL0 (игрок)
+// роли меняются местами: __Hawker__ — админ, PAY4IL0 — игрок
 await setRole(A, 'Игрок');
 await A.goto(BASE + '/lk.html#/support'); await A.waitForSelector('.composer');
 await A.fill('.composer__input', 'Тестовое обращение от PAY4IL0');
@@ -174,8 +177,9 @@ await B.goto(BASE + '/lk.html#/admin/tickets'); await B.waitForSelector('.row');
 const rows = await B.locator('.row').count();
 ok('админ Hawker видит обращения', rows >= 1, 'строк: ' + rows);
 await B.locator('.row', { hasText: 'PAY4IL0' }).click(); await B.waitForSelector('.msg'); await settle(B);
-ok('админ: кнопка «Закрыть обращение»', (await B.locator('.panel__head-actions .btn').innerText()) === 'Закрыть обращение');
-await B.click('.panel__head-actions .btn'); await B.waitForSelector('.chat__banner:not([hidden])');
+ok('админ: список и чат открыты рядом', (await B.locator('.split__list .row[aria-current=true]').count()) === 1);
+ok('админ: кнопка «Закрыть обращение»', (await B.locator('.chat__actions .btn').innerText()) === 'Закрыть обращение');
+await B.click('.chat__actions .btn'); await B.waitForSelector('.chat__banner:not([hidden])');
 ok('обращение закрыто → баннер', true);
 
 // ошибка сети
@@ -186,8 +190,8 @@ ok('сбой сети при загрузке → экран ошибки с «�
 await D.close();
 
 // выход
-await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.dash');
-await A.click('.dash__logout'); await A.waitForSelector('.modal__dialog');
+await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.user-btn');
+await A.click('.user-btn'); await A.click('.menu__item:has-text("Выйти")'); await A.waitForSelector('.modal__dialog');
 await A.click('.modal__actions .btn:not(.btn--ghost)');
 await A.waitForURL('**/index.html');
 ok('выход → лендинг', true);

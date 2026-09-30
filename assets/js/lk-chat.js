@@ -1,6 +1,6 @@
 /*
- * Чат (Frame 5 / Frame 6). Монтируется в .panel__main.
- *   const destroy = Chat.mount(mainEl, { conversationId, me, onBack });
+ * Чат с поддержкой. Монтируется в любой контейнер (он получает класс .chat).
+ *   const destroy = Chat.mount(el, { conversationId, me, onBack });
  */
 (function () {
   'use strict';
@@ -21,14 +21,16 @@
     const draftKey = 'lwl.draft.' + conversationId;
 
     /* ------------------------------------------------------------- разметка */
-    const title = h('h1', { class: 'panel__title', text: ' ' });
-    const subtitle = h('p', { class: 'panel__subtitle', text: ' ' });
-    const actions = h('div', { class: 'panel__head-actions' });
+    const headAvatar = h('div', { class: 'chat__avatar', 'aria-hidden': 'true' });
+    const title = h('h2', { class: 'chat__title', text: ' ' });
+    const subtitle = h('p', { class: 'chat__subtitle', text: ' ' });
+    const actions = h('div', { class: 'chat__actions' });
     const head = h(
       'header',
-      { class: 'panel__head' },
-      h('button', { class: 'icon-btn panel__head-back', type: 'button', 'aria-label': 'Назад', onclick: onBack }, icon('back')),
-      h('div', { class: 'panel__head-text' }, title, subtitle),
+      { class: 'chat__head' },
+      h('button', { class: 'icon-btn chat__back', type: 'button', 'aria-label': 'Назад', onclick: onBack }, icon('back')),
+      headAvatar,
+      h('div', { class: 'chat__head-text' }, title, subtitle),
       actions
     );
     const list = h('div', { class: 'chat__list', role: 'log', 'aria-live': 'polite', 'aria-relevant': 'additions', 'aria-label': 'Сообщения' });
@@ -43,11 +45,11 @@
       maxlength: String(Api.LIMITS.message.max + 200),
     });
     const counter = h('span', { class: 'composer__counter', hidden: true, 'aria-live': 'polite' });
-    const sendBtn = h('button', { class: 'btn composer__send', type: 'submit', 'aria-label': 'Отправить' }, h('span', { text: 'Отправить' }), icon('send'));
+    const sendBtn = h('button', { class: 'btn composer__send', type: 'submit', 'aria-label': 'Отправить', title: 'Отправить' }, icon('send'));
     const composer = h('form', { class: 'composer', novalidate: true }, input, counter, sendBtn);
 
+    main.classList.add('chat');
     clear(main).append(head, banner, scroller, jump, composer);
-    main.style.position = 'relative';
 
     input.value = safe(() => sessionStorage.getItem(draftKey)) || '';
     autosize();
@@ -126,8 +128,11 @@
     const unsubscribe = Api.chats.subscribe(conversationId, refresh);
 
     /* ------------------------------------------------------------ шапка */
+    let renderedStatus = null;
     function renderHead() {
       const partner = conversation.partner;
+      clear(headAvatar).append(partner ? UI.avatar(partner, 44) : h('img', { src: 'assets/img/logo.svg', alt: '', width: '44', height: '44' }));
+      headAvatar.classList.toggle('chat__avatar--brand', !partner);
       if (partner) {
         title.textContent = partner.nickname;
         subtitle.textContent = UI.presenceText(partner);
@@ -135,17 +140,20 @@
         title.textContent = 'Удалённый аккаунт';
         subtitle.textContent = '';
       } else {
-        title.textContent = 'Тех поддержка';
-        subtitle.textContent = 'Администраторы ответят здесь';
+        title.textContent = 'Администрация LWL';
+        subtitle.textContent = 'Ответим в этом чате';
       }
-      document.title = `${title.textContent} — LWL`;
+      subtitle.classList.toggle('is-online', !!(partner && partner.online));
+      document.title = partner ? `${partner.nickname} — LWL` : 'Тех поддержка — LWL';
 
+      if (renderedStatus === conversation.status) return;
+      renderedStatus = conversation.status;
       clear(actions);
       if (isAdmin && conversation.player && conversation.player.id !== me.id) {
         const closed = conversation.status === 'closed';
         actions.append(
           h('button', {
-            class: 'btn btn--ghost',
+            class: 'btn btn--sm btn--secondary',
             type: 'button',
             text: closed ? 'Открыть снова' : 'Закрыть обращение',
             onclick: (e) => toggleStatus(e.currentTarget, closed),
@@ -168,6 +176,7 @@
         UI.toast(reopen ? 'Обращение снова открыто.' : 'Обращение закрыто.', { type: 'success' });
         await refresh();
         conversation.status = reopen ? 'open' : 'closed';
+        renderedStatus = null;
         renderHead();
       } catch (err) {
         UI.toast(err.message, { type: 'error' });

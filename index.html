@@ -5,14 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self'; font-src 'self'; script-src 'self'; connect-src 'self' https:; base-uri 'self'; form-action 'self'; object-src 'none'">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <title>LWL — minecraft-сервер</title>
-  <meta name="description" content="LWL — передовой minecraft-сервер для истинных ценителей кубического вайба. Подайте заявку и начните своё путешествие.">
+  <title>LWL — Minecraft-сервер, где историю творите вы</title>
+  <meta name="description" content="LWL — Minecraft-сервер для ценителей кубического вайба: свобода творчества, уникальная сборка и живое комьюнити. Подайте заявку и начните своё путешествие.">
   <meta name="theme-color" content="#202020">
-  <meta property="og:title" content="LWL — minecraft-сервер">
+  <meta property="og:title" content="LWL — Minecraft-сервер">
   <meta property="og:description" content="На нашем сервере именно ВЫ творите историю.">
   <meta property="og:image" content="assets/img/hero.webp">
   <link rel="icon" href="assets/img/logo.svg" type="image/svg+xml">
   <link rel="preload" href="assets/fonts/russo-one-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/img/hero.webp" as="image" media="(min-width: 721px)">
   <link rel="preload" href="assets/img/hero-960.webp" as="image" media="(max-width: 720px)">
   <link rel="stylesheet" href="assets/css/base.css">
@@ -25,64 +26,148 @@
     <div class="stripe" aria-hidden="true"></div>
     <div class="site-header__bar">
       <div class="container site-header__inner">
-        <a class="site-header__logo" href="./" aria-label="LWL — на главную">
-          <img src="assets/img/logo.svg" width="100" height="100" alt="">
+        <a class="brand" href="./" aria-label="LWL — на главную">
+          <img src="assets/img/logo.svg" width="44" height="44" alt="">
+          <span class="brand__name" aria-hidden="true">LWL</span>
         </a>
         <nav class="site-nav" aria-label="Основное меню">
-          <a class="site-nav__link" href="#about">О нас</a>
-          <a class="site-nav__link" href="lk.html#/apply" data-auth-link="apply">Подать заявку</a>
+          <a class="site-nav__link" href="#about">О сервере</a>
+          <a class="site-nav__link" href="#how">Как попасть</a>
+          <a class="site-nav__link" href="#telegram">Telegram</a>
         </nav>
-        <a class="site-nav__link site-header__account" href="lk.html" data-auth-link="account">Личный кабинет</a>
+        <div class="site-header__actions">
+          <a class="btn btn--sm btn--ghost" href="lk.html" data-auth-link="account" data-account-label>Войти</a>
+          <a class="btn btn--sm" href="lk.html#/apply" data-auth-link="apply">Подать заявку</a>
+        </div>
         <button class="burger" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Открыть меню">
           <span></span><span></span><span></span>
         </button>
       </div>
     </div>
     <div class="mobile-menu" id="mobile-menu" hidden>
-      <a class="mobile-menu__link" href="#about">О нас</a>
-      <a class="mobile-menu__link" href="lk.html#/apply" data-auth-link="apply">Подать заявку</a>
-      <a class="mobile-menu__link" href="lk.html" data-auth-link="account">Личный кабинет</a>
-      <a class="mobile-menu__link" href="#telegram">Наш Telegram</a>
+      <nav class="mobile-menu__nav" aria-label="Меню">
+        <a class="mobile-menu__link" href="#about">О сервере</a>
+        <a class="mobile-menu__link" href="#how">Как попасть</a>
+        <a class="mobile-menu__link" href="#telegram">Telegram</a>
+      </nav>
+      <div class="mobile-menu__actions">
+        <a class="btn btn--lg" href="lk.html#/apply" data-auth-link="apply">Подать заявку</a>
+        <a class="btn btn--lg btn--secondary" href="lk.html" data-auth-link="account" data-account-label>Войти</a>
+      </div>
     </div>
   </header>
 
   <main id="main">
-    <section class="hero" aria-label="LWL">
-      <h1 class="visually-hidden">LWL — minecraft-сервер</h1>
-      <img class="hero__logo" src="assets/img/logo-3d.svg" width="660" height="661" alt="Логотип LWL">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="container hero__inner">
+        <div class="hero__content">
+          <p class="eyebrow">Minecraft-сервер</p>
+          <h1 class="hero__title" id="hero-title">Здесь историю творите <span class="hero__accent">вы</span></h1>
+          <p class="hero__lead">Свобода творчества, уникальная сборка и самые харизматичные игроки. Подайте заявку — и начните своё путешествие на LWL.</p>
+          <div class="hero__actions">
+            <a class="btn btn--lg" href="lk.html#/apply" data-auth-link="apply">Подать заявку</a>
+            <a class="btn btn--lg btn--secondary" href="#about">Узнать больше</a>
+          </div>
+        </div>
+        <img class="hero__logo" src="assets/img/logo-3d.svg" width="660" height="661" alt="Логотип LWL">
+      </div>
     </section>
 
-    <section class="about" id="about" aria-labelledby="about-title">
+    <section class="section about" id="about" aria-labelledby="about-title">
       <div class="container">
-        <h2 class="about__title" id="about-title">О нас</h2>
+        <div class="about-intro">
+          <div class="about-intro__text">
+            <p class="eyebrow">О сервере</p>
+            <h2 class="section-title" id="about-title">Кубический вайб без тонн лора</h2>
+            <p class="lead">LWL — передовой Minecraft-сервер для истинных ценителей кубического вайба. Мы не душим игроков тоннами лора, не заставляем обязательно пилить какой-то контент и просто хотим дать качественный сервер для отличного времяпрепровождения.</p>
+            <p class="lead">Только у нас вы найдёте самых харизматичных людей, бредовые и гениальные постройки и удивительные ивенты (не всегда от админов, конечно).</p>
+          </div>
+          <div class="about-intro__art" aria-hidden="true">
+            <img src="assets/img/logo.svg" width="330" height="330" alt="" loading="lazy">
+          </div>
+        </div>
 
-        <article class="about-card about-card--1">
-          <p class="about-card__text">LWL - передовой minecraft-сервер для истинных ценителей кубического ВаЙбА. Мы не душим игроков тоннами лора, не заставляем их обязательно пилить какой-то контент и просто хотим дать качественный сервер для отличного времяпрепровождения. Только у нас вы сможете найти самых харизматичных людей, бредовые и гениальные постройки и удивительные ивенты (не всегда от админов конечно).</p>
-          <img class="about-card__img" src="assets/img/logo.svg" width="330" height="330" alt="" loading="lazy">
-        </article>
+        <div class="features">
+          <article class="feature">
+            <div class="feature__media">
+              <img src="assets/img/about-freedom.webp" width="308" height="391" alt="Игроки строят вместе" loading="lazy">
+            </div>
+            <div class="feature__body">
+              <h3 class="feature__title">Свобода творчества</h3>
+              <p>Полная свобода в рамках Майнкрафта. Захотите — попросите администрацию добавить новые механики, связанные именно с вашим персонажем.</p>
+            </div>
+          </article>
+          <article class="feature">
+            <div class="feature__media">
+              <img src="assets/img/about-build.webp" width="323" height="415" alt="Игрок у экрана со сборкой" loading="lazy">
+            </div>
+            <div class="feature__body">
+              <h3 class="feature__title">Уникальная сборка</h3>
+              <p>На сервере есть своя сборка: новые механики от комьюнити и всё, что делает игру удобнее.</p>
+            </div>
+          </article>
+          <article class="feature">
+            <div class="feature__media">
+              <img src="assets/img/lk-support.webp" width="281" height="224" alt="Игрок у наковальни" loading="lazy">
+            </div>
+            <div class="feature__body">
+              <h3 class="feature__title">Команда растёт</h3>
+              <p>У нас немало умелых криэйторов, которые развивают сервер, и мы не боимся расширять штат. Нашим новым сотрудником можете стать именно вы — главное, проявить себя.</p>
+            </div>
+          </article>
+          <article class="feature">
+            <div class="feature__media">
+              <img src="assets/img/about-rewards.webp" width="500" height="363" alt="Игрок дарит алмаз" loading="lazy">
+            </div>
+            <div class="feature__body">
+              <h3 class="feature__title">Награды для активных</h3>
+              <p>Мы щедро вознаграждаем талантливых и творческих игроков и рассказываем о них на нашем канале, а в будущем — и на сайте.</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
 
-        <article class="about-card about-card--2 about-card--right">
-          <img class="about-card__img" src="assets/img/about-freedom.webp" width="308" height="391" alt="Игроки строят на сервере" loading="lazy">
-          <p class="about-card__text">Нашей особенностью является полная свобода творчества в рамках Майнкрафта. При желании игроки могут попросить администрацию добавить новые механики связанные конкретно с их персонажем.</p>
-        </article>
+    <section class="section how" id="how" aria-labelledby="how-title">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">Как попасть на сервер</p>
+          <h2 class="section-title" id="how-title">Три шага до первой постройки</h2>
+        </div>
+        <ol class="how__steps">
+          <li class="how-step">
+            <span class="how-step__num" aria-hidden="true">1</span>
+            <h3 class="how-step__title">Создайте аккаунт</h3>
+            <p>Ник из Minecraft, почта и пароль — это займёт минуту.</p>
+          </li>
+          <li class="how-step">
+            <span class="how-step__num" aria-hidden="true">2</span>
+            <h3 class="how-step__title">Заполните анкету</h3>
+            <p>Расскажите о себе: во что любите играть и что хотите построить.</p>
+          </li>
+          <li class="how-step">
+            <span class="how-step__num" aria-hidden="true">3</span>
+            <h3 class="how-step__title">Дождитесь решения</h3>
+            <p>Статус заявки и ответ администрации появятся в личном кабинете. Остались вопросы — пишите в поддержку.</p>
+          </li>
+        </ol>
+        <div class="how__cta">
+          <a class="btn btn--lg" href="lk.html#/apply" data-auth-link="apply">Подать заявку</a>
+          <p class="how__note">Уже подавали? <a class="link" href="lk.html" data-auth-link="account">Проверьте статус в кабинете</a></p>
+        </div>
+      </div>
+    </section>
 
-        <article class="about-card about-card--3">
-          <p class="about-card__text">На сервере так же присутствует уникальная сброка, направленная на новые механики от комьюнити и повышение комфорта игроков.</p>
-          <img class="about-card__img" src="assets/img/about-build.webp" width="323" height="415" alt="Игрок у экрана со сборкой" loading="lazy">
-        </article>
-
-        <article class="about-card about-card--4 about-card--right">
-          <p class="about-card__text">В нашей команде не мало умелых криэйтеров для улучшения стабильности и возможностей сервера, но мы не боимся расширять штат, благодаря новым талантам.<br>(Так что именно ты можешь стать нашим новым сотрудником, главное проявить себя)</p>
-        </article>
-
-        <article class="about-card about-card--5">
-          <p class="about-card__text">Мы щедро вознаграждаем талантливых и творческих игроков, упоминая их на нашем канале и в будущем на главном сайте. Не упустите свой шанс продвигаться вместе с нами)</p>
-          <img class="about-card__img" src="assets/img/about-rewards.webp" width="500" height="363" alt="Игрок дарит алмаз" loading="lazy">
-        </article>
-
-        <article class="about-card about-card--6 about-card--right">
-          <p class="about-card__text">На нашем сервере именно ВЫ творите историю, начните своё путешествие на проекте LWL!</p>
-        </article>
+    <section class="section section--tight" id="telegram" aria-labelledby="tg-title">
+      <div class="container">
+        <div class="tg-banner">
+          <img class="tg-banner__icon" src="assets/img/telegram.svg" width="120" height="120" alt="" loading="lazy">
+          <div class="tg-banner__text">
+            <h2 class="tg-banner__title" id="tg-title">Наш Telegram</h2>
+            <p>Там мы делимся обновлениями и слушаем ваши предложения.</p>
+          </div>
+          <a class="btn btn--lg tg-banner__btn" data-telegram-link href="https://t.me/" target="_blank" rel="noopener noreferrer">Подписаться</a>
+        </div>
       </div>
     </section>
   </main>
@@ -90,22 +175,26 @@
   <footer class="site-footer">
     <div class="container site-footer__inner">
       <div class="site-footer__brand">
-        <a href="#top" class="site-footer__logo" aria-label="Наверх">
-          <img src="assets/img/logo.svg" width="80" height="80" alt="LWL" loading="lazy">
+        <a class="brand" href="#top" aria-label="Наверх">
+          <img src="assets/img/logo.svg" width="44" height="44" alt="" loading="lazy">
+          <span class="brand__name" aria-hidden="true">LWL</span>
         </a>
-        <p class="site-footer__slogan">ВЫ творите историю, начните своё путешествие на проекте LWL!</p>
+        <p class="site-footer__slogan">ВЫ творите историю — начните своё путешествие на проекте LWL!</p>
       </div>
-
-      <section class="tg-card" id="telegram" aria-labelledby="tg-title">
-        <h2 class="tg-card__title" id="tg-title">Наш Telegram</h2>
-        <p class="tg-card__text">Там мы делимся нашими обновлениями и слушаем ваши предложения</p>
-        <a class="btn tg-card__btn" data-telegram-link href="https://t.me/" target="_blank" rel="noopener noreferrer">Подписаться</a>
-        <img class="tg-card__icon" src="assets/img/telegram.svg" width="146" height="139" alt="" loading="lazy">
-      </section>
+      <nav class="site-footer__nav" aria-label="Ссылки в подвале">
+        <a href="#about">О сервере</a>
+        <a href="#how">Как попасть</a>
+        <a href="lk.html" data-auth-link="account">Личный кабинет</a>
+        <a data-telegram-link href="https://t.me/" target="_blank" rel="noopener noreferrer">Telegram</a>
+      </nav>
+    </div>
+    <div class="container site-footer__bottom">
+      <p>© <span data-year>2026</span> LWL</p>
+      <p>Не является официальным продуктом Minecraft. Не связан с Mojang Studios и Microsoft.</p>
     </div>
   </footer>
 
-  <div class="toasts" aria-live="polite" aria-atomic="false"></div>
+  <div class="toasts" aria-live="polite"></div>
 
   <script src="assets/js/config.js"></script>
   <script src="assets/js/api.js"></script>

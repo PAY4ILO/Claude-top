@@ -7,25 +7,37 @@
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="robots" content="noindex">
   <title>Личный кабинет — LWL</title>
-  <meta name="theme-color" content="#2b2b2b">
+  <meta name="theme-color" content="#202020">
   <link rel="icon" href="assets/img/logo.svg" type="image/svg+xml">
   <link rel="preload" href="assets/fonts/russo-one-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/css/base.css">
   <link rel="stylesheet" href="assets/css/lk.css">
 </head>
 <body class="lk">
   <a class="skip-link" href="#app">К содержимому</a>
   <div class="stripe" aria-hidden="true"></div>
-  <a class="lk-logo" href="index.html" aria-label="LWL — на главную">
-    <img src="assets/img/logo.svg" width="100" height="100" alt="">
-  </a>
 
-  <main id="app" class="lk-app" tabindex="-1">
-    <div class="lk-loading" role="status">
-      <div class="spinner" aria-hidden="true"></div>
-      <span class="visually-hidden">Загрузка…</span>
-    </div>
-  </main>
+  <header class="app-bar">
+    <a class="brand" href="index.html" aria-label="LWL — на главную сайта">
+      <img src="assets/img/logo.svg" width="36" height="36" alt="">
+      <span class="brand__name" aria-hidden="true">LWL</span>
+    </a>
+    <span class="app-bar__title">Личный кабинет</span>
+    <div class="app-bar__user" id="user-menu"></div>
+  </header>
+
+  <div class="app">
+    <aside class="app-nav" id="app-nav" aria-label="Разделы кабинета" hidden></aside>
+    <main id="app" class="app-main" tabindex="-1">
+      <div class="lk-loading" role="status">
+        <div class="spinner" aria-hidden="true"></div>
+        <span class="visually-hidden">Загрузка…</span>
+      </div>
+    </main>
+  </div>
+
+  <nav class="tabbar" id="tabbar" aria-label="Разделы кабинета" hidden></nav>
 
   <noscript>
     <p class="lk-noscript">Личный кабинет работает только с включённым JavaScript.</p>
