@@ -39,6 +39,8 @@ public final class AuthConfig {
 	public int mojangTimeoutSeconds = 5;
 	/** Сколько часов помнить, есть ли у ника лицензия. */
 	public int premiumCacheHours = 24;
+	/** Что видит игрок, которого нет во включённом вайтлисте (/wl on). */
+	public String whitelistMessage = "Вас нет в вайтлисте сервера. Подайте заявку на сайте — после одобрения вас добавят.";
 
 	public static AuthConfig load(Path file) {
 		AuthConfig config = new AuthConfig();
@@ -71,5 +73,8 @@ public final class AuthConfig {
 		minPasswordLength = Math.clamp(minPasswordLength, 4, 32);
 		mojangTimeoutSeconds = Math.clamp(mojangTimeoutSeconds, 2, 20);
 		premiumCacheHours = Math.clamp(premiumCacheHours, 0, 24 * 30);
+		if (whitelistMessage == null || whitelistMessage.isBlank()) {
+			whitelistMessage = new AuthConfig().whitelistMessage;
+		}
 	}
 }

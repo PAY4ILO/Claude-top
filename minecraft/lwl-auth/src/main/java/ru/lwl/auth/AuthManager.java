@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -73,6 +74,7 @@ public final class AuthManager {
 	private final ExecutorService hashing;
 	private final ExecutorService io;
 	private final AuthStore store;
+	private final Whitelist whitelist;
 	private final PremiumLookup lookup;
 
 	private final Set<UUID> authenticated = ConcurrentHashMap.newKeySet();
@@ -91,9 +93,14 @@ public final class AuthManager {
 		this.hashing = Executors.newFixedThreadPool(2, Thread.ofPlatform().name("lwl-auth-hash-", 0).daemon().factory());
 		this.io = Executors.newSingleThreadExecutor(Thread.ofPlatform().name("lwl-auth-io").daemon().factory());
 		this.store = new AuthStore(configDir.resolve("lwl-auth"), io);
+		this.whitelist = new Whitelist(configDir.resolve("lwl-auth"), io);
 		this.lookup = new PremiumLookup(network, () -> this.config.mojangTimeoutSeconds);
 		if (server.usesAuthentication()) {
 			LOGGER.warn("Сервер в online-mode=true: туда и так пускают только лицензию, LWL Auth ничего не делает.");
+		}
+		if (server.isUsingWhitelist()) {
+			LOGGER.warn("В server.properties включён white-list=true. Стандартный вайтлист сверяет UUID лицензии "
+				+ "и не пускает игроков с пиратки. Выключите его (/whitelist off) и пользуйтесь /wl из LWL Auth.");
 		}
 	}
 
@@ -131,6 +138,37 @@ public final class AuthManager {
 
 	public AuthStore store() {
 		return store;
+	}
+
+	public Whitelist whitelist() {
+		return whitelist;
+	}
+
+	/** Причина отказа, если ника нет во включённом вайтлисте; иначе null. */
+	public @Nullable Component whitelistRejection(String name) {
+		return whitelist.allows(name) ? null : Component.literal(config.whitelistMessage);
+	}
+
+	/** Включает вайтлист и сразу добавляет тех, кто сейчас в игре, — чтобы никого не выкинуло. */
+	public List<String> enableWhitelist(String by) {
+		List<String> added = new java.util.ArrayList<>();
+		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+			String name = player.getGameProfile().name();
+			if (whitelist.add(name, by)) {
+				added.add(name);
+			}
+		}
+		whitelist.setEnabled(true);
+		return added;
+	}
+
+	/** Убирает ник из вайтлиста; если вайтлист включён, игрока выкидывает. */
+	public boolean removeFromWhitelist(String name) {
+		boolean removed = whitelist.remove(name);
+		if (removed && whitelist.enabled()) {
+			kickIfOnline(name, config.whitelistMessage);
+		}
+		return removed;
 	}
 
 	public MinecraftServer server() {

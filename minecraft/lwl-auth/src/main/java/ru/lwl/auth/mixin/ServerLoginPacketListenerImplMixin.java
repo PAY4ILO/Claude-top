@@ -64,7 +64,18 @@ public abstract class ServerLoginPacketListenerImplMixin {
 	@Inject(method = "handleHello", at = @At("HEAD"), cancellable = true)
 	private void lwlAuth$decideMode(ServerboundHelloPacket packet, CallbackInfo ci) {
 		AuthManager manager = AuthManager.get();
-		if (manager == null || !manager.enabled() || lwlAuth$mode != null || !StringUtil.isValidPlayerName(packet.name())) {
+		if (manager == null || lwlAuth$mode != null || !StringUtil.isValidPlayerName(packet.name())) {
+			return;
+		}
+		// Вайтлист проверяем первым: человеку не из списка незачем проходить проверку лицензии.
+		Component rejected = manager.whitelistRejection(packet.name());
+		if (rejected != null) {
+			LWL_AUTH$LOGGER.info("{} не в вайтлисте — не пускаю", packet.name());
+			disconnect(rejected);
+			ci.cancel();
+			return;
+		}
+		if (!manager.enabled()) {
 			return;
 		}
 		ci.cancel();
