@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "ru.lwl.skins.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "mixins": [
+    "ChunkMapAccessor",
+    "PlayerAccessor",
+    "ServerLoginPacketListenerImplMixin",
+    "TrackedEntityAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

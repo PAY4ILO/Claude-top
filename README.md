@@ -184,4 +184,5 @@ assets/fonts/    Russo One и Inter + лицензии
 design/figma/    оригиналы из Figma и рендеры фреймов макета
 tools/           figma-export.mjs, prepare-assets.py, static-server.mjs
 tests/           e2e.mjs
+minecraft/       моды для сервера Fabric 26.3: скины (lwl-skins) и авторизация (lwl-auth) — см. minecraft/README.md
 ```

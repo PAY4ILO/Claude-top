@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "lwl-skins",
+	"version": "${version}",
+	"name": "LWL Skins",
+	"description": "Скины по нику лицензии и по ссылке для сервера (как SkinsRestorer). Ставится только на сервер.",
+	"authors": ["LWL"],
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["ru.lwl.skins.LwlSkins"]
+	},
+	"mixins": ["lwl-skins.mixins.json"],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

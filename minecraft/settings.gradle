@@ -1,0 +1,12 @@
+pluginManagement {
+	repositories {
+		maven { name = 'Fabric'; url = 'https://maven.fabricmc.net/' }
+		// зеркало Maven Central: основной адрес иногда отвечает 429
+		maven { url = 'https://repo1.maven.org/maven2/' }
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+rootProject.name = 'lwl-mods'
+include 'lwl-skins', 'lwl-auth'

@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "lwl-auth",
+	"version": "${version}",
+	"name": "LWL Auth",
+	"description": "Авторизация для сервера с online-mode=false: лицензия входит сама, остальные — по паролю (/register, /login). Ставится только на сервер.",
+	"authors": ["LWL"],
+	"license": "MIT",
+	"environment": "server",
+	"entrypoints": {
+		"main": ["ru.lwl.auth.LwlAuth"]
+	},
+	"mixins": ["lwl-auth.mixins.json"],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
