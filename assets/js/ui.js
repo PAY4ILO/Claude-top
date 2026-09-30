@@ -64,6 +64,12 @@
     chevronDown: 'M6 9l6 6 6-6',
     chevronRight: 'M9 6l6 6-6 6',
     inbox: 'M3 13l3-8h12l3 8v6H3z|M3 13h5l1 3h6l1-3h5',
+    users: 'C9 8 3.5|M2.5 20c1-3.6 3.5-5.5 6.5-5.5s5.5 1.9 6.5 5.5|M16 4.6a3.5 3.5 0 0 1 0 6.8|M18.5 14.9c1.5.8 2.5 2.5 3 5.1',
+    server: 'M4 4h16v6H4z|M4 14h16v6H4z|M8 7h.01|M8 17h.01',
+    download: 'M12 4v12M7 11l5 5 5-5|M4 20h16',
+    link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1|M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
+    edit: 'M4 20h4L19 9l-4-4L4 16z|M13.5 6.5l4 4',
+    eyeView: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z|C12 12 3',
   };
 
   function icon(name, size) {
@@ -127,6 +133,12 @@
 
   const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
   const openModals = [];
+  const modalClosers = new Map();
+
+  /** Закрыть все открытые окна (например, при переходе по ссылке сброса пароля). */
+  function closeModals() {
+    [...modalClosers.values()].forEach((close) => close());
+  }
 
   /**
    * Открывает модальное окно. content — узел; возвращает { close, dialog }.
@@ -148,11 +160,13 @@
     document.body.append(root);
     document.body.classList.add('has-modal');
     openModals.push(root);
+    modalClosers.set(root, () => close());
 
     let closed = false;
     function close(result) {
       if (closed) return;
       closed = true;
+      modalClosers.delete(root);
       root.remove();
       openModals.splice(openModals.indexOf(root), 1);
       if (!openModals.length) document.body.classList.remove('has-modal');
@@ -457,6 +471,7 @@
     icon,
     toast,
     modal,
+    closeModals,
     confirm: confirmDialog,
     field,
     counter,

@@ -176,6 +176,11 @@ body:not(.lk--app) .app {
   background: var(--c-info-bg);
   color: #8fe8f3;
 }
+/* «Пользователь» — ещё не игрок сервера */
+.role--user {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--c-text-2);
+}
 .nav-list {
   display: grid;
   gap: 4px;
@@ -341,10 +346,6 @@ body:not(.lk--app) .app {
 }
 .card--danger .card-title {
   color: #ffb3b3;
-}
-.card--demo {
-  border-color: rgba(30, 197, 220, 0.25);
-  background: radial-gradient(120% 140% at 100% 0%, rgba(30, 197, 220, 0.1), rgba(0, 0, 0, 0) 55%), var(--c-surface);
 }
 .stack {
   display: grid;
@@ -1111,6 +1112,7 @@ body:not(.lk--app) .app {
 
 .segmented {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
   border-radius: var(--r-md);
@@ -1165,6 +1167,164 @@ body:not(.lk--app) .app {
 .gate__back {
   margin-top: 6px;
   font-size: 15px;
+}
+.gate__slot {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+}
+.gate__form {
+  text-align: left;
+}
+
+/* ---------------------------------------------------------------- вкладка «Сервер» */
+
+.server-address {
+  margin-bottom: 8px;
+}
+.cmd__code--big {
+  padding: 14px 18px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.how-list {
+  display: grid;
+  gap: 14px;
+  margin: 22px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.how-list__item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.how-list__num {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--c-info-bg);
+  color: #8fe8f3;
+  font-family: var(--font-display);
+}
+.how-list__title {
+  display: block;
+  font-weight: 600;
+}
+.how-list__text {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text-2);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.server-note {
+  margin-top: 20px;
+  padding: 16px 18px;
+  border-left: 3px solid var(--c-blue-2);
+  border-radius: var(--r-sm);
+  background: var(--c-field);
+  color: var(--c-text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.server-card .actions-row {
+  margin-top: 20px;
+}
+
+.packs {
+  display: grid;
+  gap: 14px;
+}
+.pack {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+}
+.pack__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.pack__title {
+  font-size: 18px;
+}
+.pack--admin .pack__head .pill {
+  margin-left: auto;
+}
+.pack__launcher {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--c-text-2);
+}
+.pack__launcher--prism {
+  background: rgba(106, 180, 255, 0.14);
+  color: #a9d1ff;
+}
+.pack__launcher--curseforge {
+  background: rgba(241, 100, 54, 0.16);
+  color: #ffb08f;
+}
+.pack__launcher--modrinth {
+  background: rgba(27, 217, 106, 0.14);
+  color: #7ff0ae;
+}
+.pack__meta {
+  color: var(--c-text-3);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.pack__desc {
+  color: var(--c-text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pack__help summary {
+  width: max-content;
+  color: var(--c-blue-2);
+  font-weight: 600;
+  cursor: pointer;
+}
+.pack__help ol {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-left: 22px;
+  color: var(--c-text-2);
+  font-size: 15px;
+}
+
+.progress {
+  display: grid;
+  gap: 6px;
+}
+.progress__track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--c-field);
+  overflow: hidden;
+}
+.progress__bar {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--grad);
+  transition: width 0.2s linear;
+}
+.progress__text {
+  color: var(--c-text-3);
+  font-size: 13px;
 }
 
 /* ---------------------------------------------------------------- состояния */
@@ -1678,7 +1838,9 @@ body:not(.lk--app) .app {
     bottom: 0;
     z-index: 25;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    /* 4–6 вкладок (у игрока есть «Сервер», у админа — «Люди»): всегда в одну строку */
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
     background: rgba(32, 32, 32, 0.94);
     backdrop-filter: saturate(140%) blur(12px);
@@ -1694,11 +1856,17 @@ body:not(.lk--app) .app {
     font-weight: 600;
     color: var(--c-text-3);
   }
+  .tab__label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .tab__icon {
     position: relative;
     display: grid;
     place-items: center;
-    width: 56px;
+    width: min(56px, 100%);
     height: 30px;
     border-radius: 999px;
     transition: background 0.15s;

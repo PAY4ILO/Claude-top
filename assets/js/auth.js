@@ -42,7 +42,7 @@
       tabRegister.tabIndex = next === 'register' ? 0 : -1;
       panel.setAttribute('aria-labelledby', next === 'register' ? 'auth-tab-register' : 'auth-tab-login');
       title.textContent = { login: 'Вход', register: 'Регистрация', reset: 'Восстановление пароля' }[next];
-      lead.textContent = reason && isAuthTab ? reason : next === 'reset' ? 'Укажите почту аккаунта — пришлём ссылку для смены пароля.' : '';
+      lead.textContent = reason && isAuthTab ? reason : next === 'reset' ? 'Укажите почту аккаунта. Администраторы увидят запрос и пришлют вам ссылку для смены пароля.' : '';
       lead.hidden = !lead.textContent;
       UI.clear(body).append(next === 'login' ? loginForm() : next === 'register' ? registerForm() : resetForm());
       const first = body.querySelector('input');
@@ -53,11 +53,6 @@
       m.close();
       UI.toast(current === 'register' ? `Добро пожаловать, ${user.nickname}!` : `С возвращением, ${user.nickname}!`, { type: 'success' });
       if (onSuccess) onSuccess(user);
-    }
-
-    function demoNote() {
-      if (Api.mode !== 'demo') return null;
-      return h('p', { class: 'auth__note' }, icon('info'), h('span', { text: 'Демо-режим: аккаунт хранится только в этом браузере, пароль — в виде хеша.' }));
     }
 
     function loginForm() {
@@ -73,8 +68,7 @@
           h('label', { class: 'checkbox' }, h('input', { type: 'checkbox', name: 'remember' }), h('span', { text: 'Запомнить меня' })),
           h('button', { class: 'link-btn', type: 'button', text: 'Забыли пароль?', onclick: () => show('reset') })
         ),
-        h('button', { class: 'btn btn--lg btn--block', type: 'submit', text: 'Войти' }),
-        demoNote()
+        h('button', { class: 'btn btn--lg btn--block', type: 'submit', text: 'Войти' })
       );
       form.addEventListener('submit', (e) => submit(e, form, () => Api.auth.login({ login: form.login.value, password: form.password.value, remember: form.remember.checked })));
       return form;
@@ -93,8 +87,7 @@
         pw,
         field({ label: 'Повторите пароль', name: 'password2', type: 'password', autocomplete: 'new-password', required: true }),
         h('label', { class: 'checkbox' }, h('input', { type: 'checkbox', name: 'remember', checked: true }), h('span', { text: 'Запомнить меня на этом устройстве' })),
-        h('button', { class: 'btn btn--lg btn--block', type: 'submit', text: 'Создать аккаунт' }),
-        demoNote()
+        h('button', { class: 'btn btn--lg btn--block', type: 'submit', text: 'Создать аккаунт' })
       );
       form.password.addEventListener('input', () => strength.setAttribute('data-level', UI.passwordStrength(form.password.value)));
       form.addEventListener('submit', (e) => {
@@ -119,7 +112,7 @@
         { class: 'auth__form', novalidate: true },
         h('div', { class: 'form-alert', role: 'alert', hidden: true }),
         field({ label: 'Почта', name: 'email', type: 'email', autocomplete: 'email', required: true, inputmode: 'email' }),
-        h('button', { class: 'btn btn--lg btn--block', type: 'submit', text: 'Отправить ссылку' }),
+        h('button', { class: 'btn btn--lg btn--block', type: 'submit', text: 'Попросить ссылку' }),
         h('button', { class: 'link-btn auth__back', type: 'button', text: '← Вернуться ко входу', onclick: () => show('login') })
       );
       form.addEventListener('submit', async (e) => {
@@ -134,7 +127,7 @@
           const ok = form.querySelector('.form-alert');
           ok.hidden = false;
           ok.classList.add('form-alert--info');
-          UI.clear(ok).append(icon('check'), h('span', { text: 'Если такой аккаунт есть, письмо уже в пути. Проверьте «Спам».' }));
+          UI.clear(ok).append(icon('check'), h('span', { text: 'Запрос отправлен. Администратор пришлёт ссылку в Telegram или Discord, указанный в анкете (или ответит в поддержку, когда войдёте). Ссылка действует сутки.' }));
         } catch (error) {
           UI.showFormError(form, error);
         } finally {

@@ -3,3 +3,6 @@ node_modules/
 # сырой JSON макета большой и пересоздаётся скриптом
 design/figma/file.json
 __pycache__/
+
+# база, загруженные сборки и аватары (на машине — /var/lib/lwl)
+data/

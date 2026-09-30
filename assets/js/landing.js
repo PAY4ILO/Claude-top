@@ -65,9 +65,10 @@
   }
 
   /* ------------------------------------------------------------- прочее */
-  const tg = (window.LWL_CONFIG && window.LWL_CONFIG.telegramUrl) || '';
-  document.querySelectorAll('[data-telegram-link]').forEach((a) => {
-    if (/^https:\/\//.test(tg)) a.href = tg;
+  // Ссылку на Telegram админ задаёт в кабинете («Сервер» → «Настройки»).
+  Api.settings.public().then(({ telegramUrl }) => {
+    if (!/^https:\/\//.test(telegramUrl || '')) return;
+    document.querySelectorAll('[data-telegram-link]').forEach((a) => (a.href = telegramUrl));
   });
   document.querySelectorAll('[data-year]').forEach((el) => (el.textContent = new Date().getFullYear()));
 })();
