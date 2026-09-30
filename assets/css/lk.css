@@ -702,20 +702,23 @@ body:not(.lk--app) .app {
   color: #ffb3b3;
 }
 
+/* Вкладки не прокручиваются вбок: если не влезают, переносятся на вторую строку
+   и растягиваются, чтобы ряды были ровными. */
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
-  overflow-x: auto;
   border-radius: var(--r-md);
   background: var(--c-field);
-  scrollbar-width: none;
 }
 .tabs__tab {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  flex: none;
+  flex: 1 1 auto;
+  white-space: nowrap;
   min-height: 36px;
   padding: 0 12px;
   border-radius: var(--r-sm);
