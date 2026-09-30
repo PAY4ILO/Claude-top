@@ -110,6 +110,8 @@ await C.close();
 await B.goto(BASE + '/lk.html#/apply'); await B.waitForSelector('form.form');
 await B.click('form.form button[type=submit]');
 ok('заявка: ошибки валидации', (await B.locator('.field.has-error').count()) >= 3);
+ok('заявка: без выбора лицензии не отправить', (await B.locator('.choices.has-error').count()) === 1);
+await B.check('input[name=license][value=cracked]');
 await B.fill('input[name=age]', '17');
 await B.selectOption('select[name=source]', 'Друзья');
 await B.fill('textarea[name=about]', 'Люблю строить большие города и играть с друзьями по вечерам.');
@@ -163,6 +165,10 @@ ok('отказ без причины → ошибка', (await A.locator('.revie
 await A.click('.review button[value=approved]');
 await A.waitForSelector('.split__detail .callout--success');
 ok('заявка одобрена админом', true);
+ok('админ видит лицензию и команду для сервера',
+  (await A.locator('.split__detail .details').innerText()).includes('Нет лицензии') &&
+  (await A.locator('.split__detail .cmd__code').innerText()) === '/wl add __Hawker__ cracked',
+  await A.locator('.split__detail .cmd__code').innerText());
 ok('админ: одобренная заявка ушла из «Новых»', (await A.locator('.split__list .row').count()) === 0);
 await B.goto(BASE + '/lk.html#/application'); await B.waitForSelector('.callout--success');
 ok('игрок видит «одобрена»', true);

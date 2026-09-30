@@ -109,7 +109,7 @@ window.LWL_CONFIG = {
 | POST | `/me/presence` | → 204 (раз в 25 с, пока вкладка открыта) |
 | GET | `/me/summary` | → игрок `{unreadMessages, applicationStatus}`, админ `{pendingApplications, unreadConversations}` |
 | GET | `/applications/mine` | → `{application}` (последняя или `null`) |
-| POST | `/applications` | `{age, source, about, contact, agree}` → `{application}` |
+| POST | `/applications` | `{age, license, source, about, contact, agree}` → `{application}` |
 | POST | `/applications/:id/withdraw` | → `{application}` |
 | GET | `/applications?status=pending\|approved\|rejected\|all&q=` | админ → `{items, counts}` |
 | GET | `/applications/:id` | → `{application}` |
@@ -126,9 +126,22 @@ window.LWL_CONFIG = {
 
 - `user`: `{id, nickname, email, role: 'player'|'admin', avatar, createdAt, lastSeenAt}`;
 - краткий пользователь: `{id, nickname, role, avatar, online, lastSeenAt}`;
-- `application`: `{id, nickname, age, about, source, contact, status, comment, createdAt, updatedAt, history[], applicant, reviewer}`;
+- `application`: `{id, nickname, age, license: 'premium'|'cracked', about, source, contact, status, comment, createdAt, updatedAt, history[], applicant, reviewer}`;
 - `conversation`: `{id, status, player, partner, lastMessage, unread, createdAt, updatedAt}`;
 - `message`: `{id, clientId, text, createdAt, authorId, system, author}`.
+
+### Заявка и сервер Minecraft
+
+В анкете игрок обязательно указывает, есть ли у него лицензия (`license`). Когда админ одобряет
+заявку, кабинет показывает готовую команду для мода LWL Auth (см. `minecraft/README.md`) с кнопкой
+«Скопировать»:
+
+- есть лицензия → `/wl add <ник>`: игрок заходит без пароля, лицензию проверяет Mojang;
+- нет лицензии → `/wl add <ник> cracked`: вход по паролю, даже если такой ник есть у чьей-то лицензии.
+
+Когда у сайта появится свой сервер, эту команду можно будет выполнять автоматически при одобрении
+(через RCON или мод, который забирает одобренные заявки). Всё нужное для этого уже есть в заявке:
+`nickname`, `license` и `status`.
 
 Новые сообщения в серверном режиме подтягиваются опросом раз в 4 с (`pollIntervalMs`). Когда появятся WebSocket/SSE, заменить нужно только `Api.chats.subscribe`.
 

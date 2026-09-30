@@ -842,6 +842,115 @@ body:not(.lk--app) .app {
   overflow-wrap: anywhere;
 }
 
+/* Выбор «есть лицензия / нет лицензии» в анкете */
+.choices {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.choices > legend {
+  padding: 0;
+  margin-bottom: 8px;
+}
+.choices__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: var(--r-md);
+  background: var(--c-field);
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.choice:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.choice:has(input:checked) {
+  border-color: rgba(30, 197, 220, 0.65);
+  background: var(--c-info-bg);
+}
+.choice input {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  background: var(--c-surface);
+  cursor: pointer;
+}
+.choice input:checked {
+  border-color: transparent;
+  background: var(--grad);
+}
+.choice input:checked::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+}
+.choice input:focus-visible {
+  outline: 2px solid var(--c-focus);
+  outline-offset: 2px;
+}
+.choice__body {
+  display: grid;
+  gap: 4px;
+}
+.choice__title {
+  font-weight: 600;
+}
+.choice__text {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--c-text-3);
+}
+.field.has-error .choice {
+  border-color: var(--c-danger);
+}
+
+/* Команда для консоли сервера в одобренной заявке */
+.cmd {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+}
+.cmd__title {
+  font-weight: 600;
+}
+.cmd__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.cmd__code {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: var(--r-sm);
+  background: var(--c-field);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 .review {
   display: grid;
   gap: 16px;
@@ -1716,6 +1825,9 @@ body:not(.lk--app) .app {
 }
 
 @media (max-width: 640px) {
+  .choices__row {
+    grid-template-columns: 1fr;
+  }
   .hero-card {
     grid-template-columns: minmax(0, 1fr);
     margin-top: 60px;

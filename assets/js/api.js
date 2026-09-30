@@ -40,6 +40,8 @@
   };
 
   const APPLICATION_SOURCES = ['Друзья', 'YouTube', 'TikTok', 'Telegram', 'Другое'];
+  /** Есть ли у игрока лицензия: от этого зависит, как добавить его на сервер. */
+  const LICENSES = { premium: 'Есть лицензия', cracked: 'Нет лицензии' };
 
   /* ------------------------------------------------------------------ ошибки */
 
@@ -112,6 +114,7 @@
       if (about.length < LIMITS.about.min) f.about = `Расскажите подробнее — минимум ${LIMITS.about.min} символов.`;
       else if (about.length > LIMITS.about.max) f.about = `Максимум ${LIMITS.about.max} символов.`;
       if (!APPLICATION_SOURCES.includes(d.source)) f.source = 'Выберите вариант.';
+      if (!Object.hasOwn(LICENSES, d.license)) f.license = 'Укажите, есть ли у вас лицензия Minecraft.';
       if (String(d.contact || '').trim().length > LIMITS.contact.max) f.contact = `Максимум ${LIMITS.contact.max} символов.`;
       if (!d.agree) f.agree = 'Нужно согласиться с правилами сервера.';
       return f;
@@ -554,6 +557,7 @@
           age: Number(data.age),
           about: String(data.about).trim(),
           source: data.source,
+          license: data.license,
           contact: String(data.contact || '').trim(),
           status: 'pending',
           comment: '',
@@ -881,6 +885,7 @@
     config: CONFIG,
     LIMITS,
     APPLICATION_SOURCES,
+    LICENSES,
     ApiError,
     validate,
     on,

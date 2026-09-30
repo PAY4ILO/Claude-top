@@ -553,7 +553,72 @@
 
   function detailsList(a) {
     const row = (k, v) => [h('dt', { text: k }), h('dd', { text: v || '—' })];
-    return h('dl', { class: 'details' }, row('Никнейм', a.nickname), row('Возраст', String(a.age)), row('Откуда узнали', a.source), row('Контакт', a.contact), row('О себе', a.about));
+    return h('dl', { class: 'details' }, row('Никнейм', a.nickname), row('Возраст', String(a.age)), row('Лицензия', Api.LICENSES[a.license] || 'Не указано'), row('Откуда узнали', a.source), row('Контакт', a.contact), row('О себе', a.about));
+  }
+
+  /** Выбор «есть лицензия / нет лицензии» — от него зависит, как игрока добавят на сервер. */
+  function licenseChoice(value) {
+    const option = (key, title, text) =>
+      h(
+        'label',
+        { class: 'choice' },
+        h('input', { type: 'radio', name: 'license', value: key, checked: value === key }),
+        h('span', { class: 'choice__body' }, h('span', { class: 'choice__title', text: title }), h('span', { class: 'choice__text', text }))
+      );
+    const wrap = h(
+      'fieldset',
+      { class: 'field choices' },
+      h('legend', { class: 'field__label', text: 'Лицензия Minecraft' }),
+      h(
+        'div',
+        { class: 'choices__row' },
+        option('premium', 'Есть лицензия', 'Куплена у Mojang или Microsoft. На сервер будете заходить без пароля.'),
+        option('cracked', 'Нет лицензии', 'Играете с пиратского лаунчера. При первом входе на сервер придумаете пароль.')
+      ),
+      h('div', { class: 'field__error', 'aria-live': 'polite' })
+    );
+    wrap.addEventListener('change', () => {
+      wrap.classList.remove('has-error');
+      wrap.querySelector('.field__error').textContent = '';
+    });
+    return wrap;
+  }
+
+  /** Команда для консоли сервера (мод LWL Auth): добавить игрока в вайтлист. */
+  function serverCommand(a) {
+    return '/wl add ' + a.nickname + (a.license === 'cracked' ? ' cracked' : '');
+  }
+
+  function commandBox(a) {
+    const cmd = serverCommand(a);
+    const code = h('code', { class: 'cmd__code', text: cmd });
+    const copyBtn = h('button', { class: 'btn btn--sm btn--secondary', type: 'button' }, icon('copy'), 'Скопировать');
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(cmd);
+        UI.toast('Команда скопирована — вставьте её в консоль сервера.', { type: 'success' });
+      } catch {
+        const range = document.createRange();
+        range.selectNodeContents(code);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        UI.toast('Выделил команду — скопируйте её (Ctrl+C).');
+      }
+    });
+    const why =
+      a.license === 'cracked'
+        ? 'Без лицензии: команда добавит ник в вайтлист и разрешит вход по паролю, даже если такой ник есть у чьей-то лицензии.'
+        : a.license === 'premium'
+          ? 'С лицензией: игрок будет заходить без пароля — сервер проверит его через Mojang.'
+          : 'Игрок не указал, есть ли лицензия. Если он с пиратки, добавьте в конце «cracked».';
+    return h(
+      'div',
+      { class: 'cmd' },
+      h('p', { class: 'cmd__title', text: 'Добавить на сервер' }),
+      h('div', { class: 'cmd__row' }, code, copyBtn),
+      h('p', { class: 'field__hint', text: why + ' Команду можно ввести в игре или в консоли сервера.' })
+    );
   }
 
   function progressActions(a) {
@@ -632,6 +697,7 @@
         field({ label: 'Никнейм в Minecraft', name: 'nickname', value: me.nickname, hint: 'Из профиля — поменять можно там же.', attrs: { readonly: true } }),
         field({ label: 'Возраст', name: 'age', type: 'number', value: draft.age || '', inputmode: 'numeric', attrs: { min: Api.LIMITS.age.min, max: Api.LIMITS.age.max } })
       ),
+      licenseChoice(draft.license),
       h(
         'div',
         { class: 'form__grid' },
@@ -644,9 +710,10 @@
     );
     form.agree.checked = !!draft.agree;
     form.source.value = draft.source || '';
+    form.agree.addEventListener('change', () => form.agree.checked && UI.setFieldError(form, 'agree', ''));
 
     const saveDraft = UI.debounce(() => {
-      safe(() => sessionStorage.setItem(DRAFT, JSON.stringify({ age: form.age.value, source: form.source.value, contact: form.contact.value, about: form.about.value, agree: form.agree.checked })));
+      safe(() => sessionStorage.setItem(DRAFT, JSON.stringify({ age: form.age.value, license: form.license.value, source: form.source.value, contact: form.contact.value, about: form.about.value, agree: form.agree.checked })));
     }, 300);
     form.addEventListener('input', saveDraft);
     form.addEventListener('change', saveDraft);
@@ -654,7 +721,7 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       UI.clearErrors(form);
-      const data = { age: form.age.value, source: form.source.value, contact: form.contact.value, about: form.about.value, agree: form.agree.checked };
+      const data = { age: form.age.value, license: form.license.value, source: form.source.value, contact: form.contact.value, about: form.about.value, agree: form.agree.checked };
       const errors = Api.validate.application(data);
       if (Object.keys(errors).length) return UI.showFormError(form, new Api.ApiError('VALIDATION', null, { fields: errors }));
       const btn = form.querySelector('[type=submit]');
@@ -700,7 +767,7 @@
         'a',
         { class: 'row', href: '#/admin/applications/' + encodeURIComponent(a.id) + (selected !== undefined ? location.hash.replace(/^[^?]*/, '') : ''), 'aria-current': selected ? 'true' : null, dataset: { id: a.id } },
         UI.avatar(a.applicant || { nickname: a.nickname }, 44),
-        h('span', { class: 'row__main' }, h('span', { class: 'row__title' }, h('span', { class: 'row__name', text: a.nickname })), h('span', { class: 'row__text', text: `${a.age} лет · ${a.source} · ${a.about}` })),
+        h('span', { class: 'row__main' }, h('span', { class: 'row__title' }, h('span', { class: 'row__name', text: a.nickname })), h('span', { class: 'row__text', text: `${a.age} лет · ${a.license === 'premium' ? 'лицензия' : a.license === 'cracked' ? 'без лицензии' : a.source} · ${a.about}` })),
         h('span', { class: 'row__side' }, h('span', { text: UI.shortTime(a.createdAt), title: UI.fullDate(a.createdAt) }), a.status !== 'pending' ? pill(a.status) : h('span', { class: 'dot dot--new', title: 'Новая' }))
       )
     );
@@ -915,7 +982,8 @@
             pill(a.status)
           ),
           detailsList(a),
-          a.status === 'pending' ? reviewForm(a, comment) : decisionInfo(a)
+          a.status === 'pending' ? reviewForm(a, comment) : decisionInfo(a),
+          a.status === 'approved' && commandBox(a)
         )
       );
     };
