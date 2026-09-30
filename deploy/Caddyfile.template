@@ -1,0 +1,13 @@
+# Сайт LWL за Caddy — если на машине порты 80/443 уже занимает Caddy (вместо nginx).
+# install.sh подставляет домен, порт сайта (LWL_PORT) и адрес bind (тот же, на котором слушает ваш Caddy;
+# строка bind удаляется, если Caddy слушает все адреса), кладёт файл в /etc/caddy/lwl.caddy
+# и подключает строкой «import /etc/caddy/lwl.caddy» в конце /etc/caddy/Caddyfile.
+# HTTPS-сертификат Caddy получает и продлевает сам. Лимита на размер загрузки у Caddy нет, тело
+# запроса он передаёт потоком, Range — как есть, так что особых настроек для сборок не нужно.
+__DOMAIN__, www.__DOMAIN__ {
+	bind __BIND__
+	reverse_proxy 127.0.0.1:__PORT__ {
+		# Настоящий IP посетителя (сайт берёт его из X-Real-IP при LWL_TRUST_PROXY=1) — для защиты от перебора паролей
+		header_up X-Real-IP {remote_host}
+	}
+}

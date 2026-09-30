@@ -60,6 +60,11 @@ npm test                               # браузер (Playwright) проти�
 Служба `lwl` (Restart=always, автозапуск), nginx → `127.0.0.1:LWL_PORT` (8080 или следующий свободный — выбирает `install.sh`,
 `update.sh` читает из `lwl.env`), HTTPS certbot, бэкап базы каждую ночь в `/var/backups/lwl`.
 Машина владельца общая (домашний сервер с другими программами): установщик не трогает чужие сайты nginx и порты.
+У владельца 80/443 держит **Caddy** (bind на LAN-IP; на 443 Tailscale-IP ещё tailscaled), поэтому `install.sh` сам
+выбирает режим Caddy. В этом режиме он пишет `deploy/Caddyfile.template` в `/etc/caddy/lwl.caddy` с тем же bind
+и добавляет `import` в `/etc/caddy/Caddyfile`, затем делает `systemctl reload caddy`. При ошибке откатывает;
+nginx и certbot не ставит. Сайт берёт IP посетителя из `X-Real-IP` (`clientIp` в `lib/http.js`): в любом прокси
+его нужно выставлять (`header_up X-Real-IP {remote_host}`), иначе лимиты сработают на всех сразу.
 Загрузка сборок идёт потоком (`proxy_request_buffering off` на `…/packs/<id>/file`), скачивание — без буфера nginx, с `Range`.
 Если добавляешь зависимость, переменную окружения или системный пакет — обнови `deploy/install.sh`, `deploy/lwl.env.example` и `deploy/README.md`.
 
