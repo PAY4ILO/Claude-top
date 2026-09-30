@@ -21,11 +21,18 @@
 
 ```bash
 cd minecraft
-./gradlew build          # Windows: gradlew.bat build
+./gradlew build
 ```
 
+В PowerShell на Windows то же самое: `.\gradlew.bat build`.
+
 Готовые файлы: `lwl-skins/build/libs/lwl-skins-1.0.0.jar` и `lwl-auth/build/libs/lwl-auth-1.0.0.jar`.
-Для сборки нужна Java 25 (например, Temurin 25).
+
+Для сборки хватит любой установленной Java 17 или новее. Minecraft 26.3 требует Java 25, и при
+первой сборке Gradle сам скачает её (Eclipse Temurin 25, около 200 МБ) в свою папку. Систему
+это не затрагивает, но первая сборка займёт пару минут, и нужен интернет.
+Если ошибка «Dependency requires at least JVM runtime version 25» всё равно появляется,
+остановите старые процессы Gradle командой `.\gradlew.bat --stop` и запустите сборку снова.
 
 ---
 

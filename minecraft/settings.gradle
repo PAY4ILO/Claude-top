@@ -8,5 +8,10 @@ pluginManagement {
 	}
 }
 
+plugins {
+	// Сам скачивает нужную Java (25), если на компьютере стоит другая.
+	id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
 rootProject.name = 'lwl-mods'
 include 'lwl-skins', 'lwl-auth'
