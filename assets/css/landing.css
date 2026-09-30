@@ -1,0 +1,457 @@
+/* ==========================================================================
+   Лендинг. Макет: фрейм «Frame 1», 1920×4040. Контейнер 1200px (x = 360…1560).
+   Значения в px — прямо из Figma; адаптив ниже.
+   ========================================================================== */
+
+.container {
+  width: min(1200px, calc(100% - 48px));
+  margin-inline: auto;
+}
+
+/* ---------------------------------------------------------------- шапка */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.site-header__bar {
+  background: var(--c-header);
+}
+.site-header__inner {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 110px;
+}
+.site-header__logo {
+  justify-self: start;
+  margin-left: -2px; /* в макете логотип стоит на x = 358 */
+  border-radius: 12px;
+}
+.site-header__logo img {
+  width: 100px;
+  height: 100px;
+}
+.site-nav {
+  display: flex;
+  gap: 89px;
+}
+.site-nav__link {
+  font-size: 24px;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+.site-nav__link:hover {
+  color: var(--c-blue-2);
+}
+.site-header__account {
+  justify-self: end;
+}
+
+.burger {
+  display: none;
+  justify-self: end;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  place-content: center;
+  gap: 6px;
+}
+.burger span {
+  display: block;
+  width: 26px;
+  height: 3px;
+  border-radius: 2px;
+  background: #fff;
+  transition: transform 0.2s var(--ease), opacity 0.2s;
+}
+.burger[aria-expanded='true'] span:nth-child(1) {
+  transform: translateY(9px) rotate(45deg);
+}
+.burger[aria-expanded='true'] span:nth-child(2) {
+  opacity: 0;
+}
+.burger[aria-expanded='true'] span:nth-child(3) {
+  transform: translateY(-9px) rotate(-45deg);
+}
+
+.mobile-menu {
+  display: grid;
+  padding: 8px 20px 20px;
+  background: var(--c-header);
+  border-top: 1px solid var(--c-border);
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.35);
+}
+.mobile-menu[hidden] {
+  display: none;
+}
+.mobile-menu__link {
+  display: flex;
+  align-items: center;
+  min-height: 56px;
+  font-size: 22px;
+  border-bottom: 1px solid var(--c-border);
+}
+.mobile-menu__link:last-child {
+  border-bottom: 0;
+}
+
+/* ----------------------------------------------------------------- герой */
+/* Слой «2025-06-22_21.31.12_2 1»: 1920×760, картинка растянута на 168.96% ширины
+   и отцентрирована — повторяем кадр пропорционально ширине экрана. */
+
+.hero {
+  position: relative;
+  height: clamp(300px, 39.5834vw, 760px);
+  background: #6b8fb3 url(../img/hero.webp) no-repeat 50% 49.52% / clamp(0px, 168.96%, 3244px) auto;
+  overflow: hidden;
+}
+.hero__logo {
+  position: absolute;
+  left: 50%;
+  top: 5.79%; /* 44 / 760 */
+  height: 86.97%; /* 661 / 760 */
+  width: auto;
+  max-width: none;
+  transform: translateX(-50%);
+}
+
+/* ---------------------------------------------------------------- о нас */
+
+.about {
+  padding: 141px 0 84px;
+  scroll-margin-top: 20px;
+}
+.about__title {
+  margin: 0 0 22px -2px;
+  font-size: 64px;
+}
+
+.about-card {
+  --h: auto;
+  --pt: 40px;
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  min-height: var(--h);
+  padding: var(--pt) 40px 40px;
+  border-radius: var(--radius-card);
+  background: var(--c-card);
+}
+.about-card + .about-card {
+  margin-top: 80px;
+}
+.about-card__text {
+  width: 738px;
+  max-width: 100%;
+  /* В Figma стоит «28», но слои текста масштабированы: по ширине строк в рендере макета
+     реальный кегль ≈27.8px. Высота строки в Figma — floor(28 × 1.125) = 31px. */
+  font-size: 27.8px;
+  line-height: 31px;
+  overflow-wrap: break-word;
+}
+.about-card--right .about-card__text {
+  margin-left: auto;
+  text-align: right;
+}
+.about-card__img {
+  position: absolute;
+  max-width: none;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Координаты карточек и картинок — из макета (относительно левого верхнего угла карточки).
+   --pt на 1px больше, чем top текстового слоя в Figma: так совпадает базовая линия в браузере. */
+.about-card--1 { --h: 480px; --pt: 105px; padding-left: 39px; }
+.about-card--1 .about-card__img { left: 830px; top: 75px; width: 330px; height: 330px; }
+
+.about-card--2 { --h: 362px; --pt: 101px; }
+.about-card.about-card--2 { margin-top: 78px; }
+.about-card--2 .about-card__img { left: 72px; top: -29px; width: 308px; height: 391px; }
+
+.about-card--3 { --h: 280px; --pt: 94px; padding-left: 41px; }
+.about-card--3 .about-card__img { left: 778px; top: -135px; width: 323px; height: 415px; }
+
+.about-card--4 { --h: 400px; --pt: 114px; }
+
+.about-card--5 { --h: 320px; --pt: 99px; padding-left: 41px; }
+.about-card--5 .about-card__img { left: 700px; top: -43px; width: 500px; height: 363px; }
+
+.about-card--6 { --h: 240px; --pt: 90px; }
+
+/* ----------------------------------------------------------------- футер */
+
+.site-footer {
+  background: var(--c-card);
+}
+.site-footer__inner {
+  position: relative;
+  min-height: 360px;
+}
+.site-footer__logo {
+  position: absolute;
+  left: -2px;
+  top: 8px;
+  border-radius: 10px;
+}
+.site-footer__logo img {
+  width: 80px;
+  height: 80px;
+}
+.site-footer__slogan {
+  position: absolute;
+  left: 0;
+  top: 98px;
+  width: 283px;
+  font-size: 19.7px; /* в Figma «20», слой масштабирован — см. .about-card__text */
+  line-height: 22px;
+}
+
+.tg-card {
+  position: absolute;
+  right: 0;
+  top: 60px;
+  width: 520px;
+  height: 240px;
+  border-radius: var(--radius-card);
+  background: var(--c-card-dark);
+}
+.tg-card__title {
+  position: absolute;
+  left: 37px;
+  top: 25px;
+  font-size: 36px;
+  line-height: 40px;
+  white-space: nowrap;
+}
+.tg-card__text {
+  position: absolute;
+  left: 39px;
+  top: 75px;
+  width: 328px;
+  font-size: 20px;
+  line-height: 22px;
+  color: var(--c-text-60);
+}
+.tg-card__btn {
+  position: absolute;
+  left: 40px;
+  top: 156px;
+  width: 200px;
+  height: 60px;
+  min-height: 0;
+  padding: 0;
+}
+.tg-card__icon {
+  position: absolute;
+  left: 338px;
+  top: 50px;
+  width: 146px;
+  height: 139px;
+  object-fit: cover;
+}
+
+/* ============================================================ адаптив */
+
+/* Меньше 1248px контейнер 1200 не помещается: карточки перестраиваются в сетку. */
+@media (max-width: 1247px) {
+  .about {
+    padding-top: clamp(56px, 9vw, 141px);
+  }
+  .about-card,
+  .about-card.about-card--2 {
+    --pt: 40px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 32px;
+    min-height: 0;
+    padding: 40px;
+  }
+  .about-card + .about-card,
+  .about-card.about-card--2 {
+    margin-top: 56px;
+  }
+  .about-card__text {
+    width: auto;
+    font-size: clamp(20px, 2.3vw, 27.8px);
+    line-height: 1.12;
+  }
+  .about-card__img {
+    position: static;
+    width: auto !important;
+    height: clamp(180px, 24vw, 300px) !important;
+    max-width: 40vw;
+    object-fit: contain;
+    align-self: end;
+  }
+  /* персонажи, как в макете, выходят за верх карточки и стоят на её нижнем крае */
+  .about-card--2 .about-card__img,
+  .about-card--3 .about-card__img,
+  .about-card--5 .about-card__img {
+    margin: -64px 0 -40px;
+  }
+  .about-card.about-card--2 {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .about-card--1 .about-card__img {
+    height: clamp(150px, 20vw, 260px) !important;
+    align-self: center;
+  }
+  .about-card--4,
+  .about-card--6 {
+    grid-template-columns: 1fr;
+  }
+  .about-card--4 .about-card__text,
+  .about-card--6 .about-card__text {
+    max-width: 738px;
+  }
+
+  .site-footer__inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 32px;
+    min-height: 0;
+    padding: 24px 0 48px;
+  }
+  .site-footer__logo,
+  .site-footer__slogan,
+  .tg-card {
+    position: relative;
+    left: auto;
+    top: auto;
+    right: auto;
+  }
+  .site-footer__logo {
+    display: inline-block;
+    margin-left: -2px;
+  }
+  .site-footer__slogan {
+    margin-top: 10px;
+  }
+  .tg-card {
+    margin-top: 36px;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 860px) {
+  .site-header__inner {
+    height: 64px;
+    grid-template-columns: auto 1fr;
+  }
+  .site-header__logo img {
+    width: 56px;
+    height: 56px;
+  }
+  .site-nav,
+  .site-header__account {
+    display: none;
+  }
+  .burger {
+    display: grid;
+  }
+  :root {
+    --stripe-h: 6px;
+  }
+
+  .about__title {
+    font-size: clamp(40px, 8vw, 64px);
+    margin-bottom: 20px;
+  }
+
+  .site-footer__inner {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .hero {
+    background-image: url(../img/hero-960.webp);
+  }
+  .container {
+    width: calc(100% - 32px);
+  }
+  .about-card,
+  .about-card.about-card--2,
+  .about-card--2 {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 24px 20px;
+  }
+  .about-card + .about-card,
+  .about-card.about-card--2 {
+    margin-top: 28px;
+  }
+  .about-card__text,
+  .about-card--right .about-card__text {
+    font-size: 18px;
+    line-height: 1.4;
+    text-align: left;
+    margin-left: 0;
+  }
+  .about-card__img,
+  .about-card--2 .about-card__img,
+  .about-card--3 .about-card__img,
+  .about-card--5 .about-card__img {
+    order: 2;
+    justify-self: center;
+    width: auto !important;
+    height: auto !important;
+    max-width: 100%;
+    max-height: 260px;
+    margin: 0 0 -24px;
+  }
+  .about-card--1 .about-card__img {
+    height: auto !important;
+    max-height: 180px;
+    margin: 0;
+  }
+
+  .tg-card {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    padding: 24px 20px;
+    display: grid;
+    grid-template-columns: 1fr 88px;
+    grid-template-areas:
+      'title icon'
+      'text  icon'
+      'btn   btn';
+    gap: 10px 16px;
+    align-items: start;
+  }
+  .tg-card__title,
+  .tg-card__text,
+  .tg-card__btn,
+  .tg-card__icon {
+    position: static;
+  }
+  .tg-card__title {
+    grid-area: title;
+    font-size: 28px;
+    line-height: 1.15;
+    white-space: normal;
+  }
+  .tg-card__text {
+    grid-area: text;
+    width: auto;
+    font-size: 17px;
+    line-height: 1.3;
+  }
+  .tg-card__btn {
+    grid-area: btn;
+    width: 100%;
+    margin-top: 10px;
+  }
+  .tg-card__icon {
+    grid-area: icon;
+    width: 88px;
+    height: 84px;
+  }
+}
