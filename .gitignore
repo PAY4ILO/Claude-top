@@ -1,0 +1,4 @@
+node_modules/
+.DS_Store
+# сырой JSON макета большой и пересоздаётся скриптом
+design/figma/file.json
