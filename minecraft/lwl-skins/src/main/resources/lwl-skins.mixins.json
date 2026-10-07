@@ -9,6 +9,9 @@
     "ServerLoginPacketListenerImplMixin",
     "TrackedEntityAccessor"
   ],
+  "client": [
+    "client.SkinManagerLoaderMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

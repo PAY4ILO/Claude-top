@@ -264,8 +264,10 @@ await A.goto(BASE + '/lk.html#/admin/users'); await A.waitForSelector('.row');
 await A.locator('.row', { hasText: '__Hawker__' }).click(); await A.waitForSelector('.split__detail .perms');
 await A.uncheck('.perms input[value=applications]');
 await A.click('.perms button[type=submit]'); await A.waitForSelector('.toast--success');
+// переход по хешу в той же вкладке: меню перестраивается, когда кабинет получит новые права (/api/me/summary)
 await B.goto(BASE + '/lk.html#/'); await B.waitForSelector('.app-nav .nav-link[data-key=tickets]');
-ok('админ без права «Заявки»: раздела нет в меню', (await B.locator('.app-nav .nav-link[data-key=applications]').count()) === 0);
+const appsGone = await B.waitForSelector('.app-nav .nav-link[data-key=applications]', { state: 'detached', timeout: 10000 }).then(() => true, () => false);
+ok('админ без права «Заявки»: раздела нет в меню', appsGone && (await B.locator('.app-nav .nav-link[data-key=tickets]').count()) === 1);
 await B.goto(BASE + '/lk.html#/admin/applications'); await B.waitForSelector('.state__title');
 ok('…и по прямой ссылке — «Нет прав»', (await B.locator('.state__title').innerText()) === 'Нет прав на этот раздел');
 await B.goto(BASE + '/lk.html#/admin/users'); await B.waitForSelector('.row');

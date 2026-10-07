@@ -3,7 +3,7 @@
 	"id": "lwl-skins",
 	"version": "${version}",
 	"name": "LWL Skins",
-	"description": "Скины по нику лицензии и по ссылке для сервера (как SkinsRestorer). Ставится только на сервер.",
+	"description": "Скины по нику лицензии и по ссылке для сервера (как SkinsRestorer). На сервер — обязательно; в сборку игроков — чтобы на пиратке были видны скины других игроков.",
 	"authors": ["LWL"],
 	"license": "MIT",
 	"environment": "*",

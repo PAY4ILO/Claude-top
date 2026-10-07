@@ -17,6 +17,10 @@
 - `deploy/` — установка на Linux (systemd `lwl.service`, nginx, certbot, бэкапы), инструкция `deploy/README.md`.
 - `minecraft/` — Gradle-проект с двумя Fabric-модами для Minecraft 26.3: `lwl-skins` (скины) и `lwl-auth`
   (лицензия/пароль + вайтлист `/wl`). Инструкция `minecraft/README.md`.
+  `lwl-skins` нужен и в клиентской сборке: клиентский миксин `SkinManagerLoaderMixin` (обёртка `unpackTextures`
+  в `SkinManager$1.lambda$load$0`) доверяет текстурам с textures.minecraft.net, когда подпись не проверить
+  (пиратские лаунчеры подменяют authlib/ключи — иначе все чужие скины = Стив). Имя лямбды сверено по клиенту 26.3:
+  при обновлении Minecraft проверь `javap -p -c 'SkinManager$1'`.
 
 ## Правила, о которых легко забыть
 
