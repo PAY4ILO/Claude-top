@@ -38,6 +38,16 @@
   (длинные подписи — через `short` в `navItems()`).
 - **Данных пользователей и секретов в репозитории нет и быть не должно**: база в `LWL_DATA_DIR` (локально `./data/`, в `.gitignore`),
   почта владельца — только в `/etc/lwl/lwl.env` на машине (`LWL_ADMINS`), не в коде.
+- **Коды входа вместо адреса сервера** (`routes/connect.js`, таблица `connect_codes`): игрок адрес **не видит** — ни в кабинете,
+  ни в API (`/api/me/server` отдаёт `server.ready` и `code: {exists, last4, createdAt}`, адрес знают только админы с правом «Сервер»).
+  Код — 12 символов `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, вид `XXXX-XXXX-XXXX`, в базе только `sha256` нормализованного кода
+  и последние 4 символа; целиком отдаётся один раз (`POST /api/me/connect-code`). **Контракт с модом LWL менять нельзя**
+  (мод уже выпущен; клиент — `lwl-mod`, `dev.lwl.connect.SiteClient`, спека `docs/superpowers/specs/2026-10-07-lwl-connect-code-design.md`):
+  `POST /api/connect {code,nickname}` → `{address}` | 404 «Неверный код» (одинаково для ника и кода) | 429 + `Retry-After` | 503 `no_address`;
+  игровой сервер с `Authorization: Bearer LWL_GAME_TOKEN`: `POST /api/game/codes/verify` → `{valid[,message]}`,
+  `POST /api/game/codes {nickname}` → `{code}` | 404, `DELETE /api/game/codes/{ник}` → 204; 401 — неверный токен, 503 — токен не задан.
+  Ошибки этих маршрутов — ровно `{code, message}` (коды строчные: `wrong_code`, `rate_limited`, …). Лимиты `/api/connect`:
+  10/мин по IP (все запросы) и 10 неверных за 10 мин по нику (`limiter.wait` до проверки, `hit` после ошибки). Тесты контракта — `tests/api.test.mjs` («коды: …»).
 - Роли: `user` → `player` (при одобрении заявки, `routes/applications.js`) → `admin`. **Создатель** — не роль в базе
   (там CHECK на три роли), а владелец из `LWL_ADMINS` (`isOwner`): админ со всеми правами, повышается при старте,
   его нельзя понизить/удалить, выдать на него ссылку сброса пароля (иначе админ забрал бы аккаунт). В API — `user.creator`.
@@ -83,6 +93,8 @@ Docker → находит Caddyfile на машине по `docker inspect` (Mou
 его нужно выставлять (`header_up X-Real-IP {remote_host}`), иначе лимиты сработают на всех сразу.
 Загрузка сборок идёт потоком (`proxy_request_buffering off` на `…/packs/<id>/file`), скачивание — без буфера nginx, с `Range`.
 Если добавляешь зависимость, переменную окружения или системный пакет — обнови `deploy/install.sh`, `deploy/lwl.env.example` и `deploy/README.md`.
+`LWL_GAME_TOKEN` (токен игрового сервера для входа по коду) `install.sh` и `update.sh` генерируют сами, если его нет в `lwl.env`,
+и печатают, куда вписать на сервере: `config/lwl/connect.json` → `siteToken` (и `siteUrl`).
 
 ## Что дальше (идеи, о которых говорили)
 

@@ -21,6 +21,18 @@ sed "s#/usr/bin/node#$NODE_BIN#" "$SRC/deploy/lwl-cli" > /usr/local/bin/lwl-cli
 chmod 755 /usr/local/bin/lwl-cli
 systemctl daemon-reload
 
+# Токен игрового сервера для входа по коду (мод LWL) — у старых установок его нет. Тот же код в install.sh.
+if [ -f /etc/lwl/lwl.env ] && ! grep -q '^LWL_GAME_TOKEN=.' /etc/lwl/lwl.env; then
+  GAME_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  if grep -q '^LWL_GAME_TOKEN=' /etc/lwl/lwl.env; then
+    sed -i "s#^LWL_GAME_TOKEN=.*#LWL_GAME_TOKEN=$GAME_TOKEN#" /etc/lwl/lwl.env
+  else
+    printf '\n# Токен игрового сервера: вход по коду (мод LWL, config/lwl/connect.json → siteToken)\nLWL_GAME_TOKEN=%s\n' "$GAME_TOKEN" >>/etc/lwl/lwl.env
+  fi
+  echo "==> Создан токен игрового сервера для входа по коду. Впишите его на Minecraft-сервере"
+  echo "    в config/lwl/connect.json: \"siteToken\": \"$GAME_TOKEN\" (и \"siteUrl\": \"http://127.0.0.1:$PORT\", если сервер на этой машине)."
+fi
+
 echo "==> Перезапуск"
 systemctl restart lwl
 for _ in $(seq 1 20); do

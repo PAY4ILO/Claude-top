@@ -95,6 +95,7 @@ ok('владелец — «Создатель»', (await A.locator('.nav-profile
 
 // настройки сервера и сборка
 await A.goto(BASE + '/lk.html#/server'); await A.waitForSelector('input[name=serverAddress]');
+ok('админ: подпись — игроки адрес не видят', (await A.locator('.field:has(input[name=serverAddress])').innerText()).includes('Игроки его не видят'));
 await A.fill('input[name=serverAddress]', 'play.lwl.example');
 await A.fill('input[name=serverVersion]', '26.3');
 await A.fill('input[name=telegramUrl]', 'https://t.me/lwl_test');
@@ -204,9 +205,26 @@ ok('команда для сервера в одобренной заявке', 
 
 await B.goto(BASE + '/lk.html#/'); await B.waitForSelector('.nav-link[data-key=server]');
 ok('после одобрения — «Игрок» и вкладка «Сервер»', (await B.locator('.nav-profile .role').innerText()) === 'Игрок');
-await B.goto(BASE + '/lk.html#/server'); await B.waitForSelector('.server-address');
-ok('игрок видит адрес сервера', (await B.locator('.server-address code').innerText()) === 'play.lwl.example');
-ok('на карточке адреса нет картинки с персонажем', (await B.locator('.server-card img').count()) === 0);
+// Вход по коду: адреса игрок не видит, мод получает его по коду (POST /api/connect).
+const modConnect = (code) => B.request.post(BASE + '/api/connect', { headers: { 'X-Requested-With': 'lwl', 'Content-Type': 'application/json' }, data: { code, nickname: '__hawker__' } });
+const CODE_RE = /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/;
+await B.goto(BASE + '/lk.html#/server'); await B.waitForSelector('.connect-code'); await settle(B);
+ok('адреса сервера на странице игрока нет', !(await B.content()).includes('play.lwl.example') && !(await B.locator('.server-card').innerText()).includes('Добавить сервер'));
+ok('кода ещё нет → «Получить код»', (await B.locator('.connect-code .btn').innerText()).includes('Получить код'));
+await B.click('.connect-code .btn'); await B.waitForSelector('.connect-code .callout--warning');
+const code1 = await B.locator('.connect-code__value').innerText();
+ok('код показан целиком (XXXX-XXXX-XXXX) с «Скопировать»', CODE_RE.test(code1) && (await B.locator('.connect-code button:has-text("Скопировать")').count()) === 1, code1);
+ok('предупреждение: код показывается один раз', (await B.locator('.connect-code .callout--warning').innerText()).includes('один раз'));
+const r1 = await modConnect(code1.toLowerCase().replace(/-/g, ' '));
+ok('мод получает адрес по этому коду', r1.status() === 200 && (await r1.json()).address === 'play.lwl.example');
+await B.reload(); await B.waitForSelector('.connect-code__value--masked');
+ok('после перезагрузки код не показывается — только последние 4 символа', (await B.locator('.connect-code__value').innerText()) === '••••-••••-' + code1.slice(-4));
+await B.click('.connect-code button:has-text("Новый код")'); await B.waitForSelector('.modal__dialog');
+await B.click('.modal__actions .btn:not(.btn--ghost)'); await B.waitForSelector('.connect-code .callout--warning');
+const code2 = await B.locator('.connect-code__value').innerText();
+ok('«Новый код» (с подтверждением) → другой код, старый не работает', CODE_RE.test(code2) && code2 !== code1 && (await modConnect(code1)).status() === 404 && (await modConnect(code2)).status() === 200);
+ok('шаги: сборка с модом → «Сетевая игра» → «Сервер LWL» → код', /мод LWL[\s\S]*Сервер LWL[\s\S]*код/.test(await B.locator('.how-list').innerText()));
+ok('на карточке входа нет картинки с персонажем', (await B.locator('.server-card img').count()) === 0);
 ok('подсказка для пирата: /register', (await B.locator('.how-list').innerText()).includes('/register'));
 ok('подсказка админа', (await B.locator('.server-note').innerText()).includes('Сначала установите сборку'));
 const href = await B.locator('.pack a[download]').getAttribute('href');
@@ -242,6 +260,10 @@ await B.waitForSelector('.app-nav:not([hidden])');
 /* ================================================================ роли */
 await A.goto(BASE + '/lk.html#/admin/users'); await A.waitForSelector('.row');
 await A.locator('.row', { hasText: '__Hawker__' }).click(); await A.waitForSelector('.segmented');
+ok('карточка игрока: код входа есть (без самого кода)', (await A.locator('.split__detail').innerText()).includes('••••-••••-' + code2.slice(-4)) && !(await A.locator('.split__detail').innerText()).includes(code2));
+await A.click('.split__detail button:has-text("Отозвать код входа")'); await A.click('.modal__actions .btn--danger');
+await A.waitForSelector('.split__detail button:has-text("Отозвать код входа")', { state: 'detached' });
+ok('админ отозвал код → по нему больше не пускает', (await modConnect(code2)).status() === 404);
 await A.click('.segmented button[data-role=admin]'); await A.click('.modal__actions .btn:not(.btn--ghost)');
 await A.waitForSelector('.split__detail .role--admin');
 ok('админ выдал роль «Админ»', true);

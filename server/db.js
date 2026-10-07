@@ -148,6 +148,18 @@ const MIGRATIONS = [
 
   UPDATE settings SET value = 'https://t.me/LWL_MINECRAFT' WHERE key = 'telegramUrl' AND value = '';
   `,
+
+  /* 3: личный код входа на Minecraft-сервер (мод LWL) — вместо адреса сервера */
+  `
+  -- Код в открытом виде не хранится: только sha256 нормализованного кода (12 символов, без дефисов)
+  -- и последние 4 символа — чтобы показать игроку «••••-••••-ABCD».
+  CREATE TABLE connect_codes (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    last4 TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(file) {

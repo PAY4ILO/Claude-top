@@ -119,16 +119,26 @@ export default function register(router, s) {
     return { role: user.role, unreadMessages: s.chat.unreadMessagesFor(user), applicationStatus: app ? app.status : null };
   });
 
-  // Вкладка «Сервер»: адрес, как заходить, сборки. Только для игроков (и админов).
+  // Вкладка «Сервер»: код входа, как заходить, сборки. Только для игроков (и админов).
+  // Адрес сервера сюда НЕ входит — игрок его не видит, мод получает адрес по коду (routes/connect.js).
   router.add('GET', '/api/me/server', (ctx) => {
     const user = need.player(ctx);
     const all = s.settings.all();
     const app = db.prepare("SELECT * FROM applications WHERE user_id = ? AND status = 'approved' ORDER BY updated_at DESC LIMIT 1").get(user.id);
     const packs = db.prepare('SELECT * FROM packs WHERE published = 1 AND file_name IS NOT NULL ORDER BY sort, created_at').all();
     return {
-      server: { address: all.serverAddress, version: all.serverVersion, note: all.serverNote, telegramUrl: all.telegramUrl, discordUrl: all.discordUrl },
+      server: { ready: !!all.serverAddress.trim(), version: all.serverVersion, note: all.serverNote, telegramUrl: all.telegramUrl, discordUrl: all.discordUrl },
       me: { nickname: user.nickname, role: user.role, license: app ? app.license : null, approvedAt: app ? app.updated_at : null },
+      code: s.codes.info(user.id),
       packs: packs.map(s.packView),
     };
+  });
+
+  // Новый личный код входа: старый перестаёт работать. Код целиком отдаётся только здесь, один раз.
+  router.add('POST', '/api/me/connect-code', (ctx) => {
+    const user = need.player(ctx);
+    need.rate(ctx, 'connect-code', 10, 600_000, 'Слишком часто. Новый код можно будет создать через несколько минут.');
+    const code = s.codes.issue(user.id);
+    return { code, info: s.codes.info(user.id) };
   });
 }

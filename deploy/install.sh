@@ -90,6 +90,17 @@ if [ ! -f /etc/lwl/lwl.env ]; then
 else
   echo "Уже есть — оставляю как есть."
 fi
+# Токен игрового сервера для входа по коду (мод LWL) — создаём, если его ещё нет. Тот же код в update.sh.
+GAME_TOKEN_NEW=""
+if ! grep -q '^LWL_GAME_TOKEN=.' /etc/lwl/lwl.env; then
+  GAME_TOKEN_NEW="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  if grep -q '^LWL_GAME_TOKEN=' /etc/lwl/lwl.env; then
+    sed -i "s#^LWL_GAME_TOKEN=.*#LWL_GAME_TOKEN=$GAME_TOKEN_NEW#" /etc/lwl/lwl.env
+  else
+    printf '\n# Токен игрового сервера: вход по коду (мод LWL, config/lwl/connect.json → siteToken)\nLWL_GAME_TOKEN=%s\n' "$GAME_TOKEN_NEW" >>/etc/lwl/lwl.env
+  fi
+  echo "Создан токен игрового сервера (LWL_GAME_TOKEN) — куда его вписать, скажу в конце."
+fi
 chown root:lwl /etc/lwl/lwl.env
 chmod 640 /etc/lwl/lwl.env
 
@@ -232,3 +243,14 @@ cat <<DONE
   Обновление:     git pull && sudo ./deploy/update.sh
   Бэкапы базы:    /var/backups/lwl (каждую ночь, хранятся 14 дней)
 DONE
+
+# Вход по коду: Minecraft-сервер с модом LWL проверяет коды игроков у сайта этим токеном.
+GAME_TOKEN="$(sed -n 's/^LWL_GAME_TOKEN=//p' /etc/lwl/lwl.env | tail -n 1)"
+cat <<TOKEN
+
+Вход на сервер по коду (мод LWL). На Minecraft-сервере в config/lwl/connect.json впишите:
+  "siteUrl": "http://127.0.0.1:$PORT"   (если Minecraft на этой машине; иначе "https://$DOMAIN")
+  "siteToken": "$GAME_TOKEN"
+и перезапустите сервер. Токен лежит в /etc/lwl/lwl.env (LWL_GAME_TOKEN): sudo grep LWL_GAME_TOKEN /etc/lwl/lwl.env
+Адрес сервера для мода — в кабинете: «Сервер» → «Адрес сервера» (игроки его не видят).
+TOKEN

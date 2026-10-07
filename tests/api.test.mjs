@@ -14,10 +14,12 @@ import { loadConfig } from '../server/config.js';
 let app;
 let base;
 let dataDir;
+const GAME_TOKEN = 'game-token-for-tests-0123456789';
 
 before(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-api-'));
-  const config = loadConfig({ LWL_DATA_DIR: dataDir, LWL_ADMINS: 'owner@example.com', LWL_FAST_HASH: '1', LWL_MAX_UPLOAD_MB: '1' });
+  // LWL_TRUST_PROXY — чтобы тесты кодов входа подставляли разные IP (X-Real-IP) и не упирались в лимит по IP.
+  const config = loadConfig({ LWL_DATA_DIR: dataDir, LWL_ADMINS: 'owner@example.com', LWL_FAST_HASH: '1', LWL_MAX_UPLOAD_MB: '1', LWL_GAME_TOKEN: GAME_TOKEN, LWL_TRUST_PROXY: '1' });
   app = createApp(config);
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
@@ -286,14 +288,230 @@ test('удаление заявок и обращений; «прочитано�
   await carol.del('/api/me', { password: 'Passw0rd1' });
 });
 
-test('настройки сервера: админ задаёт, игрок видит, пользователь — нет', async () => {
+test('настройки сервера: админ задаёт, игрок видит всё, кроме адреса', async () => {
   const bad = await owner.put('/api/admin/settings', { telegramUrl: 'javascript:alert(1)' });
   assert.equal(bad.status, 422);
   await owner.put('/api/admin/settings', { serverAddress: 'play.lwl.example', serverVersion: '26.3', telegramUrl: 'https://t.me/lwl' });
   assert.equal((await client().get('/api/settings')).data.telegramUrl, 'https://t.me/lwl');
+  assert.equal((await owner.get('/api/admin/settings')).data.settings.serverAddress, 'play.lwl.example', 'админ адрес видит');
   const info = await alice.get('/api/me/server');
-  assert.equal(info.data.server.address, 'play.lwl.example');
+  assert.equal(info.data.server.version, '26.3');
+  assert.equal(info.data.server.ready, true);
   assert.equal(info.data.me.license, 'cracked');
+  assert.equal(info.data.server.address, undefined);
+  assert.ok(!JSON.stringify(info.data).includes('play.lwl.example'), 'адреса сервера в ответе игроку нет');
+  assert.ok(!JSON.stringify((await client().get('/api/settings')).data).includes('play.lwl.example'));
+});
+
+/* ------------------------------------------------------------ коды входа (мод LWL) */
+
+const CODE_RE = /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/;
+let ipSeq = 0;
+/** Запрос как от мода: заголовки контракта и свой IP (X-Real-IP), чтобы не упереться в лимит по IP. */
+async function mod(method, url, body, { token, ip, omit = [], headers = {} } = {}) {
+  ipSeq++;
+  const h = Object.assign({ 'X-Requested-With': 'lwl', 'Content-Type': 'application/json', 'X-Real-IP': ip || `10.0.${ipSeq >> 8}.${ipSeq & 255}` }, headers);
+  if (token) h.Authorization = 'Bearer ' + token;
+  for (const k of omit) delete h[k];
+  const res = await fetch(base + url, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await res.text();
+  return { status: res.status, data: text ? JSON.parse(text) : null, text, headers: res.headers };
+}
+const connect = (code, nickname, opts) => mod('POST', '/api/connect', { code, nickname }, opts);
+const game = (method, url, body, token = GAME_TOKEN) => mod(method, url, body, { token });
+const WRONG = { code: 'wrong_code', message: 'Неверный код' };
+let aliceCode;
+
+test('коды: вкладка «Сервер» — код создаёт только игрок, целиком он приходит один раз', async () => {
+  const before = (await alice.get('/api/me/server')).data;
+  assert.deepEqual(before.code, { exists: false, last4: null, createdAt: null });
+  assert.equal((await bob.post('/api/me/connect-code')).status, 403, 'пользователю без роли «Игрок» — нельзя');
+  assert.equal((await client().post('/api/me/connect-code')).status, 401);
+
+  const created = await alice.post('/api/me/connect-code');
+  assert.equal(created.status, 200);
+  aliceCode = created.data.code;
+  assert.match(aliceCode, CODE_RE);
+  assert.equal(created.data.info.exists, true);
+  assert.equal(created.data.info.last4, aliceCode.slice(-4));
+
+  const after = (await alice.get('/api/me/server')).data;
+  assert.equal(after.code.exists, true);
+  assert.equal(after.code.last4, aliceCode.slice(-4));
+  assert.ok(after.code.createdAt > 0);
+  const plain = aliceCode.replace(/-/g, '');
+  assert.ok(!JSON.stringify(after).includes(plain) && !JSON.stringify(after).includes(aliceCode), 'потом код целиком больше не отдаётся');
+  const rows = app.db.prepare('SELECT * FROM connect_codes').all();
+  assert.equal(rows.length, 1);
+  assert.ok(!JSON.stringify(rows).includes(plain), 'в базе кода в открытом виде нет');
+  assert.match(rows[0].code_hash, /^[0-9a-f]{64}$/);
+
+  const aliceId = (await alice.get('/api/auth/me')).data.user.id;
+  const card = (await owner.get(`/api/admin/users/${aliceId}`)).data;
+  assert.equal(card.connectCode.exists, true, 'админ видит, что код есть');
+  assert.equal(card.connectCode.last4, aliceCode.slice(-4));
+});
+
+test('коды: POST /api/connect — адрес по коду в любом виде, 404 одинаковый для ника и кода', async () => {
+  const plain = aliceCode.replace(/-/g, '');
+  for (const [code, nick] of [
+    [aliceCode, 'Alice_07'],
+    [plain.toLowerCase(), 'alice_07'],
+    [` ${plain.slice(0, 4)} ${plain.slice(4, 8)} ${plain.slice(8)} `, 'ALICE_07'],
+    [`${plain.slice(0, 4)} ${plain.slice(4, 8)}–${plain.slice(8).toLowerCase()}`, ' Alice_07 '], // неразрывный пробел и тире из буфера
+  ]) {
+    const r = await connect(code, nick);
+    assert.equal(r.status, 200, `${JSON.stringify(code)} / ${nick}: ${r.text}`);
+    assert.deepEqual(r.data, { address: 'play.lwl.example' });
+  }
+
+  const other = plain.slice(0, 11) + (plain[11] === 'A' ? 'B' : 'A');
+  const wrong = await connect(other, 'Alice_07');
+  assert.equal(wrong.status, 404);
+  assert.deepEqual(wrong.data, WRONG, 'ошибка — ровно { code, message }');
+  for (const [code, nick] of [
+    [aliceCode, 'no_such_player'], // нет такого ника
+    [aliceCode, 'Bob_Builder2'], // есть, но не игрок и кода нет
+    ['ABC', 'Alice_07'], // не код
+    ['', ''],
+  ]) {
+    const r = await connect(code, nick);
+    assert.equal(r.status, 404, `${code} / ${nick}`);
+    assert.deepEqual(r.data, WRONG, 'неизвестный ник и неверный код неотличимы');
+  }
+  assert.deepEqual((await mod('POST', '/api/connect', {})).data, WRONG, 'без полей — то же');
+
+  // Заголовки контракта обязательны.
+  assert.equal((await mod('POST', '/api/connect', { code: aliceCode, nickname: 'Alice_07' }, { omit: ['X-Requested-With'] })).status, 403);
+  assert.equal((await mod('POST', '/api/connect', { code: aliceCode, nickname: 'Alice_07' }, { headers: { 'Content-Type': 'text/plain' } })).status, 400);
+  assert.equal((await mod('GET', '/api/connect')).status, 405);
+
+  // Админ тоже может войти по коду.
+  const ownerCode = (await owner.post('/api/me/connect-code')).data.code;
+  assert.equal((await connect(ownerCode, 'owner_1')).status, 200);
+
+  // Адрес не задан — 503 no_address (только для верного кода).
+  await owner.put('/api/admin/settings', { serverAddress: '' });
+  assert.equal((await alice.get('/api/me/server')).data.server.ready, false);
+  const none = await connect(aliceCode, 'Alice_07');
+  assert.equal(none.status, 503);
+  assert.deepEqual(none.data, { code: 'no_address', message: 'Адрес сервера ещё не указан' });
+  assert.equal((await connect(other, 'Alice_07')).status, 404);
+  await owner.put('/api/admin/settings', { serverAddress: 'play.lwl.example' });
+});
+
+test('коды: 429 + Retry-After — по IP (10 в минуту) и по нику (10 неверных за 10 минут)', async () => {
+  for (let i = 0; i < 10; i++) assert.equal((await connect('AAAA-AAAA-AAAA', 'someone', { ip: '10.200.0.1' })).status, 404);
+  const ip = await connect(aliceCode, 'Alice_07', { ip: '10.200.0.1' });
+  assert.equal(ip.status, 429);
+  assert.equal(ip.data.code, 'rate_limited');
+  assert.ok(ip.data.message);
+  const ipWait = Number(ip.headers.get('retry-after'));
+  assert.ok(ipWait > 0 && ipWait <= 60, 'Retry-After в секундах: ' + ip.headers.get('retry-after'));
+  assert.equal((await connect(aliceCode, 'Alice_07', { ip: '10.200.0.2' })).status, 200, 'другой IP не задет');
+
+  // Удачные входы ник не блокируют.
+  for (let i = 0; i < 12; i++) assert.equal((await connect(aliceCode, 'Alice_07')).status, 200);
+
+  // 10 неверных кодов для ника — дальше ник закрыт даже с верным кодом и с других IP.
+  const ownerCode = (await owner.post('/api/me/connect-code')).data.code;
+  for (let i = 0; i < 10; i++) assert.equal((await connect('AAAA-AAAA-AAAA', 'Owner_1')).status, 404);
+  const nick = await connect(ownerCode, 'OWNER_1');
+  assert.equal(nick.status, 429);
+  const nickWait = Number(nick.headers.get('retry-after'));
+  assert.ok(nickWait > 60 && nickWait <= 600, 'Retry-After: ' + nickWait);
+  assert.equal((await connect(aliceCode, 'Alice_07')).status, 200, 'другие ники не задеты');
+});
+
+test('коды: игровой сервер — токен, verify, новый код, отзыв', async () => {
+  // Токен: нет, неверный — 401.
+  for (const token of [undefined, 'wrong-token', GAME_TOKEN + 'x']) {
+    const r = await mod('POST', '/api/game/codes/verify', { nickname: 'Alice_07', code: aliceCode }, { token });
+    assert.equal(r.status, 401, String(token));
+    assert.equal(r.data.code, 'unauthorized');
+    assert.ok(r.data.message);
+  }
+  assert.equal((await mod('POST', '/api/game/codes', { nickname: 'Alice_07' }, { token: 'nope' })).status, 401);
+  assert.equal((await mod('DELETE', '/api/game/codes/Alice_07', undefined, { token: 'nope' })).status, 401);
+  assert.equal((await mod('POST', '/api/game/codes/verify', { nickname: 'Alice_07', code: aliceCode }, { token: GAME_TOKEN, omit: ['X-Requested-With'] })).status, 403);
+
+  // verify
+  assert.deepEqual((await game('POST', '/api/game/codes/verify', { nickname: 'alice_07', code: aliceCode.replace(/-/g, ' ').toLowerCase() })).data, { valid: true });
+  for (const [nickname, code] of [
+    ['Alice_07', 'AAAA-AAAA-AAAA'],
+    ['no_such_player', aliceCode],
+    ['Bob_Builder2', aliceCode],
+    ['Alice_07', ''],
+  ]) {
+    const r = await game('POST', '/api/game/codes/verify', { nickname, code });
+    assert.equal(r.status, 200);
+    assert.equal(r.data.valid, false, `${nickname} / ${code}`);
+    assert.ok(typeof r.data.message === 'string' && r.data.message.length > 5, 'сайт объясняет, почему нет');
+  }
+
+  // Новый код с сервера: старый перестаёт работать.
+  const given = await game('POST', '/api/game/codes', { nickname: 'ALICE_07' });
+  assert.equal(given.status, 200);
+  assert.match(given.data.code, CODE_RE);
+  assert.notEqual(given.data.code, aliceCode);
+  assert.equal((await game('POST', '/api/game/codes/verify', { nickname: 'Alice_07', code: aliceCode })).data.valid, false, 'старый код');
+  assert.equal((await connect(aliceCode, 'Alice_07')).status, 404);
+  assert.equal((await connect(given.data.code, 'Alice_07')).status, 200);
+  assert.equal((await alice.get('/api/me/server')).data.code.last4, given.data.code.slice(-4));
+  // …и из кабинета тоже: новый код — старый недействителен.
+  const mine = (await alice.post('/api/me/connect-code')).data.code;
+  assert.equal((await game('POST', '/api/game/codes/verify', { nickname: 'Alice_07', code: given.data.code })).data.valid, false);
+  assert.deepEqual((await game('POST', '/api/game/codes/verify', { nickname: 'Alice_07', code: mine })).data, { valid: true });
+
+  for (const nickname of ['no_such_player', 'Bob_Builder2', '']) {
+    const r = await game('POST', '/api/game/codes', { nickname });
+    assert.equal(r.status, 404, nickname);
+    assert.equal(r.data.code, 'player_not_found');
+    assert.ok(r.data.message);
+  }
+
+  // Отзыв: 204 без тела, код больше не проходит; повторный отзыв — тоже 204.
+  const del = await game('DELETE', '/api/game/codes/alice_07');
+  assert.equal(del.status, 204);
+  assert.equal(del.text, '');
+  assert.equal((await game('POST', '/api/game/codes/verify', { nickname: 'Alice_07', code: mine })).data.valid, false);
+  assert.equal((await connect(mine, 'Alice_07')).status, 404);
+  assert.equal((await alice.get('/api/me/server')).data.code.exists, false);
+  assert.equal((await game('DELETE', '/api/game/codes/Alice_07')).status, 204);
+  assert.equal((await game('DELETE', `/api/game/codes/${encodeURIComponent('нет такого')}`)).status, 204);
+
+  // Админ отзывает код в «Людях» (право «Люди»).
+  aliceCode = (await alice.post('/api/me/connect-code')).data.code;
+  const aliceId = (await alice.get('/api/auth/me')).data.user.id;
+  assert.equal((await bob.del(`/api/admin/users/${aliceId}/connect-code`)).status, 403);
+  assert.equal((await owner.del(`/api/admin/users/${aliceId}/connect-code`)).status, 204);
+  assert.equal((await owner.get(`/api/admin/users/${aliceId}`)).data.connectCode.exists, false);
+  assert.equal((await connect(aliceCode, 'Alice_07')).status, 404);
+  aliceCode = (await alice.post('/api/me/connect-code')).data.code;
+});
+
+test('коды: без LWL_GAME_TOKEN маршруты сервера отвечают 503', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-notoken-'));
+  const app2 = createApp(loadConfig({ LWL_DATA_DIR: dir, LWL_FAST_HASH: '1' }));
+  await new Promise((r) => app2.server.listen(0, '127.0.0.1', r));
+  const saved = base;
+  base = `http://127.0.0.1:${app2.server.address().port}`;
+  try {
+    for (const [method, url, body] of [
+      ['POST', '/api/game/codes/verify', { nickname: 'Alice_07', code: 'AAAA-AAAA-AAAA' }],
+      ['POST', '/api/game/codes', { nickname: 'Alice_07' }],
+      ['DELETE', '/api/game/codes/Alice_07'],
+    ]) {
+      const r = await mod(method, url, body, { token: GAME_TOKEN });
+      assert.equal(r.status, 503, url);
+      assert.ok(r.data.code && r.data.message);
+    }
+    assert.equal((await connect('AAAA-AAAA-AAAA', 'Alice_07')).status, 404, 'клиентский маршрут работает');
+  } finally {
+    base = saved;
+    await app2.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('сборки: загрузка, проверка файла, публикация, скачивание с докачкой', async () => {
@@ -338,6 +556,8 @@ test('удаление аккаунта удаляет заявки и пере�
   assert.equal((await alice.del('/api/me', { password: 'Passw0rd1' })).status, 204);
   assert.equal((await owner.get('/api/applications?status=all')).data.items.length, 0);
   assert.equal((await owner.get('/api/conversations?status=all')).data.items.length, 0);
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS n FROM connect_codes c LEFT JOIN users u ON u.id = c.user_id WHERE u.id IS NULL').get().n, 0, 'код входа удалён вместе с аккаунтом');
+  assert.equal((await connect(aliceCode, 'Alice_07')).status, 404);
 });
 
 /* ------------------------------------------------------------ автовайтлист (RCON) */

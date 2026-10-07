@@ -348,9 +348,15 @@
       },
     },
 
-    /** Вкладка «Сервер» (игроки и админы): адрес, как зайти, сборки. */
+    /**
+     * Вкладка «Сервер» (игроки и админы): код входа, как зайти, сборки.
+     * Адреса сервера здесь нет — игрок его не видит, мод LWL получает адрес по личному коду.
+     */
     server: {
+      /** { server: { ready, version, note, … }, me, code: { exists, last4, createdAt }, packs } */
       info: () => http('GET', '/me/server'),
+      /** Новый личный код (старый перестаёт работать): { code: 'XXXX-XXXX-XXXX', info }. Целиком код приходит только здесь. */
+      newCode: () => http('POST', '/me/connect-code'),
     },
 
     /** Ссылки для страниц сайта (Telegram, Discord); запрашиваются один раз. */
@@ -369,6 +375,8 @@
         /** Права админа — меняет только создатель. permissions — список ключей из permissionCatalog. */
         setPermissions: (id, permissions) => http('PUT', `/admin/users/${enc(id)}/permissions`, { permissions }).then((d) => (emit('users'), d.user)),
         resetLink: (id) => http('POST', `/admin/users/${enc(id)}/reset-link`).then((d) => (emit('users'), d)),
+        /** Отозвать личный код входа на сервер: мод и сервер перестанут его принимать. */
+        revokeCode: (id) => http('DELETE', `/admin/users/${enc(id)}/connect-code`).then(() => (emit('users'), true)),
         remove: (id) => http('DELETE', `/admin/users/${enc(id)}`).then(() => (emit('users'), emit('applications'), emit('conversations'), true)),
         onChange: (cb) => on('users', cb),
       },

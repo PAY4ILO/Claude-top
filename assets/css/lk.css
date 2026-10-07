@@ -1311,14 +1311,78 @@ body:not(.lk--app) .app {
 
 /* ---------------------------------------------------------------- вкладка «Сервер» */
 
-.server-address {
-  margin-bottom: 8px;
-}
 .cmd__code--big {
   padding: 14px 18px;
   font-size: 20px;
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+/* Личный код входа (вместо адреса сервера) */
+.connect-code {
+  display: grid;
+  gap: 10px;
+}
+.connect-code__label {
+  color: var(--c-text-3);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.connect-code__value {
+  font-size: 24px;
+  letter-spacing: 0.14em;
+  text-align: center;
+  white-space: nowrap;
+}
+.connect-code__value--masked {
+  color: var(--c-text-2);
+  user-select: none;
+}
+.connect-code .callout {
+  margin-top: 4px;
+}
+.server-card > .callout {
+  margin: 0 0 14px;
+}
+.connect-code__empty {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+}
+.connect-code__icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-md);
+  background: var(--c-info-bg);
+  color: var(--c-blue-2);
+}
+.connect-code__icon svg {
+  width: 26px;
+  height: 26px;
+}
+.connect-code__title {
+  font-size: 17px;
+  font-weight: 700;
+}
+.connect-code__text {
+  margin-top: 2px;
+  color: var(--c-text-2);
+  font-size: 15px;
+}
+.callout--warning {
+  background: var(--c-warning-bg);
+}
+.callout--warning > svg {
+  color: var(--c-warning);
 }
 .how-list {
   display: grid;
@@ -2136,6 +2200,20 @@ body:not(.lk--app) .app {
 @media (max-width: 640px) {
   .choices__row {
     grid-template-columns: 1fr;
+  }
+  .connect-code__empty {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    padding: 16px;
+  }
+  .connect-code__empty .btn,
+  .connect-code .cmd__row .btn {
+    grid-column: 1 / -1;
+    flex: 1 1 100%;
+  }
+  .connect-code__value {
+    font-size: 20px;
+    letter-spacing: 0.08em;
   }
   .hero-card {
     grid-template-columns: minmax(0, 1fr);

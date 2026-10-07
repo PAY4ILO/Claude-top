@@ -41,6 +41,31 @@ export const randomToken = (bytes = 32) => crypto.randomBytes(bytes).toString('b
 export const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 export const newId = (prefix) => prefix + '_' + crypto.randomBytes(9).toString('base64url');
 
+/** Сравнение секретов без утечки по времени (и по длине): сравниваются хеши одинаковой длины. */
+export function safeEqual(a, b) {
+  const x = crypto.createHash('sha256').update(String(a)).digest();
+  const y = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(x, y);
+}
+
+/* ---------------------------------------------------------------- коды входа на сервер */
+
+// Без похожих 0/O и 1/I. Тот же алфавит и та же нормализация — в моде LWL (dev.lwl.connect.ConnectCode).
+export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export const CODE_LENGTH = 12;
+
+/** Любой регистр, с дефисами и пробелами или без (в том числе неразрывные пробелы и тире из буфера обмена). */
+export const normalizeCode = (raw) => String(raw == null ? '' : raw).replace(/[\s\p{Zs}\p{Pd}]/gu, '').toUpperCase();
+export const isCode = (normalized) => normalized.length === CODE_LENGTH && [...normalized].every((c) => CODE_ALPHABET.includes(c));
+/** XXXX-XXXX-XXXX */
+export const formatCode = (normalized) => normalized.match(/.{1,4}/g).join('-');
+
+export function generateCode() {
+  let code = '';
+  for (let i = 0; i < CODE_LENGTH; i++) code += CODE_ALPHABET[crypto.randomInt(CODE_ALPHABET.length)];
+  return code;
+}
+
 /**
  * Простой ограничитель частоты в памяти процесса (сайт работает одним процессом).
  * hit(key, max, windowMs) → сколько секунд ждать (0 — можно).
@@ -60,6 +85,13 @@ export class RateLimiter {
     }
     b.count++;
     return b.count > max ? Math.ceil((b.resetAt - now) / 1000) : 0;
+  }
+
+  /** Сколько секунд ждать, не считая саму попытку (когда считаются только неудачи: wait() до, hit() после ошибки). */
+  wait(key, max) {
+    const b = this.buckets.get(key);
+    const now = Date.now();
+    return b && b.resetAt > now && b.count >= max ? Math.ceil((b.resetAt - now) / 1000) : 0;
   }
 
   sweep() {

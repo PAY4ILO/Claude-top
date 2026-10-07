@@ -15,6 +15,7 @@ import registerApplications from './routes/applications.js';
 import registerChats from './routes/chats.js';
 import registerAdmin from './routes/admin.js';
 import registerPacks from './routes/packs.js';
+import registerConnect from './routes/connect.js';
 
 const SESSION_COOKIE = 'lwl_session';
 const DAY = 24 * 3600 * 1000;
@@ -196,6 +197,7 @@ export function createApp(config) {
   registerChats(router, s);
   registerAdmin(router, s);
   registerPacks(router, s);
+  registerConnect(router, s);
 
   async function handleApi(req, res, url) {
     const m = router.match(req.method, url.pathname);

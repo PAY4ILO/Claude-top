@@ -72,6 +72,7 @@
     eyeView: 'M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z|C12 12 3',
     plus: 'M12 5v14M5 12h14',
     minus: 'M5 12h14',
+    key: 'C7.5 15.5 4|M10.4 12.6L20 3|M16.5 6.5l3 3|M14 9l2 2',
   };
 
   function icon(name, size) {

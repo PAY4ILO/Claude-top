@@ -35,6 +35,9 @@ export function loadConfig(env = process.env) {
       password: env.LWL_RCON_PASSWORD || '',
       timeoutMs: Number(env.LWL_RCON_TIMEOUT_MS || 5000),
     },
+    // Токен игрового сервера для /api/game/… (мод LWL: config/lwl/connect.json → siteToken).
+    // Пусто — эти маршруты отвечают 503, и сервер не может проверять коды входа.
+    gameToken: String(env.LWL_GAME_TOKEN || '').trim(),
     staticRoot: ROOT,
     // Для тестов: ускорить хеширование паролей (никогда не включать на проде)
     fastHash: env.LWL_FAST_HASH === '1',

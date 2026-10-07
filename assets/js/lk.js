@@ -4,7 +4,7 @@
  * «Создатель» (me.creator) — владелец из LWL_ADMINS: админ со всеми правами, раздаёт права другим админам.
  * Что видит админ, решают его права (me.permissions): разделы без прав скрыты из меню.
  *   #/                          — главная (пользователь/игрок | админ)
- *   #/server                    — «Сервер»: адрес, как зайти, сборки (игрок); у админа — управление
+ *   #/server                    — «Сервер»: код входа, как зайти, сборки (игрок); у админа — управление
  *   #/application               — моя заявка (анкета, если заявки ещё нет)
  *   #/apply                     — анкета
  *   #/support                   — чат с тех поддержкой
@@ -154,7 +154,7 @@
         { key: 'profile', href: '#/profile', icon: 'user', label: 'Профиль' },
       ].filter(Boolean);
     }
-    // «Сервер» (адрес, сборки) открывается, когда заявку одобрили и выдали роль «Игрок».
+    // «Сервер» (код входа, сборки) открывается, когда заявку одобрили и выдали роль «Игрок».
     return [
       { key: 'home', href: '#/', icon: 'home', label: 'Главная' },
       isPlayer() && { key: 'server', href: '#/server', icon: 'server', label: 'Сервер' },
@@ -413,7 +413,7 @@
   }
 
   function renderPlayerHome() {
-    const p = page({ title: `Привет, ${me.nickname}!`, sub: isPlayer() ? 'Вы игрок LWL: адрес сервера и сборки — во вкладке «Сервер».' : 'Здесь ваша заявка на сервер и связь с администрацией.', key: 'home' });
+    const p = page({ title: `Привет, ${me.nickname}!`, sub: isPlayer() ? 'Вы игрок LWL: код для входа и сборки — во вкладке «Сервер».' : 'Здесь ваша заявка на сервер и связь с администрацией.', key: 'home' });
     const statusBox = h('div', {}, h('div', { class: 'hero-card hero-card--loading skeleton', 'aria-hidden': 'true' }));
     const supportMeta = h('span', { class: 'tile__meta' }, 'Открыть чат', icon('arrowRight'));
     const support = h(
@@ -467,7 +467,7 @@
     if (!a && isPlayer()) {
       state = 'approved';
       title = 'Вы игрок LWL';
-      text = 'Адрес сервера, как зайти и сборки для лаунчеров — во вкладке «Сервер».';
+      text = 'Код для входа, как зайти и сборки для лаунчеров — во вкладке «Сервер».';
       actions.append(h('a', { class: 'btn btn--lg', href: '#/server' }, icon('server'), 'Как зайти на сервер'));
     } else if (!a) {
       title = 'Подайте заявку на сервер';
@@ -479,7 +479,7 @@
       actions.append(h('a', { class: 'btn btn--secondary', href: '#/application', text: 'Подробнее' }));
     } else if (a.status === 'approved') {
       title = 'Добро пожаловать на LWL!';
-      text = a.comment || `Заявка одобрена ${UI.fullDate(a.updatedAt)}. Адрес сервера и сборки — во вкладке «Сервер».`;
+      text = a.comment || `Заявка одобрена ${UI.fullDate(a.updatedAt)}. Код для входа и сборки — во вкладке «Сервер».`;
       UI.append(actions, [
         isPlayer() && h('a', { class: 'btn', href: '#/server' }, icon('server'), 'Как зайти на сервер'),
         telegramUrl() && h('a', { class: 'btn btn--secondary', href: telegramUrl(), target: '_blank', rel: 'noopener noreferrer' }, 'Наш Telegram', icon('external')),
@@ -633,7 +633,7 @@
   }
 
   function callout(kind, iconName, title, quoteOrText, extra) {
-    const isQuote = kind !== 'info' || extra;
+    const isQuote = (kind !== 'info' && kind !== 'warning') || extra;
     return h(
       'div',
       { class: 'callout callout--' + kind, role: 'status' },
@@ -1200,7 +1200,7 @@
         stateBlock({
           iconName: 'lock',
           title: 'Вкладка откроется после одобрения заявки',
-          text: 'Когда администраторы одобрят анкету, вы станете игроком — здесь появятся адрес сервера и сборки.',
+          text: 'Когда администраторы одобрят анкету, вы станете игроком — здесь появятся код для входа на сервер и сборки.',
           action: h('a', { class: 'btn', href: '#/application', text: 'Моя заявка' }),
         })
       )
@@ -1210,7 +1210,7 @@
   async function renderServer() {
     // Админ с правом «Сервер» смотрит «как видят игроки»; остальные админы — просто игроки здесь.
     const preview = can('server');
-    const p = page({ title: 'Сервер', sub: 'Адрес, как зайти и сборки для лаунчеров.', key: 'server', actions: preview && h('a', { class: 'btn btn--secondary', href: '#/server' }, icon('back'), 'К управлению') });
+    const p = page({ title: 'Сервер', sub: 'Код для входа, как зайти и сборки для лаунчеров.', key: 'server', actions: preview && h('a', { class: 'btn btn--secondary', href: '#/server' }, icon('back'), 'К управлению') });
     const load = async () => {
       clear(p.body).append(skeleton(3, 'skeleton-list--tall'));
       let data;
@@ -1221,14 +1221,17 @@
       }
       UI.append(clear(p.body), [
         preview && h('div', { class: 'card card--pad card--flush' }, callout('info', 'eyeView', 'Так эту вкладку видят игроки', 'Ник, лицензия и подсказки «как зайти» — у каждого игрока свои.')),
-        serverCard(data.server, data.me),
+        serverCard(data.server, data.me, data.code),
         packsSection(data.packs),
       ]);
     };
     await load();
   }
 
-  function serverCard(server, mine) {
+  // Код целиком сервер отдаёт один раз — держим его до перезагрузки страницы, чтобы он не пропал при перерисовке.
+  let freshCode = null; // { userId, code }
+
+  function serverCard(server, mine, code) {
     const nick = mine.nickname;
     const login =
       mine.license === 'premium'
@@ -1237,8 +1240,9 @@
           ? ['Придумайте пароль на сервере', `Заходите под ником ${nick}. При первом входе напишите в чат /register <пароль> <пароль>, дальше каждый раз — /login <пароль>.`]
           : ['Заходите под своим ником', `Ник — ${nick}. С лицензией пароль не нужен; без неё при первом входе напишите /register <пароль> <пароль>.`];
     const how = [
-      ['Установите сборку', 'Скачайте её ниже и импортируйте в свой лаунчер.'],
-      ['Добавьте сервер', `«Сетевая игра» → «Добавить сервер» → адрес ${server.address || 'выше'}.`],
+      ['Установите сборку', 'Скачайте её ниже и импортируйте в лаунчер — мод LWL уже внутри.'],
+      ['«Сетевая игра» → «Сервер LWL»', 'Кнопка «Сервер LWL» — справа вверху на экране «Сетевая игра».'],
+      ['Введите код', 'Вставьте код с этой страницы и нажмите «Подключиться». Мод запомнит его — потом вводить не нужно.'],
       login,
     ];
     return h(
@@ -1247,11 +1251,15 @@
       h(
         'div',
         { class: 'card-head' },
-        h('div', {}, h('div', { class: 'card-title-row' }, h('h2', { class: 'card-title', text: 'Адрес сервера' }), server.version && h('span', { class: 'pill', text: 'Minecraft ' + server.version })), h('p', { class: 'card-sub', text: 'Скопируйте и вставьте в игре: «Сетевая игра» → «Добавить сервер».' }))
+        h(
+          'div',
+          {},
+          h('div', { class: 'card-title-row' }, h('h2', { class: 'card-title', text: 'Вход на сервер' }), server.version && h('span', { class: 'pill', text: 'Minecraft ' + server.version })),
+          h('p', { class: 'card-sub', text: 'Адрес сервера не нужен: заходите по личному коду через мод LWL.' })
+        )
       ),
-      server.address
-        ? h('div', { class: 'cmd__row server-address' }, h('code', { class: 'cmd__code cmd__code--big', text: server.address }), copyButton(server.address, 'Адрес сервера скопирован.'))
-        : callout('info', 'clock', 'Адрес скоро появится', 'Администрация ещё не указала адрес сервера.'),
+      !server.ready && callout('info', 'clock', 'Сервер скоро откроется', 'Администрация ещё не указала адрес сервера. Код можно получить уже сейчас — войти получится, когда сервер откроется.'),
+      connectCodeBox(code),
       h(
         'ol',
         { class: 'how-list' },
@@ -1260,6 +1268,64 @@
       server.note && h('p', { class: 'server-note', text: server.note }),
       (server.telegramUrl || server.discordUrl) && h('div', { class: 'actions-row' }, server.telegramUrl && extLink(server.telegramUrl, 'Telegram'), server.discordUrl && extLink(server.discordUrl, 'Discord'))
     );
+  }
+
+  /** Личный код входа: «Получить код» → код целиком (один раз) → потом только последние 4 символа и «Новый код». */
+  function connectCodeBox(initial) {
+    const box = h('div', { class: 'connect-code' });
+    const draw = (info) => {
+      const fresh = freshCode && freshCode.userId === me.id && info.exists && freshCode.code.endsWith(info.last4) ? freshCode.code : null;
+      if (fresh) {
+        const copy = copyButton(fresh, 'Код скопирован — вставьте его в игре.');
+        copy.classList.remove('btn--sm'); // рядом с крупным кодом — обычная кнопка, как «Новый код»
+        UI.append(clear(box), [
+          h('p', { class: 'connect-code__label', text: 'Ваш код' }),
+          h('div', { class: 'cmd__row' }, h('code', { class: 'cmd__code cmd__code--big connect-code__value', text: fresh }), copy),
+          callout('warning', 'alert', 'Код показывается один раз — скопируйте его', 'Мод запомнит код сам; потеряете — создайте новый, старый перестанет работать.'),
+        ]);
+        return;
+      }
+      if (info.exists) {
+        const again = h('button', { class: 'btn btn--secondary', type: 'button' }, icon('retry'), 'Новый код');
+        again.addEventListener('click', () => create(again, true));
+        UI.append(clear(box), [
+          h('p', { class: 'connect-code__label', text: 'Ваш код' }),
+          h(
+            'div',
+            { class: 'cmd__row' },
+            h('code', { class: 'cmd__code cmd__code--big connect-code__value connect-code__value--masked', text: '••••-••••-' + info.last4, 'aria-label': 'Код, последние символы ' + info.last4 }),
+            again
+          ),
+          h('p', { class: 'field__hint', text: `Создан ${UI.fullDate(info.createdAt)}. Целиком код показывается только при создании — мод его помнит. Потеряли — создайте новый.` }),
+        ]);
+        return;
+      }
+      const get = h('button', { class: 'btn', type: 'button' }, icon('key'), 'Получить код');
+      get.addEventListener('click', () => create(get, false));
+      UI.append(clear(box), [
+        h(
+          'div',
+          { class: 'connect-code__empty' },
+          h('span', { class: 'connect-code__icon' }, icon('key')),
+          h('div', { class: 'connect-code__intro' }, h('p', { class: 'connect-code__title', text: 'Получите код для входа' }), h('p', { class: 'connect-code__text', text: 'Код личный: по нему мод пускает на сервер именно вас. Никому его не показывайте.' })),
+          get
+        ),
+      ]);
+    };
+    async function create(btn, again) {
+      if (again && !(await UI.confirm({ title: 'Создать новый код?', text: 'Старый код сразу перестанет работать — в игре нужно будет ввести новый.', confirmText: 'Создать' }))) return;
+      UI.setLoading(btn, true);
+      try {
+        const r = await Api.server.newCode();
+        freshCode = { userId: me.id, code: r.code };
+        draw(r.info);
+      } catch (err) {
+        UI.toast(err.message, { type: 'error' });
+        UI.setLoading(btn, false);
+      }
+    }
+    draw(initial);
+    return box;
   }
 
   function packsSection(packs) {
@@ -1293,7 +1359,7 @@
   function renderServerAdmin() {
     const p = page({
       title: 'Сервер',
-      sub: 'Адрес, подсказки и сборки — это видят игроки во вкладке «Сервер».',
+      sub: 'Адрес, подсказки и сборки для вкладки «Сервер». Адрес игроки не видят — мод получает его по коду.',
       key: 'server',
       actions: h('a', { class: 'btn btn--secondary', href: '#/server?preview=1' }, icon('eyeView'), 'Как видят игроки'),
     });
@@ -1304,7 +1370,7 @@
       h(
         'div',
         { class: 'stack' },
-        section('Настройки сервера', 'Адрес для подключения, версия и подсказка, которую увидят игроки.', settingsBox),
+        section('Настройки сервера', 'Адрес для мода, версия и подсказка, которую увидят игроки.', settingsBox),
         section('Автодобавление в вайтлист', 'Сайт сам добавляет одобренных игроков на Minecraft-сервер (через RCON).', rconBox),
         h(
           'section',
@@ -1337,7 +1403,7 @@
         h(
           'div',
           { class: 'form__grid' },
-          field({ label: 'Адрес сервера', name: 'serverAddress', value: st.serverAddress, placeholder: 'play.lwl.ru или 203.0.113.5:25565', hint: 'IP или домен; порт — если он не 25565.', attrs: { autocapitalize: 'off', spellcheck: 'false' } }),
+          field({ label: 'Адрес сервера', name: 'serverAddress', value: st.serverAddress, placeholder: 'play.lwl.ru или 203.0.113.5:25565', hint: 'Игроки его не видят: мод получает его по коду. IP или домен; порт — если он не 25565.', attrs: { autocapitalize: 'off', spellcheck: 'false' } }),
           field({ label: 'Версия Minecraft', name: 'serverVersion', value: st.serverVersion, placeholder: '26.3' })
         ),
         field({ label: 'Подсказка для игроков', name: 'serverNote', textarea: true, value: st.serverNote, placeholder: 'Например: сначала установите сборку; правила — в Telegram; ивенты по субботам…' }),
@@ -1623,6 +1689,7 @@
           roleEditor(u),
           me.creator && u.role === 'admin' && !u.creator && permissionsEditor(u, data.permissionCatalog),
           can('users') && !protectedTarget && resetLinkBox(u),
+          can('users') && !protectedTarget && data.connectCode && data.connectCode.exists && connectCodeAdminBox(u, data.connectCode),
           !self && !protectedTarget && can('users') && can('delete') && h('div', { class: 'actions-row' }, h('button', { class: 'btn btn--ghost', type: 'button', onclick: () => removeUser(u) }, icon('trash'), 'Удалить аккаунт'))
         )
       );
@@ -1639,7 +1706,7 @@
       'section',
       { class: 'review' },
       h('h3', { class: 'review__title', text: 'Роль' }),
-      h('p', { class: 'field__hint', text: 'Пользователь — заявка и поддержка. Игрок — плюс вкладка «Сервер» с адресом и сборками (выдаётся сама при одобрении заявки). Админ — эта панель, в пределах выданных прав.' })
+      h('p', { class: 'field__hint', text: 'Пользователь — заявка и поддержка. Игрок — плюс вкладка «Сервер» с кодом входа и сборками (выдаётся сама при одобрении заявки). Админ — эта панель, в пределах выданных прав.' })
     );
     if (u.creator) {
       box.append(h('p', { class: 'field__hint', text: 'Это создатель сайта (задан в LWL_ADMINS на сервере): у него все права, его нельзя понизить или удалить.' }));
@@ -1758,6 +1825,35 @@
       h('p', { class: 'field__hint', text: 'Писем сайт не отправляет: если человек забыл пароль, создайте ссылку и пришлите её ему (Telegram, Discord).' }),
       h('div', { class: 'actions-row' }, btn),
       out
+    );
+  }
+
+  /** Личный код входа на сервер: админ видит, что он есть (без самого кода), и может его отозвать. */
+  function connectCodeAdminBox(u, info) {
+    const btn = h('button', { class: 'btn btn--secondary', type: 'button' }, icon('lock'), 'Отозвать код входа');
+    btn.addEventListener('click', async () => {
+      const ok = await UI.confirm({
+        title: `Отозвать код ${u.nickname}?`,
+        text: 'По этому коду больше не пустит ни мод, ни сервер. Новый код игрок создаст сам во вкладке «Сервер».',
+        confirmText: 'Отозвать',
+        danger: true,
+      });
+      if (!ok) return;
+      UI.setLoading(btn, true);
+      try {
+        await Api.admin.users.revokeCode(u.id);
+        UI.toast('Код входа отозван.', { type: 'success' });
+      } catch (err) {
+        UI.toast(err.message, { type: 'error' });
+        UI.setLoading(btn, false);
+      }
+    });
+    return h(
+      'section',
+      { class: 'review' },
+      h('h3', { class: 'review__title', text: 'Вход на сервер' }),
+      h('p', { class: 'field__hint', text: `Личный код ••••-••••-${info.last4}, создан ${UI.fullDate(info.createdAt)}. Отзовите, если код попал к чужим или игрок об этом просит.` }),
+      h('div', { class: 'actions-row' }, btn)
     );
   }
 

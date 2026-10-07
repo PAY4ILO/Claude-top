@@ -66,7 +66,7 @@ export default function register(router, s) {
     const u = s.getUser(ctx.params.id);
     if (!u) throw fail.notFound('Пользователь не найден.');
     const apps = db.prepare('SELECT * FROM applications WHERE user_id = ? ORDER BY created_at DESC').all(u.id);
-    return { user: userRow(u), applications: apps.map(s.applicationView), permissionCatalog: PERMISSIONS };
+    return { user: userRow(u), applications: apps.map(s.applicationView), permissionCatalog: PERMISSIONS, connectCode: s.codes.info(u.id) };
   });
 
   /**
@@ -142,6 +142,17 @@ export default function register(router, s) {
     return { url: `${base}/lk.html#/reset/${token}`, expiresAt: now + RESET_TTL };
   });
 
+  // Отозвать личный код входа на сервер (routes/connect.js): мод больше не получит по нему адрес,
+  // сервер не пустит. Новый код игрок создаст сам во вкладке «Сервер».
+  router.add('DELETE', '/api/admin/users/:id/connect-code', (ctx) => {
+    const admin = need.perm(ctx, 'users');
+    const u = s.getUser(ctx.params.id);
+    if (!u) throw fail.notFound('Пользователь не найден.');
+    guardTarget(admin, u, 'отзывать код входа');
+    s.codes.revoke(u.id);
+    return null;
+  });
+
   /* ------------------------------------------------------------ настройки */
 
   router.add('GET', '/api/admin/settings', (ctx) => {
@@ -183,7 +194,8 @@ export default function register(router, s) {
     }
   });
 
-  // Для главной страницы: ссылки на соцсети. Адрес сервера сюда не входит — его видят только игроки.
+  // Для главной страницы: ссылки на соцсети. Адрес сервера сюда не входит — его не видит никто, кроме админов
+  // с правом «Сервер»; мод получает его по личному коду игрока (POST /api/connect).
   router.add('GET', '/api/settings', () => {
     const all = s.settings.all();
     return { telegramUrl: all.telegramUrl, discordUrl: all.discordUrl };
