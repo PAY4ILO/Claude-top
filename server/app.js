@@ -16,6 +16,7 @@ import registerChats from './routes/chats.js';
 import registerAdmin from './routes/admin.js';
 import registerPacks from './routes/packs.js';
 import registerConnect from './routes/connect.js';
+import registerAttachments from './routes/attachments.js';
 
 const SESSION_COOKIE = 'lwl_session';
 const DAY = 24 * 3600 * 1000;
@@ -26,6 +27,7 @@ export const ROLE_LABELS = { user: 'Пользователь', player: 'Игро
 
 export function createApp(config) {
   fs.mkdirSync(path.join(config.dataDir, 'packs'), { recursive: true });
+  fs.mkdirSync(path.join(config.dataDir, 'attachments'), { recursive: true });
   useFastHashing(config.fastHash);
   const db = openDb(path.join(config.dataDir, 'lwl.db'));
   const limiter = new RateLimiter();
@@ -125,6 +127,7 @@ export function createApp(config) {
     db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now);
     db.prepare('DELETE FROM password_resets WHERE expires_at < ?').run(now);
     db.prepare('DELETE FROM login_failures WHERE updated_at < ?').run(now - DAY);
+    s.attachments.sweep();
   }, 3600 * 1000);
   cleanupTimer.unref();
 
@@ -195,6 +198,7 @@ export function createApp(config) {
   registerMe(router, s);
   registerApplications(router, s);
   registerChats(router, s);
+  registerAttachments(router, s);
   registerAdmin(router, s);
   registerPacks(router, s);
   registerConnect(router, s);

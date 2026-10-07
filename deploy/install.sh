@@ -241,7 +241,7 @@ cat <<DONE
   Статус и логи:  systemctl status lwl   |   journalctl -u lwl -f
   Команды:        sudo lwl-cli users   (role, reset-link, backup)
   Обновление:     git pull && sudo ./deploy/update.sh
-  Бэкапы базы:    /var/backups/lwl (каждую ночь, хранятся 14 дней)
+  Бэкапы:         /var/backups/lwl — база и файлы из чата (каждую ночь, хранятся 14 дней)
 DONE
 
 # Вход по коду: Minecraft-сервер с модом LWL проверяет коды игроков у сайта этим токеном.

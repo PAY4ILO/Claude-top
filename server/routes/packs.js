@@ -10,7 +10,8 @@ import path from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { tx } from '../db.js';
-import { HANDLED, fail } from '../lib/http.js';
+import { contentDisposition, parseRange, sendFile } from '../lib/files.js';
+import { fail } from '../lib/http.js';
 import { newId, randomToken } from '../lib/security.js';
 import { LAUNCHERS, LIMITS } from '../lib/validate.js';
 
@@ -178,45 +179,19 @@ export default function register(router, s) {
     } catch {
       throw fail.notFound('Файл сборки пропал с сервера. Сообщите администрации.');
     }
-    let start = 0;
-    let end = stat.size - 1;
-    let status = 200;
-    const range = /^bytes=(\d*)-(\d*)$/.exec(String(ctx.req.headers.range || ''));
-    if (ctx.req.headers.range) {
-      if (!range || (!range[1] && !range[2])) {
-        ctx.res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` });
-        ctx.res.end();
-        return HANDLED;
-      }
-      if (range[1]) {
-        start = Number(range[1]);
-        if (range[2]) end = Math.min(Number(range[2]), stat.size - 1);
-      } else {
-        start = Math.max(stat.size - Number(range[2]), 0);
-      }
-      if (start > end || start >= stat.size) {
-        ctx.res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` });
-        ctx.res.end();
-        return HANDLED;
-      }
-      status = 206;
-    }
-    if (start === 0) db.prepare('UPDATE packs SET downloads = downloads + 1 WHERE id = ?').run(p.id);
-    const ascii = p.file_name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
-    const headers = {
-      'Content-Type': EXTENSIONS[path.extname(p.file_name).toLowerCase()] || 'application/octet-stream',
-      'Content-Disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(p.file_name)}`,
-      'Content-Length': end - start + 1,
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'private, no-store',
-    };
-    if (status === 206) headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`;
-    ctx.res.writeHead(status, headers);
-    if (ctx.req.method === 'HEAD') {
-      ctx.res.end();
-      return HANDLED;
-    }
-    fs.createReadStream(file, { start, end }).pipe(ctx.res);
-    return HANDLED;
+    const range = parseRange(ctx.req.headers.range, stat.size);
+    // Скачивание считаем один раз — по запросу с начала файла (докачка не в счёт).
+    if (range && range.start === 0) db.prepare('UPDATE packs SET downloads = downloads + 1 WHERE id = ?').run(p.id);
+    return sendFile(
+      ctx,
+      file,
+      stat.size,
+      {
+        'Content-Type': EXTENSIONS[path.extname(p.file_name).toLowerCase()] || 'application/octet-stream',
+        'Content-Disposition': contentDisposition('attachment', p.file_name),
+        'Cache-Control': 'private, no-store',
+      },
+      range
+    );
   });
 }

@@ -1,17 +1,14 @@
 /** Профиль: ник, аватар, пароль, удаление; «в сети»; счётчики для меню; вкладка «Сервер» игрока. */
 import { tx } from '../db.js';
+import { sniffImage } from '../lib/files.js';
 import { HANDLED, fail } from '../lib/http.js';
 import { hashPassword, verifyPassword } from '../lib/security.js';
 import { LIMITS, validate } from '../lib/validate.js';
 
 const str = (v) => (typeof v === 'string' ? v : '');
 
-// Сигнатуры файлов: верим содержимому, а не тому, что прислал браузер.
-const IMAGE_MAGIC = [
-  ['image/jpeg', (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
-  ['image/png', (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))],
-  ['image/webp', (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP'],
-];
+// Аватар — только JPG, PNG или WebP; тип узнаём по содержимому, а не по тому, что прислал браузер.
+const AVATAR_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
 
 export default function register(router, s) {
   const { db, need, views } = s;
@@ -37,9 +34,9 @@ export default function register(router, s) {
       if (!m) throw fail.validation({ avatar: 'Поддерживаются JPG, PNG и WebP.' });
       const data = Buffer.from(m[2], 'base64');
       if (data.length > LIMITS.avatarBytes) throw fail.validation({ avatar: 'Картинка слишком большая.' });
-      const real = IMAGE_MAGIC.find(([, test]) => data.length > 12 && test(data));
-      if (!real) throw fail.validation({ avatar: 'Это не похоже на картинку.' });
-      image = { mime: real[0], data };
+      const real = data.length > 12 && sniffImage(data);
+      if (!real || !AVATAR_MIMES.includes(real.mime)) throw fail.validation({ avatar: 'Это не похоже на картинку.' });
+      image = { mime: real.mime, data };
     }
     tx(db, () => {
       if (nickname !== undefined) db.prepare('UPDATE users SET nickname = ? WHERE id = ?').run(str(nickname).trim(), user.id);
@@ -90,8 +87,10 @@ export default function register(router, s) {
     const password = str(ctx.body.password);
     if (!password) throw fail.validation({ password: 'Введите пароль.' });
     if (!(await verifyPassword(password, user.password_hash))) throw fail.credentials('Неверный пароль.', { password: 'Неверный пароль.' });
-    // Заявки, переписка, сессии и аватар удаляются каскадом (ON DELETE CASCADE).
+    // Заявки, переписка, сессии и аватар удаляются каскадом (ON DELETE CASCADE), файлы из чата — с диска.
+    const files = s.attachments.idsOfPlayer(user.id);
     db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+    s.attachments.removeFiles(files);
     s.endSession(ctx);
     return null;
   });

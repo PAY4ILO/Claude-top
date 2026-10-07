@@ -73,6 +73,8 @@
     plus: 'M12 5v14M5 12h14',
     minus: 'M5 12h14',
     key: 'C7.5 15.5 4|M10.4 12.6L20 3|M16.5 6.5l3 3|M14 9l2 2',
+    paperclip: 'M20.5 11.3l-8.4 8.4a5.3 5.3 0 0 1-7.5-7.5l8.6-8.6a3.6 3.6 0 0 1 5 5l-8.6 8.6a1.8 1.8 0 0 1-2.5-2.5l7.9-7.9',
+    image: 'M3.5 5h17v14h-17z|C9 10 1.8|M20.5 15.5l-5-5L5 19',
   };
 
   function icon(name, size) {
@@ -152,13 +154,13 @@
     const titleId = labelledBy || 'modal-title-' + Math.random().toString(36).slice(2, 8);
     const dialog = h(
       'div',
-      { class: 'modal__dialog' + (size === 'sm' ? ' modal__dialog--sm' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
+      { class: 'modal__dialog' + (size ? ' modal__dialog--' + size : ''), role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId },
       closable && h('button', { class: 'modal__close', type: 'button', 'aria-label': 'Закрыть', onclick: () => close() }, icon('close')),
       title && h('h2', { class: 'modal__title', id: titleId, text: title }),
       content
     );
     const backdrop = h('div', { class: 'modal__backdrop' });
-    const root = h('div', { class: 'modal' }, backdrop, dialog);
+    const root = h('div', { class: 'modal' + (size ? ' modal--' + size : '') }, backdrop, dialog);
     if (closable) backdrop.addEventListener('click', () => close());
     document.body.append(root);
     document.body.classList.add('has-modal');
@@ -204,6 +206,33 @@
       if (target) target.focus();
     });
     return { close, dialog, root };
+  }
+
+  /**
+   * Фото крупно: тёмный фон, картинка по размеру экрана, «Скачать» и «Открыть в новой вкладке».
+   * Закрывается крестиком, Esc и кликом мимо фото. src — что показать (можно blob:), href — ссылка на файл.
+   */
+  function lightbox({ src, name, href, meta }) {
+    const stage = h('div', { class: 'lightbox__stage' }, h('img', { class: 'lightbox__img', src, alt: name || 'Фото' }));
+    const content = h(
+      'div',
+      { class: 'lightbox' },
+      stage,
+      h(
+        'div',
+        { class: 'lightbox__bar' },
+        meta && h('span', { class: 'lightbox__meta', text: meta }),
+        h(
+          'div',
+          { class: 'lightbox__actions' },
+          h('a', { class: 'btn btn--sm btn--secondary', href, download: name || '' }, icon('download'), 'Скачать'),
+          h('a', { class: 'btn btn--sm btn--ghost', href, target: '_blank', rel: 'noopener' }, icon('external'), 'Открыть')
+        )
+      )
+    );
+    const m = modal({ title: name || 'Фото', content, size: 'lightbox' });
+    stage.addEventListener('click', (e) => e.target === stage && m.close());
+    return m;
   }
 
   /** Подтверждение действия. Возвращает Promise<boolean>. */
@@ -357,6 +386,15 @@
   const dateFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' });
   const dateYearFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
   const fullFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  /** Размер файла по-русски: 512 Б, 24 КБ, 3,4 МБ, 1,2 ГБ. */
+  function fileSize(b) {
+    if (typeof b !== 'number' || !(b >= 0)) return '';
+    if (b < 1024) return b + ' Б';
+    if (b < 1024 * 1024) return Math.max(1, Math.round(b / 1024)) + ' КБ';
+    const [n, unit] = b < 1024 ** 3 ? [b / 1024 / 1024, ' МБ'] : [b / 1024 ** 3, ' ГБ'];
+    return n.toFixed(n < 100 ? 1 : 0).replace(/\.0$/, '').replace('.', ',') + unit;
+  }
 
   function startOfDay(ts) {
     const d = new Date(ts);
@@ -624,6 +662,7 @@
     modal,
     closeModals,
     confirm: confirmDialog,
+    lightbox,
     field,
     counter,
     setFieldError,
@@ -632,6 +671,7 @@
     passwordStrength,
     setLoading,
     plural,
+    fileSize,
     dayLabel,
     shortTime,
     relative,

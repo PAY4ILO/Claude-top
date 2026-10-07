@@ -53,6 +53,12 @@ export const validate = {
     if (v.length > LIMITS.message.max) return `Максимум ${LIMITS.message.max} символов.`;
     return '';
   },
+  /** Подпись к фото или файлу в чате: может быть пустой. */
+  caption(v) {
+    v = str(v).trim();
+    if (v.length > LIMITS.message.max) return `Подпись — максимум ${LIMITS.message.max} символов.`;
+    return '';
+  },
   application(d) {
     const f = {};
     const age = Number(d.age);

@@ -13,7 +13,8 @@
   (и события `emit(...)`, чтобы другие экраны/вкладки обновились).
 - `server/` — Node.js без зависимостей: `app.js` (сессии, права `need.user/admin/perm/creator/player`, настройки, роутинг),
   `routes/*.js` (API по разделам), `db.js` (SQLite, миграции), `lib/` (http, пароли scrypt, проверки, `permissions.js` —
-  права админов, `rcon.js` — консоль Minecraft-сервера), `cli.js` (команды админа).
+  права админов, `rcon.js` — консоль Minecraft-сервера, `files.js` — картинка ли файл по первым байтам, безопасное имя,
+  отдача с `Range`), `cli.js` (команды админа).
 - `deploy/` — установка на Linux (systemd `lwl.service`, nginx, certbot, бэкапы), инструкция `deploy/README.md`.
 - `minecraft/` — Gradle-проект с двумя Fabric-модами для Minecraft 26.3: `lwl-skins` (скины) и `lwl-auth`
   (лицензия/пароль + вайтлист `/wl`). Инструкция `minecraft/README.md`.
@@ -60,6 +61,20 @@
   `LWL_RCON_*` в `lwl.env`); результат — в `applications.whitelist_*`, в карточке — «Повторить» или команда вручную.
   Ответ мода проверяется по тексту («добавлен в вайтлист») — меняешь тексты `/wl` в `lwl-auth`, поправь `whitelistAdd`.
 - Чат: «прочитано» (две галочки) — из `conversation_reads`, поле `peerReadAt` у обращения.
+- **Фото и файлы в чате** (`routes/attachments.js`, таблица `attachments`, миграция 4): каждый файл — отдельное сообщение,
+  `messages.text` — подпись (может быть пустой); новое сообщение с файлом или текстом — только через `s.chat.addMessage`
+  (автоответ, открытие закрытого обращения, «прочитано»). Загрузка — `PUT /api/conversations/:id/attachments` сырым телом
+  (`{raw: true}`), заголовки `X-File-Name`/`X-Caption` URL-кодированные, `X-Client-Id` — повтор без дубля; лимит
+  `LWL_CHAT_MAX_FILE_MB` (25, приходит в кабинет как `conversation.maxFileBytes`), 30 файлов в минуту на человека.
+  На диске — `LWL_DATA_DIR/attachments/<id>` (не имя от пользователя). **Картинка — только PNG/JPEG/GIF/WebP по первым
+  байтам** (`sniffImage`, там же ширина/высота с учётом поворота из EXIF) — отдаётся `inline`; всё остальное, в том числе
+  SVG и HTML, — `application/octet-stream` + `Content-Disposition: attachment`, всегда `nosniff`. Скачивание
+  `GET /api/attachments/:id` — доступ как к обращению (`canAccess`), `Range`, `private, no-cache` + ETag (304).
+  Удаляешь обращение или аккаунт — сначала собери id файлов (`s.attachments.idsOfConversation/idsOfPlayer`), потом
+  DELETE, потом `s.attachments.removeFiles` (каскад сотрёт строки, но не файлы); остальное подчищает `sweep()` при старте
+  и раз в час. Подпись идёт заголовком: длиннее `Api.chats.CAPTION_HEADER_MAX` (после кодирования) кабинет шлёт
+  обычным сообщением перед файлами — nginx режет заголовки больше 8 КБ. В кабинете (`lk-chat.js`) все сообщения
+  уходят по одному через `sendChain` (порядок как при отправке), неотправленные рисуются после серверных.
 - Ник «Игрока» сам не меняется (он в вайтлисте Minecraft-сервера) — только через поддержку.
 - Сброс пароля без почты: запрос → админ в «Людях» выдаёт одноразовую ссылку `/lk.html#/reset/<токен>` (24 ч), или `sudo lwl-cli reset-link НИК`.
 
@@ -82,7 +97,7 @@ npm test                               # браузер (Playwright) проти�
 
 `sudo ./deploy/install.sh домен почта` на Ubuntu/Debian; обновление — `git pull && sudo ./deploy/update.sh`.
 Служба `lwl` (Restart=always, автозапуск), nginx → `127.0.0.1:LWL_PORT` (8080 или следующий свободный — выбирает `install.sh`,
-`update.sh` читает из `lwl.env`), HTTPS certbot, бэкап базы каждую ночь в `/var/backups/lwl`.
+`update.sh` читает из `lwl.env`), HTTPS certbot, бэкап базы и файлов из чата каждую ночь в `/var/backups/lwl`.
 Машина владельца общая (домашний сервер с другими программами): установщик не трогает чужие сайты nginx и порты.
 У владельца 80/443 держит **Caddy в Docker** (контейнер `caddy`, образ `caddy:2`, host-сеть, bind на LAN-IP;
 на 443 Tailscale-IP ещё tailscaled), поэтому `install.sh` сам выбирает режим Caddy; nginx и certbot не ставит.
@@ -91,7 +106,9 @@ npm test                               # браузер (Playwright) проти�
 Docker → находит Caddyfile на машине по `docker inspect` (Mounts), дописывает блок между `# >>> Сайт LWL`/`# <<< Сайт LWL`
 на месте (не `mv`: файл примонтирован) и делает `docker exec … caddy reload`. При ошибке откатывает. Сайт берёт IP посетителя из `X-Real-IP` (`clientIp` в `lib/http.js`): в любом прокси
 его нужно выставлять (`header_up X-Real-IP {remote_host}`), иначе лимиты сработают на всех сразу.
-Загрузка сборок идёт потоком (`proxy_request_buffering off` на `…/packs/<id>/file`), скачивание — без буфера nginx, с `Range`.
+Загрузка сборок и файлов в чат идёт потоком (`proxy_request_buffering off` на `…/packs/<id>/file` и
+`…/conversations/<id>/attachments`), скачивание сборок — без буфера nginx, с `Range`. Бэкап (`deploy/backup.sh`) —
+база и папка-снимок `attachments-ДАТА` (неизменившиеся файлы — жёсткими ссылками на вчерашний снимок).
 Если добавляешь зависимость, переменную окружения или системный пакет — обнови `deploy/install.sh`, `deploy/lwl.env.example` и `deploy/README.md`.
 `LWL_GAME_TOKEN` (токен игрового сервера для входа по коду) `install.sh` и `update.sh` генерируют сами, если его нет в `lwl.env`,
 и печатают, куда вписать на сервере: `config/lwl/connect.json` → `siteToken` (и `siteUrl`).

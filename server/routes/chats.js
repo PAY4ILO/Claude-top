@@ -4,6 +4,7 @@
  * сообщения игрока прочитаны, когда их открыл кто-то из админов, сообщения админов — когда их открыл игрок.
  * Отвечать в обращениях могут админы с правом «Обращения».
  * Новые сообщения клиент забирает опросом раз в несколько секунд (Api.chats.subscribe).
+ * Фото и файлы — тоже сообщения (с вложением): загрузка и скачивание — routes/attachments.js.
  */
 import { tx } from '../db.js';
 import { fail } from '../lib/http.js';
@@ -14,7 +15,7 @@ const str = (v) => (typeof v === 'string' ? v : '');
 const SYSTEM_GREETING = 'Спасибо за обращение! Администратор ответит здесь, как только освободится. Уведомлений на почту нет — загляните позже.';
 
 export default function register(router, s) {
-  const { db, need, views } = s;
+  const { db, need, views, config } = s;
 
   const convById = db.prepare('SELECT * FROM conversations WHERE id = ?');
   const readAt = db.prepare('SELECT read_at FROM conversation_reads WHERE conversation_id = ? AND user_id = ?');
@@ -47,8 +48,13 @@ export default function register(router, s) {
     return last ? views.brief(s.getUser(last.author_id)) : null;
   }
 
+  const lastMessage = db.prepare(
+    `SELECT m.text, m.author_id, m.system, m.created_at, a.kind, a.name FROM messages m LEFT JOIN attachments a ON a.message_id = m.id
+     WHERE m.conversation_id = ? ORDER BY m.created_at DESC LIMIT 1`
+  );
+
   function view(user, c) {
-    const last = db.prepare('SELECT text, author_id, system, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1').get(c.id);
+    const last = lastMessage.get(c.id);
     return {
       id: c.id,
       status: c.status,
@@ -56,12 +62,25 @@ export default function register(router, s) {
       updatedAt: c.updated_at,
       player: views.brief(s.getUser(c.player_id)),
       partner: partnerFor(user, c),
-      lastMessage: last && { text: last.text, authorId: last.system ? 'system' : last.author_id, createdAt: last.created_at },
+      // attachment — чтобы в списке обращений показать «Фото» или имя файла, если текста нет
+      lastMessage: last && { text: last.text, authorId: last.system ? 'system' : last.author_id, createdAt: last.created_at, attachment: last.kind ? { kind: last.kind, name: last.name } : null },
       messageCount: db.prepare('SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?').get(c.id).n,
       unread: unreadFor(user, c),
       peerReadAt: peerReadAt(user, c),
     };
   }
+
+  const attachmentsOf = db.prepare('SELECT * FROM attachments WHERE message_id = ? ORDER BY created_at');
+  const attachmentView = (a) => ({
+    id: a.id,
+    name: a.name,
+    size: a.size,
+    kind: a.kind,
+    mime: a.mime,
+    width: a.width,
+    height: a.height,
+    url: `/api/attachments/${encodeURIComponent(a.id)}`,
+  });
 
   function messageView(m) {
     const author = m.system ? null : s.getUser(m.author_id);
@@ -73,10 +92,42 @@ export default function register(router, s) {
       authorId: m.system ? 'system' : m.author_id,
       system: !!m.system,
       author: views.brief(author),
+      attachments: attachmentsOf.all(m.id).map(attachmentView),
     };
   }
 
+  /** Повтор отправки (плохой интернет) с тем же clientId — то же сообщение, без дубля. */
+  const findDuplicate = (conversationId, userId, clientId) =>
+    clientId ? db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND author_id = ? AND client_id = ?').get(conversationId, userId, clientId) : null;
+
+  /**
+   * Новое сообщение (текст и/или вложение) — вызывать внутри tx(). Сообщение игрока открывает закрытое обращение,
+   * первое — добавляет автоответ. attachment: { id, name, size, kind, mime, width, height } — файл уже лежит на диске.
+   */
+  function addMessage(user, c, { text, clientId, attachment }) {
+    const now = Date.now();
+    const isPlayer = user.id === c.player_id;
+    const id = newId('m');
+    db.prepare('INSERT INTO messages (id, conversation_id, author_id, system, client_id, text, created_at) VALUES (?, ?, ?, 0, ?, ?, ?)').run(id, c.id, user.id, clientId, text, now);
+    if (attachment) {
+      const a = attachment;
+      db.prepare('INSERT INTO attachments (id, message_id, name, size, kind, mime, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(a.id, id, a.name, a.size, a.kind, a.mime, a.width, a.height, now);
+    }
+    if (isPlayer && c.player_messages === 0) {
+      db.prepare('INSERT INTO messages (id, conversation_id, author_id, system, text, created_at) VALUES (?, ?, NULL, 1, ?, ?)').run(newId('m'), c.id, SYSTEM_GREETING, now + 1);
+    }
+    db.prepare(`UPDATE conversations SET updated_at = ?, player_messages = player_messages + ? ${isPlayer ? ", status = 'open'" : ''} WHERE id = ?`).run(now, isPlayer ? 1 : 0, c.id);
+    setRead.run(c.id, user.id, now + 1);
+    db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(now, user.id);
+    return db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
+  }
+
   s.chat = {
+    byId: (id) => convById.get(id),
+    canAccess,
+    findDuplicate,
+    addMessage,
+    messageView,
     unreadMessagesFor(user) {
       const c = db.prepare('SELECT * FROM conversations WHERE player_id = ?').get(user.id);
       return c ? unreadFor(user, c) : 0;
@@ -119,7 +170,8 @@ export default function register(router, s) {
     const user = need.user(ctx);
     const c = convById.get(ctx.params.id);
     if (!canAccess(user, c)) throw fail.notFound('Обращение не найдено.');
-    return { conversation: view(user, c) };
+    // maxFileBytes — чтобы кабинет сразу отказал в слишком большом файле, а не грузил его зря
+    return { conversation: Object.assign(view(user, c), { maxFileBytes: config.chatMaxFileBytes }) };
   });
 
   router.add('GET', '/api/conversations/:id/messages', (ctx) => {
@@ -145,22 +197,7 @@ export default function register(router, s) {
     const result = tx(db, () => {
       const c = convById.get(ctx.params.id);
       if (!canAccess(user, c)) throw fail.notFound('Обращение не найдено.');
-      if (clientId) {
-        // Повтор отправки (плохой интернет) не создаёт дубль.
-        const dup = db.prepare('SELECT * FROM messages WHERE conversation_id = ? AND author_id = ? AND client_id = ?').get(c.id, user.id, clientId);
-        if (dup) return dup;
-      }
-      const now = Date.now();
-      const isPlayer = user.id === c.player_id;
-      const id = newId('m');
-      db.prepare('INSERT INTO messages (id, conversation_id, author_id, system, client_id, text, created_at) VALUES (?, ?, ?, 0, ?, ?, ?)').run(id, c.id, user.id, clientId, text, now);
-      if (isPlayer && c.player_messages === 0) {
-        db.prepare('INSERT INTO messages (id, conversation_id, author_id, system, text, created_at) VALUES (?, ?, NULL, 1, ?, ?)').run(newId('m'), c.id, SYSTEM_GREETING, now + 1);
-      }
-      db.prepare(`UPDATE conversations SET updated_at = ?, player_messages = player_messages + ? ${isPlayer ? ", status = 'open'" : ''} WHERE id = ?`).run(now, isPlayer ? 1 : 0, c.id);
-      setRead.run(c.id, user.id, now + 1);
-      db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(now, user.id);
-      return db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
+      return findDuplicate(c.id, user.id, clientId) || addMessage(user, c, { text, clientId });
     });
     return { message: messageView(result) };
   });
@@ -185,12 +222,14 @@ export default function register(router, s) {
     });
   }
 
-  // Удалить обращение вместе с перепиской. Игрок сможет написать снова — начнётся новое.
+  // Удалить обращение вместе с перепиской и файлами. Игрок сможет написать снова — начнётся новое.
   router.add('DELETE', '/api/conversations/:id', (ctx) => {
     need.perm(ctx, 'tickets', 'delete');
     const c = convById.get(ctx.params.id);
     if (!c) throw fail.notFound('Обращение не найдено.');
+    const files = s.attachments.idsOfConversation(c.id);
     db.prepare('DELETE FROM conversations WHERE id = ?').run(c.id);
+    s.attachments.removeFiles(files);
     return null;
   });
 }

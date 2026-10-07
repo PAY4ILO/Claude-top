@@ -194,6 +194,98 @@ ok('у игрока две галочки: админ прочитал', (await 
 await A.waitForSelector('.msg--mine.msg--read', { timeout: 10000 });
 ok('у админа две галочки: игрок прочитал ответ', true);
 
+/* ================================================================ фото и файлы в чате */
+const photoPath = path.join(HERE, 'fixtures/avatar.jpg');
+const reportPath = path.join(dataDir, 'отчёт об ошибке.txt');
+fs.writeFileSync(reportPath, 'Лог клиента: не удалось подключиться к серверу\n'.repeat(40));
+const guidePath = path.join(dataDir, 'инструкция.txt');
+fs.writeFileSync(guidePath, 'Удалите папку mods и поставьте сборку заново.\n');
+const bigPath = path.join(dataDir, 'видео.mp4');
+fs.writeFileSync(bigPath, '');
+fs.truncateSync(bigPath, 26 * 1024 * 1024);
+const noPending = (p) => p.waitForFunction(() => !document.querySelector('.msg--pending'), null, { timeout: 15000 });
+const imagesLoaded = (p, sel) => p.waitForFunction((s) => { const imgs = [...document.querySelectorAll(s)]; return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0); }, sel, { timeout: 15000 });
+/** Перетаскивание файла в окно чата (как из проводника). */
+const dropFile = (p, name, text) =>
+  p.evaluate(({ name, text }) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([text], name, { type: 'text/plain' }));
+    const chat = document.querySelector('.chat');
+    chat.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    chat.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, { name, text });
+/** Ctrl+V скриншота: в буфере только картинка «image.png». */
+const pasteImage = (p, file) =>
+  p.evaluate((b64) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], 'image.png', { type: 'image/jpeg' }));
+    document.querySelector('.composer__input').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, fs.readFileSync(file).toString('base64'));
+
+// игрок: фото скрепкой, файл перетаскиванием, лишний — крестиком
+await B.setInputFiles('.composer__file', photoPath);
+await B.waitForSelector('.tray-item--image img');
+ok('чат: выбранное фото — превью над полем ввода', (await B.locator('.tray-item--image img').getAttribute('src')).startsWith('blob:'));
+await dropFile(B, 'отчёт об ошибке.txt', fs.readFileSync(reportPath, 'utf8'));
+await B.setInputFiles('.composer__file', guidePath);
+await B.waitForFunction(() => document.querySelectorAll('.tray-item').length === 3);
+await B.click('.tray-item:has-text("инструкция.txt") .tray-item__remove');
+ok('чат: перетаскивание добавляет файл, «✕» убирает лишний', (await B.locator('.tray-item').count()) === 2 && (await B.locator('.tray-item:has-text("отчёт об ошибке.txt")').count()) === 1);
+ok('чат: поле ввода становится подписью', (await B.locator('.composer__input').getAttribute('placeholder')) === 'Подпись к первому файлу');
+await B.setInputFiles('.composer__file', bigPath);
+await B.waitForSelector('.toast--error');
+ok('чат: файл больше 25 МБ не добавляется (без загрузки)', (await B.locator('.toast--error').innerText()).includes('25 МБ') && (await B.locator('.tray-item').count()) === 2);
+await settle(B, 100);
+await B.fill('.composer__input', 'Вот скрин ошибки и лог');
+await B.keyboard.press('Enter');
+await noPending(B);
+await B.waitForFunction(() => document.querySelectorAll('.msg--mine .att-photo, .msg--mine .att-file').length === 2);
+ok('чат: игрок отправил фото с подписью и файл — два сообщения', (await B.locator('.msg--mine:has(.att-photo) .msg__caption').innerText()).includes('Вот скрин ошибки и лог') && (await B.locator('.tray-item').count()) === 0);
+
+// админ: в списке — имя файла; превью, крупно, скачать
+await A.waitForFunction(() => [...document.querySelectorAll('.split__list .row__text')].some((r) => r.textContent.includes('отчёт об ошибке.txt')), null, { timeout: 10000 });
+ok('чат: в списке обращений — значок и имя файла', (await A.locator('.split__list .row__text .row__att svg').count()) === 1);
+await imagesLoaded(A, '.msg:not(.msg--mine) .att-photo img');
+const adminImg = A.locator('.msg:not(.msg--mine) .att-photo img').first();
+ok('чат: админ видит превью фото с сервера', (await adminImg.getAttribute('src')).startsWith('/api/attachments/'));
+const box = await A.locator('.msg:not(.msg--mine) .att-photo').first().boundingBox();
+ok('чат: превью ограничено по размеру и с местом под фото', box.width > 100 && box.width <= 360 && box.height <= 360, `${Math.round(box.width)}×${Math.round(box.height)}`);
+await A.click('.msg:not(.msg--mine) .att-photo');
+await A.waitForSelector('.lightbox__img');
+await A.waitForFunction(() => document.querySelector('.lightbox__img').naturalWidth > 0);
+ok('чат: по клику фото открывается крупно', (await A.locator('.modal__dialog--lightbox .modal__title').innerText()) === 'avatar.jpg');
+await A.keyboard.press('Escape');
+await A.waitForSelector('.lightbox', { state: 'detached' });
+const [dl1] = await Promise.all([A.waitForEvent('download'), A.click('.msg:not(.msg--mine) a.att-file')]);
+ok('чат: админ скачивает файл — то же имя и содержимое', dl1.suggestedFilename() === 'отчёт об ошибке.txt' && fs.readFileSync(await dl1.path()).equals(fs.readFileSync(reportPath)));
+
+// админ отвечает: скриншот из буфера и файл; первая попытка файла обрывается — «Повторить»
+await A.focus('.composer__input');
+await pasteImage(A, photoPath);
+await A.waitForSelector('.tray-item--image');
+ok('чат: Ctrl+V картинки → в полоске, с именем «Снимок …»', /^Снимок \d{4}-\d\d-\d\d/.test(await A.locator('.tray-item--image').getAttribute('title')));
+await A.click('.composer__send');
+await noPending(A);
+await A.route('**/attachments', (route) => route.abort());
+await A.setInputFiles('.composer__file', guidePath);
+await A.click('.composer__send');
+await A.waitForSelector('.msg--failed .msg__retry');
+ok('чат: обрыв загрузки → «Файл не отправлен» и «Повторить»', (await A.locator('.msg--failed .msg__retry').innerText()).includes('Повторить'));
+await A.unroute('**/attachments');
+await settle(A, 100);
+await A.click('.msg--failed .msg__retry button:has-text("Повторить")');
+await A.waitForFunction(() => !document.querySelector('.msg--failed, .msg--pending'), null, { timeout: 15000 });
+ok('чат: после «Повторить» файл ушёл', (await A.locator('.msg--mine a.att-file:has-text("инструкция.txt")').count()) === 1);
+
+// игрок видит ответ без перезагрузки и скачивает
+await imagesLoaded(B, '.msg:not(.msg--mine) .att-photo img');
+ok('чат: игрок видит фото от админа без перезагрузки', (await B.locator('.msg:not(.msg--mine) .att-photo img').getAttribute('src')).startsWith('/api/attachments/'));
+await B.waitForSelector('.msg:not(.msg--mine) a.att-file');
+const [dl2] = await Promise.all([B.waitForEvent('download'), B.click('.msg:not(.msg--mine) a.att-file')]);
+ok('чат: игрок скачивает файл от админа', dl2.suggestedFilename() === 'инструкция.txt' && fs.readFileSync(await dl2.path()).equals(fs.readFileSync(guidePath)));
+ok('чат: файлы лежат на сервере под id, без имён от пользователей', fs.readdirSync(path.join(dataDir, 'attachments')).length === 4 && fs.readdirSync(path.join(dataDir, 'attachments')).every((n) => /^f_[\w-]+$/.test(n)));
+
 /* ================================================================ одобрение → «Игрок» */
 await A.goto(BASE + '/lk.html#/admin/applications'); await A.waitForSelector('.row'); await A.click('.row');
 await A.waitForSelector('.review');
@@ -307,6 +399,7 @@ await A.locator('.row', { hasText: '__Hawker__' }).click(); await A.waitForSelec
 await A.click('.chat__actions .icon-btn'); await A.click('.modal__actions .btn--danger');
 await A.waitForFunction(() => ![...document.querySelectorAll('.split__list .row')].some((r) => r.textContent.includes('__Hawker__')));
 ok('обращение удалено', true);
+ok('фото и файлы обращения удалены с диска', fs.readdirSync(path.join(dataDir, 'attachments')).length === 0);
 
 /* ================================================================ сбой сети */
 const D = await person('D');

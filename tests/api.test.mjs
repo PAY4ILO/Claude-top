@@ -19,7 +19,7 @@ const GAME_TOKEN = 'game-token-for-tests-0123456789';
 before(async () => {
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-api-'));
   // LWL_TRUST_PROXY — чтобы тесты кодов входа подставляли разные IP (X-Real-IP) и не упирались в лимит по IP.
-  const config = loadConfig({ LWL_DATA_DIR: dataDir, LWL_ADMINS: 'owner@example.com', LWL_FAST_HASH: '1', LWL_MAX_UPLOAD_MB: '1', LWL_GAME_TOKEN: GAME_TOKEN, LWL_TRUST_PROXY: '1' });
+  const config = loadConfig({ LWL_DATA_DIR: dataDir, LWL_ADMINS: 'owner@example.com', LWL_FAST_HASH: '1', LWL_MAX_UPLOAD_MB: '1', LWL_CHAT_MAX_FILE_MB: '1', LWL_GAME_TOKEN: GAME_TOKEN, LWL_TRUST_PROXY: '1' });
   app = createApp(config);
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
@@ -187,6 +187,207 @@ test('поддержка: переписка, автоответ, непрочи
   assert.equal(view.partner.nickname, 'Owner_1');
   await owner.post(`/api/conversations/${conversation.id}/close`);
   assert.equal((await owner.get('/api/conversations?status=closed')).data.items.length, 1);
+});
+
+/* ------------------------------------------------------------ фото и файлы в чате */
+
+const attach = (who, convId, data, name, headers = {}) =>
+  who.put(`/api/conversations/${convId}/attachments`, data, Object.assign({ 'X-File-Name': encodeURIComponent(name), 'Content-Type': 'application/octet-stream' }, headers));
+const attachmentFile = (id) => path.join(dataDir, 'attachments', id);
+const aliceFiles = [];
+let photoAtt;
+let logAtt;
+
+/** Минимальный JPEG: SOI, (EXIF с поворотом), SOF0 с размером, EOI. */
+function tinyJpeg(width, height, orientation) {
+  const parts = [Buffer.from([0xff, 0xd8])];
+  if (orientation) {
+    const tiff = Buffer.alloc(26);
+    tiff.write('II', 0, 'latin1');
+    tiff.writeUInt16LE(42, 2);
+    tiff.writeUInt32LE(8, 4);
+    tiff.writeUInt16LE(1, 8);
+    tiff.writeUInt16LE(0x0112, 10);
+    tiff.writeUInt16LE(3, 12);
+    tiff.writeUInt32LE(1, 14);
+    tiff.writeUInt16LE(orientation, 18);
+    const body = Buffer.concat([Buffer.from('Exif\0\0', 'latin1'), tiff]);
+    const seg = Buffer.from([0xff, 0xe1, 0, 0]);
+    seg.writeUInt16BE(body.length + 2, 2);
+    parts.push(seg, body);
+  }
+  const sof = Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08, 0, 0, 0, 0, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]);
+  sof.writeUInt16BE(height, 5);
+  sof.writeUInt16BE(width, 7);
+  parts.push(sof, Buffer.from([0xff, 0xd9]));
+  return Buffer.concat(parts);
+}
+
+test('вложения: картинка узнаётся по первым байтам, размер — с учётом поворота фото', async () => {
+  const { sniffImage, cleanFileName } = await import('../server/lib/files.js');
+  assert.deepEqual(sniffImage(PNG), { mime: 'image/png', width: 1, height: 1 });
+  assert.deepEqual(sniffImage(tinyJpeg(200, 100)), { mime: 'image/jpeg', width: 200, height: 100 });
+  assert.deepEqual(sniffImage(tinyJpeg(200, 100, 6)), { mime: 'image/jpeg', width: 100, height: 200 }, 'фото с телефона, повёрнутое в EXIF');
+  const gif = Buffer.concat([Buffer.from('GIF89a', 'latin1'), Buffer.from([0x40, 0x01, 0xf0, 0x00]), Buffer.alloc(8)]);
+  assert.deepEqual(sniffImage(gif), { mime: 'image/gif', width: 320, height: 240 });
+  const webp = Buffer.alloc(30);
+  webp.write('RIFF', 0, 'latin1');
+  webp.write('WEBPVP8X', 8, 'latin1');
+  webp.writeUIntLE(639, 24, 3);
+  webp.writeUIntLE(479, 27, 3);
+  assert.deepEqual(sniffImage(webp), { mime: 'image/webp', width: 640, height: 480 });
+  assert.equal(sniffImage(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>')), null, 'SVG — не картинка');
+  assert.equal(cleanFileName('../../etc/passwd'), 'passwd');
+  assert.equal(cleanFileName('C:\\Users\\x\\фото.jpg'), 'фото.jpg');
+  assert.equal(cleanFileName('photo\u202egpj.exe'), 'photogpj.exe', 'без символов смены направления текста');
+  assert.equal(cleanFileName('...'), 'файл');
+  const long = cleanFileName('я'.repeat(300) + '.png');
+  assert.ok(long.length === 120 && long.endsWith('.png'));
+});
+
+test('вложения: фото с подписью и файл, повтор без дубля, закрытое обращение снова открыто', async () => {
+  assert.equal((await owner.get(`/api/conversations/${conversation.id}`)).data.conversation.status, 'closed');
+  const photo = await attach(alice, conversation.id, PNG, 'скрин.png', { 'X-Client-Id': 'f1', 'X-Caption': encodeURIComponent('  Вот ошибка — смотрите  ') });
+  assert.equal(photo.status, 200);
+  const m = photo.data.message;
+  assert.equal(m.text, 'Вот ошибка — смотрите');
+  assert.equal(m.attachments.length, 1);
+  photoAtt = m.attachments[0];
+  assert.deepEqual([photoAtt.kind, photoAtt.mime, photoAtt.width, photoAtt.height, photoAtt.size, photoAtt.name], ['image', 'image/png', 1, 1, PNG.length, 'скрин.png']);
+  assert.ok(fs.existsSync(attachmentFile(photoAtt.id)), 'файл лежит на диске под своим id, а не под именем от пользователя');
+
+  const again = await attach(alice, conversation.id, PNG, 'скрин.png', { 'X-Client-Id': 'f1', 'X-Caption': encodeURIComponent('Вот ошибка — смотрите') });
+  assert.equal(again.status, 200);
+  assert.equal(again.data.message.id, m.id, 'повтор с тем же X-Client-Id — то же сообщение');
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS n FROM attachments').get().n, 1);
+  assert.equal(fs.readdirSync(path.join(dataDir, 'attachments')).length, 1, 'лишнего файла на диске нет');
+
+  const log = await attach(alice, conversation.id, Buffer.from('лог сервера\nошибка 42\n'), 'latest.log', { 'X-Client-Id': 'f2' });
+  assert.equal(log.status, 200);
+  assert.equal(log.data.message.text, '', 'без подписи — пустой текст');
+  logAtt = log.data.message.attachments[0];
+  assert.deepEqual([logAtt.kind, logAtt.mime, logAtt.width, logAtt.height], ['file', 'application/octet-stream', null, null]);
+  aliceFiles.push(photoAtt.id, logAtt.id);
+
+  const conv = (await owner.get(`/api/conversations/${conversation.id}`)).data.conversation;
+  assert.equal(conv.status, 'open', 'игрок прислал файл — обращение снова открыто, как с текстом');
+  assert.equal(conv.maxFileBytes, 1024 * 1024, 'кабинет знает лимит размера (LWL_CHAT_MAX_FILE_MB)');
+  const item = (await owner.get('/api/conversations')).data.items.find((c) => c.id === conversation.id);
+  assert.deepEqual(item.lastMessage.attachment, { kind: 'file', name: 'latest.log' }, 'в списке — имя файла');
+  assert.equal(item.lastMessage.text, '');
+  assert.equal(item.unread, 2, 'фото и файл — два непрочитанных');
+  const items = (await owner.get(`/api/conversations/${conversation.id}/messages`)).data.items;
+  assert.deepEqual(items.slice(-2).map((x) => x.attachments[0].kind), ['image', 'file']);
+  assert.equal(items[0].attachments.length, 0, 'у текстовых сообщений вложений нет');
+  await owner.post(`/api/conversations/${conversation.id}/read`);
+  assert.equal((await owner.get('/api/conversations')).data.items.find((c) => c.id === conversation.id).unread, 0);
+
+  // и в обратную сторону: админ отвечает фото — у игрока непрочитанное
+  const reply = await attach(owner, conversation.id, tinyJpeg(200, 100, 6), 'ответ.jpg', { 'X-Client-Id': 'o-f1' });
+  assert.deepEqual([reply.data.message.attachments[0].width, reply.data.message.attachments[0].height], [100, 200]);
+  aliceFiles.push(reply.data.message.attachments[0].id);
+  assert.equal((await alice.get('/api/me/summary')).data.unreadMessages, 1);
+  const aliceView = (await alice.get(`/api/conversations/${conversation.id}`)).data.conversation;
+  assert.deepEqual(aliceView.lastMessage.attachment, { kind: 'image', name: 'ответ.jpg' }, 'в списке — «Фото»');
+  await alice.post(`/api/conversations/${conversation.id}/read`);
+});
+
+test('вложения: SVG, HTML и «фото.png» с HTML внутри отдаются как файл octet-stream, картинка — inline', async () => {
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  const html = Buffer.from('<!doctype html><script>alert(document.cookie)</script>');
+  for (const [data, name, type] of [
+    [svg, 'pic.svg', 'image/svg+xml'],
+    [html, 'page.html', 'text/html'],
+    [html, 'фото.png', 'image/png'],
+  ]) {
+    const r = await attach(alice, conversation.id, data, name, { 'Content-Type': type });
+    assert.equal(r.status, 200, name);
+    const a = r.data.message.attachments[0];
+    aliceFiles.push(a.id);
+    assert.equal(a.kind, 'file', `${name}: не картинка`);
+    const got = await owner.get(a.url);
+    assert.equal(got.status, 200);
+    assert.equal(got.headers.get('content-type'), 'application/octet-stream', name);
+    assert.match(got.headers.get('content-disposition'), /^attachment; filename="[^"]+"; filename\*=UTF-8''/, name);
+    assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
+    assert.ok(Buffer.compare(got.data, data) === 0, 'файл отдаётся без изменений');
+  }
+  // А PNG под именем .html — всё равно картинка: смотрим на содержимое, а не на имя.
+  const png = await attach(alice, conversation.id, PNG, 'not-a-page.html');
+  const a = png.data.message.attachments[0];
+  aliceFiles.push(a.id);
+  assert.equal(a.kind, 'image');
+  const got = await owner.get(a.url);
+  assert.equal(got.headers.get('content-type'), 'image/png');
+  assert.match(got.headers.get('content-disposition'), /^inline; /);
+  assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(got.headers.get('cache-control'), /private/);
+  assert.match(got.headers.get('content-security-policy'), /sandbox/, 'файл, открытый отдельно, не выполнит скрипт');
+  const photo = await alice.get(photoAtt.url);
+  assert.equal(photo.headers.get('content-disposition'), `inline; filename="_____.png"; filename*=UTF-8''%D1%81%D0%BA%D1%80%D0%B8%D0%BD.png`, 'имя по-русски — через filename*');
+});
+
+test('вложения: чужое обращение — 404, без входа — 401; Range и 304; лимиты размера и подписи', async () => {
+  assert.equal((await bob.get(photoAtt.url)).status, 404, 'чужой файл не скачать');
+  assert.equal((await client().get(photoAtt.url)).status, 401);
+  assert.equal((await attach(bob, conversation.id, PNG, 'x.png')).status, 404, 'в чужое обращение не загрузить');
+  assert.equal((await alice.get('/api/attachments/f_nope')).status, 404);
+
+  const part = await alice.get(logAtt.url, { Range: 'bytes=2-5' });
+  assert.equal(part.status, 206);
+  assert.equal(part.data.length, 4);
+  assert.equal(part.headers.get('content-range'), `bytes 2-5/${logAtt.size}`);
+  assert.equal((await alice.get(logAtt.url, { Range: 'bytes=9999-' })).status, 416);
+  const full = await alice.get(photoAtt.url);
+  const cached = await alice.get(photoAtt.url, { 'If-None-Match': full.headers.get('etag') });
+  assert.equal(cached.status, 304, 'картинка не скачивается заново');
+
+  const tooBig = await attach(alice, conversation.id, Buffer.alloc(1024 * 1024 + 1, 1), 'big.bin');
+  assert.equal(tooBig.status, 413);
+  assert.match(tooBig.data.message, /1 МБ/);
+  assert.equal((await attach(alice, conversation.id, Buffer.alloc(0), 'empty.txt')).status, 422);
+  assert.equal((await attach(alice, conversation.id, PNG, 'x.png', { 'X-Caption': encodeURIComponent('а'.repeat(2001)) })).status, 422);
+  assert.equal((await attach(alice, conversation.id, PNG, 'x.png', { 'X-Caption': '%E0%A4%A' })).status, 400, 'битая кодировка подписи');
+  assert.equal(fs.readdirSync(path.join(dataDir, 'attachments')).filter((n) => !aliceFiles.includes(n)).length, 0, 'отклонённые файлы не остались на диске');
+});
+
+test('вложения: лимит частоты на человека; удаление обращения удаляет файлы с диска', async () => {
+  const dan = client();
+  await dan.post('/api/auth/register', { nickname: 'Dan_9', email: 'dan@example.com', password: 'Passw0rd1' });
+  const conv = (await dan.post('/api/support/conversation')).data.conversation;
+  const ids = [];
+  for (let i = 0; i < 30; i++) {
+    const r = await attach(dan, conv.id, PNG, `${i}.png`, { 'X-Client-Id': 'd' + i });
+    assert.equal(r.status, 200);
+    ids.push(r.data.message.attachments[0].id);
+  }
+  const limited = await attach(dan, conv.id, PNG, 'more.png', { 'X-Client-Id': 'd30' });
+  assert.equal(limited.status, 429);
+  assert.ok(Number(limited.headers.get('retry-after')) > 0);
+  assert.equal((await attach(dan, conv.id, PNG, '0.png', { 'X-Client-Id': 'd0' })).status, 200, 'повтор уже дошедшего файла лимитом не режется');
+  assert.ok(ids.every((id) => fs.existsSync(attachmentFile(id))));
+  assert.equal((await owner.del(`/api/conversations/${conv.id}`)).status, 204);
+  assert.ok(ids.every((id) => !fs.existsSync(attachmentFile(id))), 'файлы удалены вместе с обращением');
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS n FROM attachments WHERE id IN (' + ids.map(() => '?').join(',') + ')').get(...ids).n, 0);
+  await dan.del('/api/me', { password: 'Passw0rd1' });
+});
+
+test('вложения: при запуске сайт убирает файлы без строки в базе и брошенные загрузки', async () => {
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-sweep-'));
+  try {
+    const files = path.join(dir2, 'attachments');
+    fs.mkdirSync(files);
+    fs.writeFileSync(path.join(files, 'f_orphan'), 'x');
+    fs.writeFileSync(path.join(files, '.upload-stale'), 'x');
+    const old = new Date(Date.now() - 2 * 24 * 3600 * 1000);
+    fs.utimesSync(path.join(files, '.upload-stale'), old, old);
+    fs.writeFileSync(path.join(files, '.upload-fresh'), 'x');
+    const app2 = createApp(loadConfig({ LWL_DATA_DIR: dir2, LWL_FAST_HASH: '1' }));
+    await app2.close();
+    assert.deepEqual(fs.readdirSync(files), ['.upload-fresh'], 'идущую загрузку не трогает');
+  } finally {
+    fs.rmSync(dir2, { recursive: true, force: true });
+  }
 });
 
 test('сброс пароля: запрос → ссылка от админа → новый пароль', async () => {
@@ -551,11 +752,12 @@ test('статика: страницы есть, служебные файлы �
   }
 });
 
-test('удаление аккаунта удаляет заявки и переписку', async () => {
+test('удаление аккаунта удаляет заявки, переписку и файлы из чата', async () => {
   assert.equal((await alice.del('/api/me', { password: 'wrong' })).status, 401);
   assert.equal((await alice.del('/api/me', { password: 'Passw0rd1' })).status, 204);
   assert.equal((await owner.get('/api/applications?status=all')).data.items.length, 0);
   assert.equal((await owner.get('/api/conversations?status=all')).data.items.length, 0);
+  assert.ok(aliceFiles.length > 0 && aliceFiles.every((id) => !fs.existsSync(attachmentFile(id))), 'фото и файлы из чата удалены с диска');
   assert.equal(app.db.prepare('SELECT COUNT(*) AS n FROM connect_codes c LEFT JOIN users u ON u.id = c.user_id WHERE u.id IS NULL').get().n, 0, 'код входа удалён вместе с аккаунтом');
   assert.equal((await connect(aliceCode, 'Alice_07')).status, 404);
 });

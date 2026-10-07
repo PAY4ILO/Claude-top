@@ -106,6 +106,12 @@
       if (v.length > LIMITS.message.max) return `Максимум ${LIMITS.message.max} символов.`;
       return '';
     },
+    /** Подпись к фото или файлу в чате: может быть пустой. */
+    caption(v) {
+      v = String(v || '').trim();
+      if (v.length > LIMITS.message.max) return `Подпись — максимум ${LIMITS.message.max} символов.`;
+      return '';
+    },
     application(d) {
       const f = {};
       const age = Number(d.age);
@@ -191,14 +197,15 @@
     return s ? '?' + s : '';
   };
 
-  /** Загрузка файла с прогрессом (fetch не умеет показывать прогресс отправки). */
-  function upload(path, file, onProgress) {
+  /** Загрузка файла с прогрессом (fetch не умеет показывать прогресс отправки). headers — дополнительные заголовки. */
+  function upload(path, file, onProgress, headers) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', CONFIG.apiBase + path);
       xhr.setRequestHeader('X-Requested-With', 'lwl');
-      xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));
+      xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name || 'файл'));
       xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      Object.entries(headers || {}).forEach(([k, v]) => v && xhr.setRequestHeader(k, v));
       xhr.upload.onprogress = (e) => e.lengthComputable && onProgress && onProgress(e.loaded / e.total);
       xhr.onload = () => {
         let data = null;
@@ -332,6 +339,17 @@
       get: (id) => http('GET', `/conversations/${enc(id)}`).then((d) => d.conversation),
       messages: (id, { before = 0, limit = 50 } = {}) => http('GET', `/conversations/${enc(id)}/messages` + q({ before, limit })),
       send: (id, body) => http('POST', `/conversations/${enc(id)}/messages`, body).then((d) => (emit('messages', { conversationId: id }), emit('conversations'), d.message)),
+      /**
+       * Фото или файл — отдельным сообщением: { clientId, caption, onProgress(доля 0..1) }.
+       * Повтор с тем же clientId не создаёт дубль. Лимит размера — conversation.maxFileBytes.
+       * Подпись идёт заголовком, поэтому длинную (см. CAPTION_HEADER_MAX) отправляйте обычным сообщением.
+       */
+      attach: (id, file, { clientId, caption, onProgress } = {}) =>
+        upload(`/conversations/${enc(id)}/attachments`, file, onProgress, { 'X-Client-Id': clientId, 'X-Caption': caption ? enc(caption) : '' }).then(
+          (d) => (emit('messages', { conversationId: id }), emit('conversations'), d.message)
+        ),
+      /** Сколько символов подписи (после URL-кодирования) влезает в заголовок: прокси режут длинные заголовки. */
+      CAPTION_HEADER_MAX: 4000,
       markRead: (id) => http('POST', `/conversations/${enc(id)}/read`).then(() => emit('conversations')).catch(() => null),
       close: (id) => http('POST', `/conversations/${enc(id)}/close`).then(() => (emit('conversations'), emit('messages', { conversationId: id }), true)),
       reopen: (id) => http('POST', `/conversations/${enc(id)}/reopen`).then(() => (emit('conversations'), emit('messages', { conversationId: id }), true)),

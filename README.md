@@ -74,7 +74,11 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
   - ссылки кликабельны, HTML из сообщений не выполняется;
   - черновик сохраняется, поле растёт по высоте, счётчик символов;
   - Enter отправляет сообщение, Shift+Enter переносит строку (на телефоне Enter переносит строку);
-  - админ может закрыть обращение и открыть его снова, а с правом «Удаление» — удалить.
+  - админ может закрыть обращение и открыть его снова, а с правом «Удаление» — удалить (вместе с фото и файлами);
+  - фото и любые файлы — скрепкой, вставкой из буфера (Ctrl+V) или перетаскиванием в окно чата: сначала полоска выбранных
+    с превью и «✕», текст из поля становится подписью к первому файлу; каждый файл уходит отдельным сообщением с прогрессом,
+    не ушёл — «Повторить». В ленте фото — превью (место оставлено заранее, лента не прыгает), по клику — крупно;
+    файл — карточка со значком, именем, размером и «Скачать». В списке обращений — «Фото» или имя файла.
 - **Мобильная версия.** Нижние вкладки, чат на весь экран с кнопкой «назад», учёт безопасных зон экрана, окна открываются снизу, на лендинге меню-бургер.
 - **Доступность.** Ловушка фокуса в окнах и меню, Esc, aria-атрибуты, видимый фокус, `prefers-reduced-motion`.
 
@@ -124,12 +128,14 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 | DELETE | `/api/applications/:id` | «Заявки» + «Удаление» | → 204 |
 | POST | `/api/support/conversation` | вошедший | → `{conversation}` (создаёт, если ещё нет) |
 | GET | `/api/conversations?status=open\|closed\|all&q=` | «Обращения» | → `{items}` |
-| GET | `/api/conversations/:id` | участник, «Обращения» | → `{conversation}` (`peerReadAt` — до какого времени прочитал собеседник) |
+| GET | `/api/conversations/:id` | участник, «Обращения» | → `{conversation}` (`peerReadAt` — до какого времени прочитал собеседник, `maxFileBytes` — лимит файла в чате) |
 | GET | `/api/conversations/:id/messages?before=&limit=` | участник, админ | → `{items, hasMore}` (по возрастанию времени) |
 | POST | `/api/conversations/:id/messages` | участник, админ | `{text, clientId}` → `{message}` (повтор с тем же `clientId` не создаёт дубль) |
 | POST | `/api/conversations/:id/read` | участник, админ | → 204 |
 | POST | `/api/conversations/:id/close`, `/reopen` | «Обращения» | → 204 |
-| DELETE | `/api/conversations/:id` | «Обращения» + «Удаление» | → 204 |
+| DELETE | `/api/conversations/:id` | «Обращения» + «Удаление» | → 204 (файлы из чата удаляются с диска) |
+| PUT | `/api/conversations/:id/attachments` | участник, админ | сырое тело файла; заголовки `X-File-Name`, `X-Caption` (URL-кодированные), `X-Client-Id` → `{message}` с `attachments: [{id, name, size, kind: 'image'\|'file', mime, width, height, url}]`; лимит `LWL_CHAT_MAX_FILE_MB`, 30 файлов в минуту |
+| GET | `/api/attachments/:id` | участник, админ | файл с докачкой (`Range`); картинка (PNG/JPEG/GIF/WebP по первым байтам) — `inline`, остальное — `application/octet-stream` + `attachment` |
 | GET | `/api/admin/users?role=all\|reset\|user\|player\|admin&q=` | «Люди» или «Админы» | → `{items, counts}` |
 | GET | `/api/admin/users/:id` | «Люди» или «Админы» | → `{user, applications, permissionCatalog}` |
 | PATCH | `/api/admin/users/:id` | «Люди» (роли user/player), «Админы» (выдать/снять админа) | `{role}` → `{user}` |
@@ -222,7 +228,8 @@ assets/js/       api.js    — ЕДИНСТВЕННЫЙ слой данных н
 assets/img/      картинки сайта (SVG, WebP)
 assets/fonts/    Russo One и Inter + лицензии
 server/          index.js (запуск), app.js (сессии, права, маршрутизация), db.js (схема и миграции),
-                 cli.js (команды админа), lib/ (http, пароли, проверки), routes/ (API по разделам)
+                 cli.js (команды админа), lib/ (http, пароли, проверки, files.js — картинки по первым байтам,
+                 отдача файлов с Range), routes/ (API по разделам; attachments.js — фото и файлы в чате)
 deploy/          install.sh, update.sh, служба systemd, nginx, бэкапы — см. deploy/README.md
 design/figma/    оригиналы из Figma и рендеры фреймов макета
 tools/           figma-export.mjs, prepare-assets.py

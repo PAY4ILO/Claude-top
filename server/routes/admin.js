@@ -121,7 +121,9 @@ export default function register(router, s) {
     if (!u) throw fail.notFound('Пользователь не найден.');
     if (u.id === admin.id) throw fail.conflict('Свой аккаунт удаляйте в профиле.');
     guardTarget(admin, u, 'удалить аккаунт');
+    const files = s.attachments.idsOfPlayer(u.id);
     db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
+    s.attachments.removeFiles(files);
     return null;
   });
 

@@ -160,6 +160,25 @@ const MIGRATIONS = [
     created_at INTEGER NOT NULL
   );
   `,
+
+  /* 4: фото и файлы в чате поддержки */
+  `
+  -- Вложение сообщения. Сам файл — в LWL_DATA_DIR/attachments/<id> (имя на диске — id, не имя от пользователя).
+  -- kind = 'image' только для PNG/JPEG/GIF/WebP, узнанных по первым байтам; остальное — 'file'
+  -- (отдаётся как application/octet-stream «скачать»). width/height — у картинок, если удалось узнать.
+  CREATE TABLE attachments (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('image', 'file')),
+    mime TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX attachments_message ON attachments(message_id);
+  `,
 ];
 
 export function openDb(file) {

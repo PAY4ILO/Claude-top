@@ -899,11 +899,19 @@
           'span',
           { class: 'row__main' },
           h('span', { class: 'row__title' }, h('span', { class: 'row__name', text: c.player ? c.player.nickname : 'Удалённый аккаунт' }), c.status === 'closed' && h('span', { class: 'pill pill--closed', text: 'Закрыто' })),
-          h('span', { class: 'row__text', text: last ? prefix + last.text : 'Нет сообщений' })
+          h('span', { class: 'row__text' }, lastMessageText(last, prefix))
         ),
         h('span', { class: 'row__side' }, last && h('span', { text: UI.shortTime(last.createdAt), title: UI.fullDate(last.createdAt) }), c.unread ? h('span', { class: 'nav-badge', text: String(c.unread), 'aria-label': `${c.unread} непрочитанных` }) : null)
       )
     );
+  }
+
+  /** Последнее сообщение в списке обращений: фото и файлы — значком и словом «Фото» или именем файла. */
+  function lastMessageText(last, prefix) {
+    if (!last) return 'Нет сообщений';
+    const a = last.attachment;
+    if (!a) return prefix + last.text;
+    return [prefix, h('span', { class: 'row__att' }, icon(a.kind === 'image' ? 'image' : 'paperclip')), last.text || (a.kind === 'image' ? 'Фото' : a.name)];
   }
 
   /** Экран «список | карточка». */
@@ -1178,7 +1186,7 @@
     return h('a', { class: 'btn btn--secondary', href, target: '_blank', rel: 'noopener noreferrer' }, label, icon('external'));
   }
 
-  const formatSize = (b) => (!b ? '' : b < 1024 * 1024 ? Math.max(1, Math.round(b / 1024)) + ' КБ' : (b / 1024 / 1024).toFixed(b < 100 * 1024 * 1024 ? 1 : 0).replace('.', ',') + ' МБ');
+  const formatSize = UI.fileSize;
   const extOf = (name) => (name && /\.mrpack$/i.test(name) ? '.mrpack' : '.zip');
 
   /* ============================================================ сервер (игрок) */

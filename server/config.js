@@ -17,7 +17,7 @@ export function loadConfig(env = process.env) {
   return {
     host: env.LWL_HOST || '127.0.0.1',
     port: Number(env.LWL_PORT || 8080),
-    // База SQLite, загруженные сборки и аватары. Не внутри репозитория на проде: /var/lib/lwl
+    // База SQLite, загруженные сборки и файлы из чата. Не внутри репозитория на проде: /var/lib/lwl
     dataDir: path.resolve(env.LWL_DATA_DIR || path.join(ROOT, 'data')),
     // Адрес сайта снаружи, например https://lwl.ru — из него собираются ссылки для сброса пароля
     publicUrl,
@@ -27,6 +27,8 @@ export function loadConfig(env = process.env) {
     trustProxy: env.LWL_TRUST_PROXY === '1',
     secureCookies: env.LWL_SECURE_COOKIES ? env.LWL_SECURE_COOKIES === '1' : publicUrl.startsWith('https://'),
     maxUploadBytes: Number(env.LWL_MAX_UPLOAD_MB || 2048) * 1024 * 1024,
+    // Фото и файлы в чате поддержки: максимальный размер одного файла
+    chatMaxFileBytes: Number(env.LWL_CHAT_MAX_FILE_MB || 25) * 1024 * 1024,
     // RCON Minecraft-сервера: при одобрении заявки сайт сам выполняет /wl add <ник> [cracked].
     // Без пароля выключено — тогда команду вводят вручную (она показывается в одобренной заявке).
     rcon: {
