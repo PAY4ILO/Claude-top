@@ -25,6 +25,18 @@ export const ROLES = ['user', 'player', 'admin'];
 export const LAUNCHERS = ['prism', 'curseforge', 'modrinth', 'other'];
 // Что игрок может скрыть на своей карточке (PATCH /api/me/card → hideFields).
 export const CARD_FIELDS = ['playtime', 'deaths', 'mobKills', 'playerKills', 'blocksMined', 'distance', 'advancements', 'firstSeen', 'lastSeen'];
+// Поза персонажа и фон карточки (рисует assets/js/skin3d.js и assets/css/players.css).
+export const CARD_POSES = ['stand', 'wave', 'walk', 'cheer', 'point', 'sit'];
+export const CARD_BACKGROUNDS = ['meadow', 'night', 'sunset', 'ocean', 'cave', 'snow', 'nether', 'end'];
+// Соцсети на карточке: хранится только ник, ссылку собирает страница — чужой адрес в карточку не попадёт.
+export const SOCIALS = {
+  telegram: /^[A-Za-z][A-Za-z0-9_]{4,31}$/,
+  discord: /^[A-Za-z0-9_.]{2,32}(#\d{4})?$/,
+  youtube: /^[A-Za-z0-9_.-]{3,30}$/,
+  twitch: /^[A-Za-z0-9_]{3,25}$/,
+  vk: /^[A-Za-z0-9_.]{2,32}$/,
+  tiktok: /^[A-Za-z0-9_.]{2,24}$/,
+};
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
@@ -85,6 +97,20 @@ export const validate = {
     if (d.hidden !== undefined && typeof d.hidden !== 'boolean') f.hidden = 'Нужно «да» или «нет».';
     if (d.hideFields !== undefined) {
       if (!Array.isArray(d.hideFields) || d.hideFields.length > CARD_FIELDS.length || d.hideFields.some((k) => !CARD_FIELDS.includes(k))) f.hideFields = 'Неизвестное поле карточки.';
+    }
+    if (d.pose !== undefined && !CARD_POSES.includes(d.pose)) f.pose = 'Такой позы нет.';
+    if (d.background !== undefined && !CARD_BACKGROUNDS.includes(d.background)) f.background = 'Такого фона нет.';
+    if (d.socials !== undefined) {
+      if (!d.socials || typeof d.socials !== 'object' || Array.isArray(d.socials)) f.socials = { _: 'Нужен список соцсетей.' };
+      else {
+        const bad = {};
+        for (const [key, v] of Object.entries(d.socials)) {
+          if (!Object.hasOwn(SOCIALS, key)) bad[key] = 'Такой соцсети нет.';
+          else if (typeof v !== 'string') bad[key] = 'Это должен быть текст.';
+          else if (v && !SOCIALS[key].test(v)) bad[key] = 'Ник выглядит неправильно.';
+        }
+        if (Object.keys(bad).length) f.socials = bad;
+      }
     }
     return f;
   },

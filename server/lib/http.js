@@ -168,7 +168,7 @@ const TYPES = {
 };
 
 // Наружу отдаются только страницы и assets/ — никаких server/, data/, .git и т. п.
-const PAGES = new Set(['/index.html', '/lk.html', '/robots.txt']);
+const PAGES = new Set(['/index.html', '/lk.html', '/players.html', '/robots.txt']);
 
 export function serveStatic(req, res, root) {
   let pathname;

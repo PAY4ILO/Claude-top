@@ -1,6 +1,7 @@
 /**
  * Скины для карточек игроков. Игровой сервер присылает только ссылку на текстуру, картинку сайт качает сам
  * и хранит в LWL_DATA_DIR/skins/<sha256>.png — браузер никогда не ходит к Mojang.
+ * Туда же кладутся скины, загруженные в кабинете (routes/players.js → store).
  *
  * Защита от SSRF: принимается ТОЛЬКО https://textures.minecraft.net/texture/<hex> (Mojang в профиле пишет http:// —
  * такую ссылку переводим на https). Никаких редиректов, не больше 64 КБ, тайм-аут, внутри — PNG 64×64 или 64×32.
@@ -124,18 +125,23 @@ export function createSkins({ db, dir, origin, timeoutMs = 10_000 }) {
     const data = Buffer.concat(chunks);
     if (!isSkinPng(data)) throw new Error('не PNG 64×64 / 64×32');
     const hash = createHash('sha256').update(data).digest('hex');
-    const file = fileOf(hash);
-    if (!fs.existsSync(file)) {
-      const tmp = `${file}.${process.pid}.tmp`;
-      await fs.promises.writeFile(tmp, data);
-      await fs.promises.rename(tmp, file);
-    }
+    await store(hash, data);
     return hash;
+  }
+
+  /** Сохранить проверенную картинку под её sha256 (скачанную или загруженную в кабинете). */
+  async function store(hash, data) {
+    const file = fileOf(hash);
+    if (fs.existsSync(file)) return;
+    const tmp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    await fs.promises.writeFile(tmp, data);
+    await fs.promises.rename(tmp, file);
   }
 
   return {
     normalize,
     want,
+    store,
     fileOf,
     /** Для тестов: дождаться, пока очередь скачается. */
     async idle() {
@@ -149,7 +155,12 @@ export function createSkins({ db, dir, origin, timeoutMs = 10_000 }) {
       } catch {
         return;
       }
-      const used = new Set(db.prepare('SELECT DISTINCT skin_hash FROM player_stats WHERE skin_hash IS NOT NULL').all().map((r) => r.skin_hash));
+      const used = new Set(
+        db
+          .prepare('SELECT skin_hash FROM player_stats WHERE skin_hash IS NOT NULL UNION SELECT skin_hash FROM player_cards WHERE skin_hash IS NOT NULL')
+          .all()
+          .map((r) => r.skin_hash)
+      );
       const old = Date.now() - 24 * 3600 * 1000;
       for (const name of names) {
         const hash = name.replace(/\.png$/, '');

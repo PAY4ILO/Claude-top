@@ -789,7 +789,8 @@ test('карточки: presence — в сети, вышел, и тайм-аут
   const first = await game('POST', '/api/game/presence', { players: [{ nickname: 'Alice_07', uuid: '0f6d3a2e-1111-3222-8333-444455556666' }, 'Steve_Bot'] });
   assert.equal(first.status, 204);
   assert.equal(first.text, '');
-  let list = (await alice.get('/api/players')).data.players;
+  const fromGame = async () => (await alice.get('/api/players')).data.players.filter((p) => p.stats);
+  let list = await fromGame();
   assert.deepEqual(
     list.map((p) => [p.nickname, p.online]),
     [
@@ -801,7 +802,7 @@ test('карточки: presence — в сети, вышел, и тайм-аут
 
   // Steve_Bot вышел: его нет в полном списке.
   await game('POST', '/api/game/presence', { players: [{ nickname: 'alice_07' }] });
-  list = (await alice.get('/api/players')).data.players;
+  list = await fromGame();
   assert.equal(list.find((p) => p.nickname === 'Steve_Bot').online, false);
   assert.ok(list.some((p) => p.nickname === 'alice_07' && p.online), 'ник — как прислал сервер');
   assert.equal(statsRow('Alice_07').uuid, '0f6d3a2e-1111-3222-8333-444455556666', 'uuid не стёрся');
@@ -845,27 +846,53 @@ test('карточки: статистика сохраняется и отда�
 
   // Сортировки и поиск.
   const nicks = async (sort, query = '') => (await alice.get(`/api/players?sort=${sort}&q=${encodeURIComponent(query)}`)).data.players.map((x) => x.nickname);
-  assert.deepEqual(await nicks('playtime'), ['New_Guy', 'Alice_07', 'Steve_Bot']);
+  // Owner_1 (админ сайта) в игру не заходил: карточка есть, без статистики — в конце.
+  assert.deepEqual(await nicks('playtime'), ['New_Guy', 'Alice_07', 'Steve_Bot', 'Owner_1']);
+  assert.equal((await alice.get('/api/players/Owner_1')).data.player.stats, null);
   await game('POST', '/api/game/presence', { players: ['Steve_Bot'] });
-  assert.deepEqual(await nicks('online'), ['Steve_Bot', 'New_Guy', 'Alice_07']);
+  assert.deepEqual(await nicks('online'), ['Steve_Bot', 'New_Guy', 'Alice_07', 'Owner_1']);
+  const listed = (await alice.get('/api/players')).data;
+  assert.equal(listed.full, true);
+  assert.equal(listed.online, 1);
   assert.equal((await nicks('recent'))[0], 'Steve_Bot');
   assert.deepEqual(await nicks('online', 'ALI'), ['Alice_07']);
   assert.deepEqual(await nicks('online', 'нет такого'), []);
   assert.equal((await alice.get('/api/players/nobody_here')).status, 404);
 });
 
-test('карточки: «Пользователю» — 403, без входа — 401, видят игроки и админы', async () => {
-  for (const url of ['/api/players', '/api/players/Alice_07', '/api/me/card']) {
-    assert.equal((await bob.get(url)).status, 403, url);
-    assert.equal((await client().get(url)).status, 401, url);
+test('карточки: видны всем; гостю и «Пользователю» — без статистики и «в сети», порядок по нику', async () => {
+  for (const who of [bob, client()]) {
+    const list = await who.get('/api/players?sort=playtime');
+    assert.equal(list.status, 200);
+    assert.equal(list.data.full, false);
+    assert.ok(!('online' in list.data), 'сколько в сети — только игрокам');
+    assert.deepEqual(
+      list.data.players.map((p) => p.nickname),
+      ['Alice_07', 'New_Guy', 'Owner_1', 'Steve_Bot'],
+      'по нику, сортировка из запроса не действует'
+    );
+    const p = (await who.get('/api/players/Alice_07')).data.player;
+    assert.deepEqual(Object.keys(p).sort(), ['avatar', 'background', 'bio', 'creator', 'nickname', 'pose', 'role', 'skinSlim', 'skinUrl', 'socials']);
   }
+  assert.equal((await client().get('/api/players/nobody_here')).status, 404);
+  // Своя карточка — только «Игрокам» и админам.
+  assert.equal((await bob.get('/api/me/card')).status, 403);
+  assert.equal((await client().get('/api/me/card')).status, 401);
   assert.equal((await bob.patch('/api/me/card', { bio: 'привет' })).status, 403);
-  assert.equal((await owner.get('/api/players')).status, 200);
+  assert.equal((await bob.put('/api/me/skin', SKIN_PNG, { 'Content-Type': 'application/octet-stream' })).status, 403);
+  assert.equal((await owner.get('/api/players')).data.full, true);
+  // Сколько в сети — без входа, только число.
+  const online = await client().get('/api/online');
+  assert.equal(online.status, 200);
+  assert.deepEqual(online.data, { count: 1 });
 });
 
 test('карточки: «о себе», скрыть поля и всю карточку; проверка PATCH /api/me/card', async () => {
   const empty = (await alice.get('/api/me/card')).data;
-  assert.deepEqual({ ...empty, player: !!empty.player }, { bio: '', hidden: false, hideFields: [], player: true });
+  assert.deepEqual(
+    { ...empty, card: empty.card.nickname },
+    { bio: '', hidden: false, hideFields: [], pose: 'stand', background: 'meadow', socials: {}, skin: null, card: 'Alice_07' }
+  );
 
   for (const [body, field] of [
     [{ bio: 'x'.repeat(141) }, 'bio'],
@@ -873,6 +900,13 @@ test('карточки: «о себе», скрыть поля и всю кар�
     [{ hidden: 'yes' }, 'hidden'],
     [{ hideFields: ['coords'] }, 'hideFields'],
     [{ hideFields: 'deaths' }, 'hideFields'],
+    [{ pose: 'dab' }, 'pose'],
+    [{ background: 'https://evil.example/bg.png' }, 'background'],
+    [{ socials: 'telegram' }, 'socials'],
+    [{ socials: { myspace: 'alice' } }, 'socials'],
+    [{ socials: { telegram: 'https://evil.example' } }, 'socials'],
+    [{ socials: { youtube: 'a"><script>' } }, 'socials'],
+    [{ socials: { vk: 42 } }, 'socials'],
   ]) {
     const r = await alice.patch('/api/me/card', body);
     assert.equal(r.status, 422, JSON.stringify(body));
@@ -885,6 +919,17 @@ test('карточки: «о себе», скрыть поля и всю кар�
   assert.deepEqual(saved.data.hideFields, ['deaths', 'lastSeen']);
   assert.equal((await alice.patch('/api/me/card', { bio: 'й'.repeat(140) })).status, 200, 'ровно 140 — можно');
   await alice.patch('/api/me/card', { bio: 'Строю замки' });
+
+  // Поза, фон и соцсети видны всем; пустая строка убирает соцсеть, остальные не трогаются.
+  const look = await alice.patch('/api/me/card', { pose: 'wave', background: 'nether', socials: { telegram: 'alice_tg', discord: 'alice.07', twitch: 'alice_live' } });
+  assert.equal(look.status, 200);
+  assert.deepEqual(look.data.socials, { telegram: 'alice_tg', discord: 'alice.07', twitch: 'alice_live' });
+  assert.deepEqual((await alice.patch('/api/me/card', { socials: { twitch: '' } })).data.socials, { telegram: 'alice_tg', discord: 'alice.07' });
+  const guestView = (await client().get('/api/players/Alice_07')).data.player;
+  assert.equal(guestView.pose, 'wave');
+  assert.equal(guestView.background, 'nether');
+  assert.deepEqual(guestView.socials, { telegram: 'alice_tg', discord: 'alice.07' });
+  assert.equal(guestView.bio, 'Строю замки');
 
   // Скрытые поля вырезает сервер: их нет ни в списке, ни в карточке.
   const seen = (await owner.get('/api/players/Alice_07')).data.player;
@@ -899,18 +944,20 @@ test('карточки: «о себе», скрыть поля и всю кар�
   assert.equal((await alice.patch('/api/me/card', { hidden: true })).data.hidden, true);
   assert.ok(!(await owner.get('/api/players')).data.players.some((x) => x.nickname === 'Alice_07'));
   assert.equal((await alice.get('/api/players?q=alice')).data.players.length, 0);
+  assert.ok(!(await client().get('/api/players')).data.players.some((x) => x.nickname === 'Alice_07'), 'гостю тоже не видна');
   const hidden = await owner.get('/api/players/Alice_07');
   assert.equal(hidden.status, 404);
   assert.equal(hidden.data.message, (await owner.get('/api/players/nobody_here')).data.message);
   const mine = (await alice.get('/api/me/card')).data;
   assert.equal(mine.hidden, true);
   assert.equal(mine.bio, 'Строю замки', 'остальное сохранилось');
+  assert.equal(mine.card.nickname, 'Alice_07', 'себе — предпросмотр, даже скрытой');
 
   await alice.patch('/api/me/card', { hidden: false, hideFields: [] });
   assert.equal((await owner.get('/api/players/Alice_07')).data.player.stats.deaths, 3);
 });
 
-test('карточки: скин качается только с textures.minecraft.net, отдаётся игрокам с ETag', async () => {
+test('карточки: скин качается только с textures.minecraft.net, отдаётся всем по адресу .png', async () => {
   const hitsBefore = textureHits.length;
   const hex = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
   const evil = [
@@ -933,20 +980,22 @@ test('карточки: скин качается только с textures.minec
   assert.equal(statsRow('New_Guy').skin_hash, null, 'больше 64 КБ');
 
   const p = (await alice.get('/api/players/Alice_07')).data.player;
-  assert.match(p.skinUrl, /^\/api\/skins\/[0-9a-f]{64}$/);
+  assert.match(p.skinUrl, /^\/api\/skins\/[0-9a-f]{64}\.png$/);
   assert.equal(p.skinSlim, true);
-  assert.ok(fs.existsSync(path.join(dataDir, 'skins', p.skinUrl.split('/').pop() + '.png')));
+  assert.ok(fs.existsSync(path.join(dataDir, 'skins', p.skinUrl.split('/').pop())));
 
   const img = await alice.get(p.skinUrl);
   assert.equal(img.status, 200);
   assert.equal(img.headers.get('content-type'), 'image/png');
-  assert.equal(img.headers.get('cache-control'), 'private, no-cache');
+  assert.equal(img.headers.get('cache-control'), 'public, max-age=31536000, immutable', 'имя — хеш картинки, она не меняется');
   assert.equal(img.headers.get('x-content-type-options'), 'nosniff');
   assert.ok(img.data.equals(SKIN_PNG));
   assert.equal((await alice.get(p.skinUrl, { 'If-None-Match': img.headers.get('etag') })).status, 304);
-  assert.equal((await bob.get(p.skinUrl)).status, 403);
-  assert.equal((await client().get(p.skinUrl)).status, 401);
+  assert.equal((await bob.get(p.skinUrl)).status, 200);
+  assert.equal((await client().get(p.skinUrl)).status, 200, 'карточки публичные — скины тоже');
+  assert.equal((await client().get(p.skinUrl.replace(/\.png$/, ''))).status, 200);
   assert.equal((await alice.get('/api/skins/..%2F..%2Flwl.db')).status, 404);
+  assert.equal((await alice.get('/api/skins/' + 'f'.repeat(64) + '.png')).status, 404);
 
   // Тот же скин ещё раз — заново не качается; без скина в запросе — старый остаётся.
   const hits = textureHits.length;
@@ -955,6 +1004,52 @@ test('карточки: скин качается только с textures.minec
   assert.equal(textureHits.length, hits);
   await game('POST', '/api/game/stats', { players: [statsOf('Alice_07')] });
   assert.equal((await alice.get('/api/players/Alice_07')).data.player.skinUrl, p.skinUrl);
+});
+
+/** Тот же PNG 64×64 с лишними байтами после IEND: картинка та же, хеш другой. */
+const skinVariant = (n) => Buffer.concat([SKIN_PNG, Buffer.from(`lwl${n}`)]);
+
+test('свой скин: загрузка в кабинете, проверка файла, без RCON — только на сайте', async () => {
+  const raw = (who, body, model) => who.put('/api/me/skin', body, { 'Content-Type': 'application/octet-stream', ...(model ? { 'X-Skin-Model': model } : {}) });
+  assert.equal((await raw(alice, Buffer.from('<html>не картинка</html>'))).status, 422);
+  assert.equal((await raw(alice, PNG)).status, 422, 'PNG, но не 64×64');
+  assert.equal((await raw(alice, Buffer.concat([SKIN_PNG, Buffer.alloc(70 * 1024)]))).status, 413);
+  assert.equal((await client().put('/api/me/skin', SKIN_PNG, { 'Content-Type': 'application/octet-stream' })).status, 401);
+
+  const up = await raw(alice, skinVariant(1), 'slim');
+  assert.equal(up.status, 200);
+  assert.equal(up.data.skin.slim, true);
+  assert.equal(up.data.skin.sync.status, 'off', 'RCON не настроен');
+  assert.match(up.data.skin.sync.message, /RCON/);
+  assert.equal(up.data.card.skinUrl, up.data.skin.url, 'на карточке — свой скин (он новее скина из игры)');
+  assert.equal(up.data.card.skinSlim, true);
+  const img = await client().get(up.data.skin.url);
+  assert.ok(img.data.equals(skinVariant(1)));
+
+  // Сменил скин в игре — на карточке он (свежее), свой из кабинета остаётся в запасе.
+  await new Promise((r) => setTimeout(r, 5));
+  await game('POST', '/api/game/stats', { players: [statsOf('Alice_07', { skin: { url: `${texturesOrigin}/texture/ffff0000ffff0000`, slim: false } })] });
+  await app.skins.idle();
+  const after = (await client().get('/api/players/Alice_07')).data.player;
+  assert.notEqual(after.skinUrl, up.data.skin.url);
+  assert.equal(after.skinSlim, false);
+
+  // Тонкие/обычные руки — без новой загрузки, и свой скин снова главный.
+  const model = await alice.patch('/api/me/skin', { slim: false });
+  assert.equal(model.status, 200);
+  assert.equal(model.data.card.skinUrl, up.data.skin.url);
+  assert.equal((await alice.patch('/api/me/skin', { slim: 'yes' })).status, 422);
+  assert.equal((await bob.patch('/api/me/skin', { slim: true })).status, 403);
+  assert.equal((await alice.post('/api/me/skin/sync')).data.skin.sync.status, 'off');
+
+  // Убрать: свой скин и скин из игры (это копия своего) — до следующего отчёта мода стандартный.
+  const removed = await alice.del('/api/me/skin');
+  assert.equal(removed.status, 200);
+  assert.equal(removed.data.skin, null);
+  assert.equal(removed.data.card.skinUrl, '/assets/img/skin-default.png');
+  assert.equal((await alice.post('/api/me/skin/sync')).status, 404);
+  // Файл никто не использует — sweep уберёт его через сутки, а пока он на диске.
+  assert.ok(fs.existsSync(path.join(dataDir, 'skins', up.data.skin.url.split('/').pop())));
 });
 
 test('сборки: загрузка, проверка файла, публикация, скачивание с докачкой', async () => {
@@ -989,6 +1084,7 @@ test('статика: страницы есть, служебные файлы �
   const index = await fetch(base + '/');
   assert.equal(index.status, 200);
   assert.match(index.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  assert.equal((await fetch(base + '/players.html')).status, 200, 'страница игроков');
   for (const p of ['/server/app.js', '/data/lwl.db', '/package.json', '/.git/config', '/assets/../server/app.js', '/tests/api.test.mjs']) {
     assert.equal((await fetch(base + p)).status, 404, p);
   }
@@ -1036,7 +1132,9 @@ function fakeRcon(password) {
         } else if (type === 2 && authed) {
           commands.push(text);
           const m = /^wl add (\w+)/.exec(text);
-          send(id, 0, m ? `${m[1]} добавлен в вайтлист.` : 'Вайтлист выключен, в нём пока никого нет.');
+          if (/^skin of \w+ url /.test(text)) send(id, 0, 'Загружаю скин по ссылке, это займёт несколько секунд…');
+          else if (/^skin of \w+ clear$/.test(text)) send(id, 0, '');
+          else send(id, 0, m ? `${m[1]} добавлен в вайтлист.` : 'Вайтлист выключен, в нём пока никого нет.');
         }
       }
     });
@@ -1086,6 +1184,48 @@ test('автовайтлист: одобрение сразу добавляет
     assert.ok(rcon.commands.includes('wl add Erin_1'), 'лицензия — без cracked');
     assert.equal((await boss.post(`/api/applications/${dApp.id}/whitelist`)).status, 200);
     assert.equal((await dave.post(`/api/applications/${dApp.id}/whitelist`)).status, 403);
+  } finally {
+    base = saved;
+    await app2.close();
+    await new Promise((r) => rcon.server.close(() => r()));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('свой скин: сайт сам ставит его на сервер через RCON (/skin of <ник> url …)', async () => {
+  const rcon = fakeRcon('rcon-secret');
+  await new Promise((r) => rcon.server.listen(0, '127.0.0.1', r));
+  const rconPort = rcon.server.address().port;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-skin-'));
+  const app2 = createApp(
+    loadConfig({ LWL_DATA_DIR: dir, LWL_ADMINS: 'boss@example.com', LWL_FAST_HASH: '1', LWL_RCON_PASSWORD: 'rcon-secret', LWL_RCON_PORT: String(rconPort), LWL_RCON_TIMEOUT_MS: '2000', LWL_PUBLIC_URL: 'https://lwl.example' })
+  );
+  await new Promise((r) => app2.server.listen(0, '127.0.0.1', r));
+  const saved = base;
+  base = `http://127.0.0.1:${app2.server.address().port}`;
+  try {
+    const boss = client();
+    await boss.post('/api/auth/register', { nickname: 'Boss_1', email: 'boss@example.com', password: 'Passw0rd1' });
+    const up = await boss.put('/api/me/skin', SKIN_PNG, { 'Content-Type': 'application/octet-stream', 'X-Skin-Model': 'slim' });
+    assert.equal(up.status, 200);
+    assert.deepEqual(up.data.skin.sync, { status: 'ok', message: '' });
+    const hash = up.data.skin.url.match(/[0-9a-f]{64}/)[0];
+    assert.deepEqual(rcon.commands, [`skin of Boss_1 url https://lwl.example/api/skins/${hash}.png slim`], 'ссылка — на публичный адрес сайта');
+
+    await boss.patch('/api/me/skin', { slim: false });
+    assert.equal(rcon.commands.at(-1), `skin of Boss_1 url https://lwl.example/api/skins/${hash}.png`);
+
+    // Сервер выключен — ошибка видна, «Повторить» отправляет ещё раз.
+    await new Promise((r) => rcon.server.close(r));
+    const failed = await boss.post('/api/me/skin/sync');
+    assert.equal(failed.data.skin.sync.status, 'error');
+    assert.match(failed.data.skin.sync.message, /выключен/);
+    await new Promise((r) => rcon.server.listen(rconPort, '127.0.0.1', r));
+    assert.equal((await boss.post('/api/me/skin/sync')).data.skin.sync.status, 'ok');
+
+    await boss.del('/api/me/skin');
+    assert.equal(rcon.commands.at(-1), 'skin of Boss_1 clear');
+    assert.equal(rcon.commands.length, 4);
   } finally {
     base = saved;
     await app2.close();

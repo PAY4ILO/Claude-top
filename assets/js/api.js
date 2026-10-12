@@ -31,6 +31,7 @@
     packDescription: { max: 1000 },
     packVersion: { max: 40 },
     cardBio: { max: 140 },
+    skinBytes: 64 * 1024,
   };
 
   const APPLICATION_SOURCES = ['Друзья', 'YouTube', 'TikTok', 'Telegram', 'Другое'];
@@ -56,6 +57,38 @@
     firstSeen: 'Первый вход',
     lastSeen: 'Когда был в игре',
   };
+  /** Позы и фоны карточки (ключи — как в server/lib/validate.js → CARD_POSES, CARD_BACKGROUNDS). */
+  const CARD_POSES = { stand: 'Стоит', wave: 'Машет', walk: 'Идёт', cheer: 'Ура!', point: 'Указывает', sit: 'Сидит' };
+  const CARD_BACKGROUNDS = { meadow: 'Луг', night: 'Ночь', sunset: 'Закат', ocean: 'Океан', cave: 'Пещера', snow: 'Снег', nether: 'Незер', end: 'Энд' };
+  /**
+   * Соцсети на карточке. Хранится только ник (pattern — как в server/lib/validate.js → SOCIALS),
+   * ссылку собирает страница: url + ник. Без url (Discord) — ник копируется.
+   * hosts — с каких адресов можно вставить ссылку целиком: ник из неё достанет parseSocial.
+   */
+  const SOCIALS = {
+    telegram: { label: 'Telegram', url: 'https://t.me/', at: true, pattern: /^[A-Za-z][A-Za-z0-9_]{4,31}$/, hosts: ['t.me', 'telegram.me'], placeholder: '@nickname' },
+    discord: { label: 'Discord', url: null, pattern: /^[A-Za-z0-9_.]{2,32}(#\d{4})?$/, hosts: [], placeholder: 'nickname' },
+    youtube: { label: 'YouTube', url: 'https://www.youtube.com/@', at: true, pattern: /^[A-Za-z0-9_.-]{3,30}$/, hosts: ['youtube.com', 'www.youtube.com', 'm.youtube.com'], placeholder: '@channel' },
+    twitch: { label: 'Twitch', url: 'https://www.twitch.tv/', pattern: /^[A-Za-z0-9_]{3,25}$/, hosts: ['twitch.tv', 'www.twitch.tv'], placeholder: 'nickname' },
+    vk: { label: 'VK', url: 'https://vk.com/', pattern: /^[A-Za-z0-9_.]{2,32}$/, hosts: ['vk.com', 'm.vk.com', 'vk.ru'], placeholder: 'nickname' },
+    tiktok: { label: 'TikTok', url: 'https://www.tiktok.com/@', at: true, pattern: /^[A-Za-z0-9_.]{2,24}$/, hosts: ['tiktok.com', 'www.tiktok.com'], placeholder: '@nickname' },
+  };
+
+  /** Что ввели в поле соцсети → ник: «@name», «name» или ссылка на профиль. Непонятное — как есть (покажем ошибку). */
+  function parseSocial(key, raw) {
+    let v = String(raw || '').trim();
+    const s = SOCIALS[key];
+    if (!v || !s) return v;
+    if (/^(https?:\/\/)?[\w.-]+\.\w+\//i.test(v)) {
+      try {
+        const u = new URL(/^https?:\/\//i.test(v) ? v : 'https://' + v);
+        if (s.hosts.includes(u.hostname.toLowerCase())) v = decodeURIComponent(u.pathname.split('/').filter(Boolean)[0] || '');
+      } catch (e) {
+        /* оставим как есть */
+      }
+    }
+    return v.replace(/^@/, '');
+  }
 
   /* ------------------------------------------------------------------ ошибки */
 
@@ -149,6 +182,20 @@
       if (d.hideFields !== undefined) {
         const keys = Object.keys(CARD_FIELDS);
         if (!Array.isArray(d.hideFields) || d.hideFields.length > keys.length || d.hideFields.some((k) => !keys.includes(k))) f.hideFields = 'Неизвестное поле карточки.';
+      }
+      if (d.pose !== undefined && !Object.hasOwn(CARD_POSES, d.pose)) f.pose = 'Такой позы нет.';
+      if (d.background !== undefined && !Object.hasOwn(CARD_BACKGROUNDS, d.background)) f.background = 'Такого фона нет.';
+      if (d.socials !== undefined) {
+        if (!d.socials || typeof d.socials !== 'object' || Array.isArray(d.socials)) f.socials = { _: 'Нужен список соцсетей.' };
+        else {
+          const bad = {};
+          for (const [key, v] of Object.entries(d.socials)) {
+            if (!Object.hasOwn(SOCIALS, key)) bad[key] = 'Такой соцсети нет.';
+            else if (typeof v !== 'string') bad[key] = 'Это должен быть текст.';
+            else if (v && !SOCIALS[key].pattern.test(v)) bad[key] = 'Ник выглядит неправильно.';
+          }
+          if (Object.keys(bad).length) f.socials = bad;
+        }
       }
       return f;
     },
@@ -289,6 +336,10 @@
     CREATOR_LABEL,
     LAUNCHERS,
     CARD_FIELDS,
+    CARD_POSES,
+    CARD_BACKGROUNDS,
+    SOCIALS,
+    parseSocial,
     ApiError,
     validate,
     on,
@@ -405,14 +456,19 @@
       newCode: () => http('POST', '/me/connect-code'),
     },
 
-    /** Карточки игроков (статистика с Minecraft-сервера). Только «Игрокам» и админам. */
+    /**
+     * Карточки игроков — их видят все, даже без входа (ник, скин, поза, фон, «о себе», соцсети).
+     * Вошедшим «Игрокам» и админам — ещё статистика и «в сети» (в ответе full: true).
+     */
     players: {
-      /** sort: 'online' | 'playtime' | 'recent'; → { players: [карточка], total } */
-      list: ({ sort = 'online', query = '' } = {}) => http('GET', '/players' + q({ sort, q: query.trim() })),
-      get: (nickname) => http('GET', `/players/${enc(nickname)}`).then((d) => d.player),
-      /** Своя карточка: { bio, hidden, hideFields, player (как видят другие, или null — ещё не заходил) } */
+      /** sort: 'online' | 'playtime' | 'recent' (без статистики — по нику); → { players, total, full } */
+      list: ({ sort = 'online', query = '' } = {}) => http('GET', '/players' + q({ sort, q: query.trim() }), undefined, true),
+      get: (nickname) => http('GET', `/players/${enc(nickname)}`, undefined, true).then((d) => d.player),
+      /** Сколько человек сейчас на сервере (без входа): { count } */
+      online: () => http('GET', '/online', undefined, true),
+      /** Своя карточка: { card (как её видят), bio, hidden, hideFields, pose, background, socials, skin: { slim, sync } | null } */
       myCard: () => http('GET', '/me/card'),
-      /** Меняет только переданное: { bio?, hidden?, hideFields? } */
+      /** Меняет только переданное: { bio?, hidden?, hideFields?, pose?, background?, socials? } */
       async updateMyCard(patch) {
         const fields = validate.card(patch);
         if (Object.keys(fields).length) throw new ApiError('VALIDATION', null, { fields });
@@ -420,6 +476,33 @@
         emit('players');
         return card;
       },
+      /** Проверить файл скина ещё в браузере: PNG 64×64 (или старый 64×32), до 64 КБ. → { slim } — похоже ли на тонкие руки. */
+      async checkSkinFile(file) {
+        if (!file) throw new ApiError('VALIDATION', 'Выберите файл.');
+        if (file.size > LIMITS.skinBytes) throw new ApiError('VALIDATION', 'Файл больше 64 КБ. Скин — маленькая картинка PNG 64×64.');
+        if (file.type && file.type !== 'image/png') throw new ApiError('VALIDATION', 'Скин — это картинка PNG.');
+        const url = URL.createObjectURL(file);
+        try {
+          const skin = await window.Skin3D.load(url, { cache: false });
+          return { slim: window.Skin3D.guessSlim(skin) };
+        } catch (e) {
+          throw new ApiError('VALIDATION', 'Это не скин Minecraft: нужна картинка PNG 64×64 (или старая 64×32).');
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      },
+      /** Свой скин: сайт сохранит его и сам поставит на сервере Minecraft. → как myCard */
+      async uploadSkin(file, slim, onProgress) {
+        const d = await upload('/me/skin', file, onProgress, { 'X-Skin-Model': slim ? 'slim' : 'classic' });
+        emit('players');
+        return d;
+      },
+      /** Тонкие (Алекс) или обычные (Стив) руки. */
+      setSkinModel: (slim) => http('PATCH', '/me/skin', { slim: !!slim }).then((d) => (emit('players'), d)),
+      /** Ещё раз поставить скин на сервере (если в прошлый раз не вышло). */
+      syncSkin: () => http('POST', '/me/skin/sync').then((d) => (emit('players'), d)),
+      removeSkin: () => http('DELETE', '/me/skin').then((d) => (emit('players'), d)),
+      onChange: (cb) => on('players', cb),
     },
 
     /** Ссылки для страниц сайта (Telegram, Discord); запрашиваются один раз. */

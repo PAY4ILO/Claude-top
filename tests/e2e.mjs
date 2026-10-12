@@ -14,7 +14,8 @@ import { loadConfig } from '../server/config.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-e2e-'));
-const app = createApp(loadConfig({ LWL_DATA_DIR: dataDir, LWL_ADMINS: 'pay@example.com', LWL_FAST_HASH: '1' }));
+const GAME_TOKEN = 'e2e-game-token-0123456789abcdef';
+const app = createApp(loadConfig({ LWL_DATA_DIR: dataDir, LWL_ADMINS: 'pay@example.com', LWL_FAST_HASH: '1', LWL_GAME_TOKEN: GAME_TOKEN }));
 await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
 const BASE = `http://127.0.0.1:${app.server.address().port}`;
 
@@ -90,7 +91,7 @@ ok('аватар загружен и отдаётся сервером', (await 
 ok('новая аватарка сразу в меню и в шапке', (await A.locator('.nav-profile .avatar img').count()) === 1 && (await A.locator('.user-btn .avatar img').count()) === 1);
 await A.goto(BASE + '/lk.html#/'); await A.waitForSelector('.stat__num'); await settle(A);
 ok('владелец из LWL_ADMINS сразу админ', (await A.locator('.page-title').innerText()) === 'Панель администратора');
-ok('меню админа: заявки, обращения, люди, сервер', ['applications', 'tickets', 'users', 'server'].every(async () => true) && (await A.locator('.app-nav .nav-list .nav-link').count()) === 6);
+ok('меню админа: заявки, обращения, люди, сервер, игроки', (await A.locator('.app-nav .nav-list .nav-link').count()) === 7 && (await A.locator('.app-nav .nav-link[data-key=players]').count()) === 1);
 ok('владелец — «Создатель»', (await A.locator('.nav-profile .role').innerText()) === 'Создатель');
 
 // настройки сервера и сборка
@@ -127,7 +128,7 @@ await register(B, '__Hawker__', 'hawk@example.com', 'Hawker123');
 await B.goto(BASE + '/lk.html#/'); await B.waitForSelector('.hero-card:not(.hero-card--loading)'); await settle(B);
 ok('новичок — «Пользователь»', (await B.locator('.nav-profile .role').innerText()) === 'Пользователь');
 ok('главная: призыв подать заявку', (await B.locator('.hero-card__title').innerText()) === 'Подайте заявку на сервер');
-ok('меню пользователя: 4 раздела, без «Сервера»', (await B.locator('.app-nav .nav-list .nav-link').count()) === 4 && (await B.locator('.app-nav .nav-link[data-key=server]').count()) === 0);
+ok('меню пользователя: 5 разделов (с «Игроками»), без «Сервера»', (await B.locator('.app-nav .nav-list .nav-link').count()) === 5 && (await B.locator('.app-nav .nav-link[data-key=server]').count()) === 0);
 await B.goto(BASE + '/lk.html#/server'); await B.waitForSelector('.state__title');
 ok('«Сервер» закрыт до одобрения', (await B.locator('.state__title').innerText()).includes('после одобрения'));
 ok('скачать сборку без роли «Игрок» нельзя', (await B.request.get(BASE + '/api/admin/packs')).status() === 403);
@@ -325,6 +326,64 @@ ok('игрок скачивает сборку', file.status() === 200 && (await
 await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('input[name=nickname]');
 ok('игрок не меняет ник сам (он в вайтлисте)', (await B.locator('input[name=nickname]').getAttribute('readonly')) !== null);
 
+/* ================================================================ карточки игроков */
+// Мод lwl-stats присылает статистику и «в сети» (как настоящий сервер Minecraft).
+const gamePost = (url, data) => B.request.post(BASE + url, { headers: { Authorization: 'Bearer ' + GAME_TOKEN, 'X-Requested-With': 'lwl', 'Content-Type': 'application/json' }, data });
+const statsSent = await gamePost('/api/game/stats', { players: [{ nickname: '__Hawker__', playTimeSec: 12 * 3600, deaths: 4, mobKills: 1234, playerKills: 0, blocksMined: 10500, distanceM: 3400, advancements: 7 }] });
+await gamePost('/api/game/presence', { players: ['__Hawker__'] });
+ok('мод: статистика и «в сети» приняты', statsSent.status() === 204);
+
+await B.goto(BASE + '/lk.html#/players'); await B.waitForSelector('.pcard[data-nick="__Hawker__"]');
+const myCardText = await B.locator('.pcard[data-nick="__Hawker__"]').innerText();
+ok('игрок видит свою карточку в «Игроках»: «в сети», часы, км, тысячи', /в сети/.test(myCardText) && myCardText.includes('12 ч') && myCardText.includes('3,4 км') && /1\s234/.test(myCardText), myCardText.replace(/\s+/g, ' '));
+ok('звание «Шахтёр» за 10 000+ блоков', myCardText.includes('Шахтёр'));
+ok('вкладки сортировки и «Топы» — игроку', (await B.locator('.players__tabs:not([hidden]) .tabs__tab').count()) === 4);
+ok('скин нарисован на холсте', (await B.locator('.pcard[data-nick="__Hawker__"] canvas').count()) === 1);
+await B.click('.pcard[data-nick="__Hawker__"] .pcard__open'); await B.waitForSelector('.modal__dialog .skin3d canvas');
+ok('окно игрока: 3D-скин, позы, статистика', (await B.locator('.modal__dialog .chip').count()) === 6 && (await B.locator('.modal__dialog .pdetail__stat').count()) >= 5);
+await B.keyboard.press('Escape'); await B.waitForSelector('.modal__dialog', { state: 'detached' });
+ok('окно закрывается по Esc', true);
+
+// Профиль: поза, фон, «о себе», соцсети, свой скин.
+await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card .chip');
+await B.click('.my-card .chip:has-text("Машет")'); await B.waitForSelector('.toast:has-text("Поза сохранена")'); await settle(B, 300);
+await B.click('.my-card .swatch[aria-label="Незер"]'); await B.waitForSelector('.toast:has-text("Фон сохранён")'); await settle(B, 300);
+await B.fill('.my-card textarea[name=bio]', 'Строю мосты над лавой');
+await B.fill('.my-card input[name=social-telegram]', 'https://t.me/hawker_tg');
+await B.fill('.my-card input[name=social-youtube]', 'не ник!');
+await B.click('.my-card__form button[type=submit]');
+ok('соцсеть с ошибкой подсвечена, ничего не ушло', (await B.locator('.my-card .field.has-error input[name=social-youtube]').count()) === 1);
+await B.fill('.my-card input[name=social-youtube]', '');
+await B.click('.my-card__form button[type=submit]'); await B.waitForSelector('.toast:has-text("Карточка сохранена")'); await settle(B, 300);
+const saved = await (await B.request.get(BASE + '/api/me/card')).json();
+ok('карточка сохранена: поза, фон, «о себе», ник из ссылки Telegram', saved.pose === 'wave' && saved.background === 'nether' && saved.bio === 'Строю мосты над лавой' && saved.socials.telegram === 'hawker_tg', JSON.stringify({ pose: saved.pose, background: saved.background, socials: saved.socials }));
+await B.setInputFiles('#skin-file', path.join(HERE, '../assets/img/skin-default.png'));
+await B.waitForSelector('.toast:has-text("Скин загружен")'); await settle(B, 300);
+ok('свой скин загружен; без RCON — честно «поставит администрация»', (await B.locator('.skin-sync__text').innerText()).includes('администрация') && (await B.locator('button:has-text("Убрать свой скин")').count()) === 1);
+
+// Гость: публичная страница — ник, скин, «о себе», соцсети, без статистики.
+const G = await person('G');
+await G.setViewportSize({ width: 320, height: 700 });
+await G.goto(BASE + '/players.html'); await G.waitForSelector('.pcard[data-nick="__Hawker__"]');
+const guestCard = await G.locator('.pcard[data-nick="__Hawker__"]').innerText();
+ok('гость видит карточку: «о себе» и Telegram, но без статистики и «в сети»', guestCard.includes('Строю мосты над лавой') && guestCard.includes('Telegram') && !guestCard.includes('12 ч') && !/в сети/.test(guestCard), guestCard.replace(/\s+/g, ' '));
+ok('гостю — пояснение про статистику, без вкладок', !(await G.locator('[data-players-note]').isHidden()) && (await G.locator('.players__tabs').isHidden()));
+ok('ссылка Telegram собрана сайтом', (await G.locator('.pcard[data-nick="__Hawker__"] a.social--telegram').getAttribute('href')) === 'https://t.me/hawker_tg');
+await G.waitForSelector('[data-online]:not([hidden])');
+ok('«Сейчас на сервере: 1»', (await G.locator('[data-online]').innerText()).includes('Сейчас на сервере: 1'));
+ok('players.html на 320px без горизонтальной прокрутки', await G.evaluate(() => document.documentElement.scrollWidth <= 320));
+
+// Скрыть карточку в профиле → она пропадает из списка (и у игрока, и у гостя).
+await B.locator('label.checkbox--hint', { hasText: 'Скрыть карточку' }).click();
+await B.waitForSelector('.toast:has-text("Карточка скрыта")'); await settle(B, 300);
+await B.goto(BASE + '/lk.html#/players'); await B.waitForSelector('.players__box[aria-busy="false"] .pcard, .players__box[aria-busy="false"] .state');
+ok('скрытая карточка исчезла из «Игроков»', (await B.locator('.pcard[data-nick="__Hawker__"]').count()) === 0);
+await G.reload(); await G.waitForSelector('.players__box[aria-busy="false"] .pcard, .players__box[aria-busy="false"] .state');
+ok('и с публичной страницы', (await G.locator('.pcard[data-nick="__Hawker__"]').count()) === 0);
+await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card .chip');
+await B.locator('label.checkbox--hint', { hasText: 'Скрыть карточку' }).click();
+await B.waitForSelector('.toast:has-text("Карточка снова видна")'); await settle(B, 300);
+
 /* ================================================================ сброс пароля по ссылке */
 await C.goto(BASE + '/lk.html'); await C.waitForSelector('.auth-dialog');
 await C.click('.link-btn:has-text("Забыли пароль?")');
@@ -415,6 +474,8 @@ await A.click('.modal__actions .btn:not(.btn--ghost)');
 await A.waitForURL('**/index.html');
 ok('выход → лендинг', true);
 ok('лендинг берёт ссылку Telegram из настроек', (await A.locator('[data-telegram-link]').first().getAttribute('href')) === 'https://t.me/lwl_test');
+await A.waitForSelector('[data-showcase-section]:not([hidden]) .pcard');
+ok('на главной — карточки игроков и «Все игроки»', (await A.locator('[data-players-showcase] .pcard').count()) >= 1 && (await A.locator('a[href="players.html"]:has-text("Все игроки")').count()) === 1);
 
 /* ================================================================ база */
 const rows = app.db.prepare('SELECT password_hash FROM users').all();

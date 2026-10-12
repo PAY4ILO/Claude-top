@@ -1,0 +1,692 @@
+/* ==========================================================================
+   Карточки игроков: публичная страница, витрина на главной, кабинет
+   ========================================================================== */
+
+/* ------------------------------------------------------------ фоны карточек */
+/* Только градиенты — без картинок. Ключи — как в Api.CARD_BACKGROUNDS. */
+
+.bg--meadow {
+  background:
+    linear-gradient(180deg, transparent 72%, #4c8a2c 72%, #3d7124 80%, #6b4a2b 80%),
+    linear-gradient(180deg, #6fb7ff 0%, #a9dcff 72%);
+}
+.bg--night {
+  background:
+    radial-gradient(1.5px 1.5px at 18% 22%, #fff 99%, transparent),
+    radial-gradient(1.5px 1.5px at 62% 14%, #fff 99%, transparent),
+    radial-gradient(1px 1px at 80% 40%, #fff 99%, transparent),
+    radial-gradient(1px 1px at 35% 48%, #dfe8ff 99%, transparent),
+    radial-gradient(14px 14px at 82% 20%, #f4f1d6 98%, transparent),
+    linear-gradient(180deg, transparent 74%, #1f3a2a 74%),
+    linear-gradient(180deg, #0b1230 0%, #23315f 74%);
+}
+.bg--sunset {
+  background:
+    radial-gradient(28px 28px at 72% 64%, #ffe08a 96%, transparent),
+    linear-gradient(180deg, transparent 74%, #3f2a3d 74%),
+    linear-gradient(180deg, #3a2f7a 0%, #e25d74 45%, #ffb36b 74%);
+}
+.bg--ocean {
+  background:
+    linear-gradient(180deg, transparent 60%, rgba(255, 255, 255, 0.35) 60%, rgba(255, 255, 255, 0.35) 61.5%, transparent 61.5%),
+    linear-gradient(180deg, transparent 74%, #d9c78b 74%),
+    linear-gradient(180deg, #7fd3ff 0%, #2a8fd0 60%, #136ba6 74%);
+}
+.bg--cave {
+  background:
+    radial-gradient(3px 3px at 22% 30%, #67e0e8 99%, transparent),
+    radial-gradient(3px 3px at 70% 54%, #f7a54a 99%, transparent),
+    radial-gradient(2px 2px at 48% 18%, #67e0e8 99%, transparent),
+    linear-gradient(180deg, transparent 74%, #3b3b3b 74%),
+    linear-gradient(180deg, #1b1b1b 0%, #4a4a4a 74%);
+}
+.bg--snow {
+  background:
+    radial-gradient(2px 2px at 20% 30%, #fff 99%, transparent),
+    radial-gradient(2px 2px at 60% 20%, #fff 99%, transparent),
+    radial-gradient(2px 2px at 85% 45%, #fff 99%, transparent),
+    linear-gradient(180deg, transparent 74%, #f4f8ff 74%),
+    linear-gradient(180deg, #a9c6e8 0%, #dbe8f7 74%);
+}
+.bg--nether {
+  background:
+    radial-gradient(40px 20px at 30% 90%, #ff8a2b 90%, transparent),
+    linear-gradient(180deg, transparent 74%, #6b1a1a 74%),
+    linear-gradient(180deg, #2a0707 0%, #7a1c12 74%);
+}
+.bg--end {
+  background:
+    radial-gradient(1.5px 1.5px at 25% 20%, #f3e9ff 99%, transparent),
+    radial-gradient(1.5px 1.5px at 75% 30%, #f3e9ff 99%, transparent),
+    linear-gradient(180deg, transparent 74%, #e9e5a6 74%, #d8d38f 100%),
+    linear-gradient(180deg, #120a1f 0%, #3b2357 74%);
+}
+
+/* ------------------------------------------------------------ сетка */
+
+.pgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: 52px 20px;
+  /* место для голов, которые выглядывают над первым рядом */
+  padding-top: 30px;
+}
+
+/* ------------------------------------------------------------ карточка */
+
+.pcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.2s var(--ease);
+}
+.pcard:hover {
+  border-color: var(--c-border-strong);
+}
+.pcard:focus-within {
+  border-color: var(--c-focus);
+}
+.pcard__scene {
+  position: relative;
+  height: 140px;
+  border-radius: calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0 0;
+}
+/* Персонаж стоит на «земле» фона и выглядывает над краем карточки. */
+.pcard__figure {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 150px;
+  height: 190px;
+  margin-left: -75px;
+  transform-origin: bottom center;
+  transition: transform 0.3s var(--ease);
+  pointer-events: none;
+}
+.pcard:hover .pcard__figure {
+  transform: scale(1.05);
+}
+.skin3d__figure {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.35));
+}
+.pcard__body {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px 18px;
+  min-width: 0;
+}
+.pcard__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.pcard__nick {
+  min-width: 0;
+  font-size: 20px;
+}
+.pcard__open {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.pcard__open:focus-visible {
+  outline: none;
+}
+.pcard__meta,
+.pdetail__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.pcard__online {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border-radius: 999px;
+  background: var(--c-success-bg);
+  color: var(--c-green-soft);
+  font-weight: 600;
+}
+.pcard__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1f9837;
+  box-shadow: 0 0 0 3px rgba(31, 152, 55, 0.3);
+}
+.pcard__seen {
+  color: var(--c-text-3);
+}
+.rank {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+  font-size: 12px;
+  font-weight: 600;
+}
+.pcard__bio {
+  color: var(--c-text-2);
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.pcard__bio--empty {
+  color: var(--c-text-3);
+  font-style: italic;
+}
+.pcard__stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.pcard__stat {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--c-field);
+  min-width: 0;
+}
+.pcard__stat dt {
+  color: var(--c-text-3);
+  font-size: 12px;
+}
+.pcard__stat dd {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------ соцсети */
+
+.socials {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.social {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--c-surface-3);
+  color: var(--c-text);
+  font-size: 13px;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.social:hover {
+  background: #505050;
+}
+.social__name {
+  font-weight: 700;
+}
+.social__handle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-text-2);
+}
+.socials--compact .social__handle {
+  display: none;
+}
+.social--telegram .social__name { color: #6cc4f5; }
+.social--discord .social__name { color: #a3adff; }
+.social--youtube .social__name { color: #ff7b7b; }
+.social--twitch .social__name { color: #c9a6ff; }
+.social--vk .social__name { color: #7fb2f0; }
+.social--tiktok .social__name { color: #7ff0e8; }
+
+/* ------------------------------------------------------------ заготовки при загрузке */
+
+.pcard--skeleton {
+  cursor: default;
+}
+.pcard__skeleton-scene {
+  height: 140px;
+  border-radius: calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0 0;
+}
+.pcard__skeleton-line {
+  height: 18px;
+  border-radius: 6px;
+}
+.pcard__skeleton-line--short {
+  width: 60%;
+}
+
+/* ------------------------------------------------------------ список */
+
+.players__tools {
+  display: grid;
+  gap: 12px;
+}
+.players__count {
+  margin-top: 14px;
+  color: var(--c-text-3);
+  font-size: 14px;
+}
+.players__count:empty {
+  display: none;
+}
+.players__box {
+  margin-top: 8px;
+}
+.players__box > .state {
+  margin-top: 20px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  background: var(--c-surface);
+}
+
+/* ------------------------------------------------------------ топы */
+
+.tops {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+.tops__col {
+  padding: 20px;
+}
+.tops__title {
+  margin-bottom: 12px;
+  font-size: 17px;
+}
+.tops__list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tops__row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+}
+.tops__row:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.03);
+}
+.tops__place {
+  font-family: var(--font-display);
+  color: var(--c-text-3);
+  text-align: center;
+}
+.tops__row--1 .tops__place { color: #ffd34d; }
+.tops__row--2 .tops__place { color: #d6dde6; }
+.tops__row--3 .tops__place { color: #e09a5b; }
+.tops__nick {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-weight: 600;
+}
+.tops__value {
+  font-family: var(--font-display);
+  font-size: 15px;
+  white-space: nowrap;
+}
+.tops__empty {
+  color: var(--c-text-3);
+}
+
+/* ------------------------------------------------------------ окно с подробностями */
+
+.modal__dialog--wide {
+  width: min(100%, 860px);
+}
+.pdetail {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: 24px;
+  margin-top: 16px;
+}
+.pdetail__stage {
+  position: relative;
+  display: grid;
+  min-height: 360px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.pdetail__download {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+.pdetail__info {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+}
+.pdetail__bio {
+  color: var(--c-text-2);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.pdetail__label {
+  margin-bottom: 8px;
+  color: var(--c-text-3);
+  font-size: 13px;
+}
+.pdetail__stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.pdetail__stat {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--c-field);
+}
+.pdetail__stat dt,
+.pdetail__dates dt {
+  color: var(--c-text-3);
+  font-size: 12px;
+}
+.pdetail__stat dd {
+  margin: 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 19px;
+}
+.pdetail__dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+.pdetail__dates dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+.pdetail__note {
+  color: var(--c-text-3);
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------ 3D-просмотр */
+
+.skin3d {
+  position: relative;
+  display: grid;
+  min-height: 360px;
+}
+.skin3d__canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  cursor: grab;
+  touch-action: none;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 12px 14px rgba(0, 0, 0, 0.35));
+}
+.skin3d__canvas:active {
+  cursor: grabbing;
+}
+.skin3d__canvas:focus-visible {
+  outline: 3px solid var(--c-focus);
+  outline-offset: -3px;
+}
+.skin3d.is-loading .skin3d__canvas {
+  opacity: 0.4;
+}
+.skin3d__play {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/* ------------------------------------------------------------ выбор позы и фона */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text-2);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.chip:hover {
+  color: #fff;
+}
+.chip[aria-checked='true'] {
+  border-color: transparent;
+  background: var(--grad);
+  color: #fff;
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.swatch {
+  width: 44px;
+  height: 44px;
+  border: 2px solid transparent;
+  border-radius: var(--r-sm);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.swatch[aria-checked='true'] {
+  border-color: #fff;
+}
+
+/* ------------------------------------------------------------ своя карточка (профиль) */
+
+.my-card__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.my-card__preview {
+  padding-top: 30px;
+}
+.my-card__preview .pcard {
+  cursor: default;
+}
+.my-card__controls {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+}
+.my-card__group {
+  display: grid;
+  gap: 10px;
+}
+.my-card__form {
+  display: grid;
+  gap: 14px;
+}
+.my-card__socials {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.my-card__social-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+  gap: 0 12px;
+  margin-top: 8px;
+}
+.my-card__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  gap: 10px 16px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  background: var(--c-field);
+}
+.checkbox--hint .checkbox__label {
+  display: block;
+  font-weight: 600;
+}
+.checkbox--hint .checkbox__hint {
+  display: block;
+  color: var(--c-text-3);
+  font-size: 13px;
+}
+
+.skin-drop {
+  display: grid;
+  grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  border-radius: var(--r-md);
+}
+.skin-drop.is-over {
+  outline: 2px dashed var(--c-focus);
+  outline-offset: 6px;
+}
+.skin-drop__stage,
+.skin-drop__stage .skin3d,
+.skin-drop__stage .skin3d__canvas {
+  min-height: 320px;
+}
+.skin-drop__side {
+  display: grid;
+  gap: 16px;
+}
+.skin-drop__side .btn svg {
+  width: 18px;
+  height: 18px;
+}
+.skin-sync {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+.skin-sync__text {
+  color: var(--c-text-2);
+  font-size: 14px;
+}
+.skin-sync__text--ok {
+  color: var(--c-green-soft);
+}
+.skin-sync__text--error {
+  color: var(--c-danger);
+}
+
+/* ------------------------------------------------------------ страница players.html и витрина на главной */
+
+.players-page {
+  padding: 48px 0 80px;
+}
+.players-page__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-bottom: 24px;
+}
+.players-page__title {
+  font-size: clamp(30px, 5vw, 44px);
+}
+.players-page__lead {
+  margin-top: 8px;
+  color: var(--c-text-2);
+  max-width: 620px;
+}
+.online-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--c-success-bg);
+  color: var(--c-green-soft);
+  font-weight: 600;
+  font-size: 14px;
+}
+.online-pill[hidden] {
+  display: none !important;
+}
+.players-page__note {
+  margin-bottom: 20px;
+  padding: 14px 18px;
+  border-radius: var(--r-md);
+  background: var(--c-info-bg);
+  color: var(--c-text-2);
+  font-size: 15px;
+}
+
+/* Витрина на главной */
+.players-showcase .pgrid {
+  margin-top: 8px;
+}
+.players-showcase__more {
+  display: flex;
+  justify-content: center;
+  margin-top: 36px;
+}
+
+/* ------------------------------------------------------------ телефон */
+
+@media (max-width: 720px) {
+  .pdetail,
+  .my-card__grid,
+  .skin-drop {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pdetail__stage,
+  .skin3d,
+  .skin3d__canvas {
+    min-height: 300px;
+  }
+  .my-card__preview {
+    max-width: 280px;
+  }
+}
+@media (max-width: 400px) {
+  .pcard__body {
+    padding: 14px;
+  }
+  .pcard__stat dd {
+    font-size: 15px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pcard:hover .pcard__figure {
+    transform: none;
+  }
+}

@@ -127,6 +127,7 @@
     if (a === 'apply') return renderApply();
     if (a === 'support') return renderSupport();
     if (a === 'profile') return renderProfile();
+    if (a === 'players') return renderPlayers();
     if (a === 'server') {
       if (!isPlayer()) return renderServerLocked();
       return can('server') && query.get('preview') !== '1' ? renderServerAdmin() : renderServer();
@@ -151,6 +152,7 @@
         can('tickets') && { key: 'tickets', href: '#/admin/tickets', icon: 'chat', label: 'Обращения', short: 'Чаты', badge: summary.unreadConversations },
         canPeople() && { key: 'users', href: '#/admin/users', icon: 'users', label: 'Люди', badge: summary.resetRequests },
         { key: 'server', href: '#/server', icon: 'server', label: 'Сервер' },
+        { key: 'players', href: '#/players', icon: 'users', label: 'Игроки' },
         { key: 'profile', href: '#/profile', icon: 'user', label: 'Профиль' },
       ].filter(Boolean);
     }
@@ -160,6 +162,7 @@
       isPlayer() && { key: 'server', href: '#/server', icon: 'server', label: 'Сервер' },
       { key: 'application', href: '#/application', icon: 'file', label: 'Заявка' },
       { key: 'support', href: '#/support', icon: 'chat', label: 'Поддержка', badge: summary.unreadMessages },
+      { key: 'players', href: '#/players', icon: 'users', label: 'Игроки' },
       { key: 'profile', href: '#/profile', icon: 'user', label: 'Профиль' },
     ].filter(Boolean);
   }
@@ -1943,7 +1946,7 @@
   /* ============================================================ профиль */
 
   function renderProfile() {
-    const p = page({ title: 'Профиль', sub: 'Фото, никнейм и пароль.', key: 'profile' });
+    const p = page({ title: 'Профиль', sub: isPlayer() ? 'Карточка игрока, скин, фото, никнейм и пароль.' : 'Фото, никнейм и пароль.', key: 'profile' });
 
     /* --- фото --- */
     const fileInput = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', hidden: true });
@@ -2091,12 +2094,28 @@
 
     UI.append(p.body, [
       h('div', { class: 'stack' }, [
+        // Карточка и скин — у «Игроков» и админов (у остальных карточки нет).
+        isPlayer() && Players.editor(),
         section('Фото профиля', null, avatarBox),
         section('Никнейм и почта', null, nickForm),
         section('Пароль', null, pwForm),
         section('Удалить аккаунт', 'Удалятся профиль, заявки и переписка с поддержкой. Отменить это нельзя.', h('button', { class: 'btn btn--danger', type: 'button', text: 'Удалить аккаунт', onclick: deleteAccount }), 'card--danger'),
       ]),
     ]);
+  }
+
+  /* ============================================================ игроки */
+
+  /** Карточки игроков. «Пользователю» — то же, что гостям на сайте (без статистики), игрокам и админам — всё. */
+  function renderPlayers() {
+    const p = page({
+      title: 'Игроки',
+      sub: isPlayer() ? 'Кто играет на сервере. Свою карточку и скин настройте в профиле.' : 'Кто играет на сервере. Статистика из игры откроется, когда вашу заявку одобрят.',
+      key: 'players',
+      actions: isPlayer() && h('a', { class: 'btn btn--secondary', href: '#/profile' }, icon('user'), 'Моя карточка'),
+    });
+    const list = Players.mount(p.body);
+    cleanup = list.destroy;
   }
 
   function section(title, text, content, extra) {

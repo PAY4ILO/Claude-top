@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self'; font-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Игроки — LWL</title>
+  <meta name="description" content="Игроки Minecraft-сервера LWL: карточки со скинами, «о себе» и ссылками на соцсети.">
+  <meta name="theme-color" content="#202020">
+  <meta property="og:title" content="Игроки — LWL">
+  <meta property="og:description" content="Кто играет на сервере LWL.">
+  <meta property="og:image" content="assets/img/hero.webp">
+  <link rel="icon" href="assets/img/logo.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/russo-one-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/inter-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/css/base.css">
+  <link rel="stylesheet" href="assets/css/landing.css">
+  <link rel="stylesheet" href="assets/css/lk.css">
+  <link rel="stylesheet" href="assets/css/players.css">
+</head>
+<body class="landing players-body">
+  <a class="skip-link" href="#main">К содержимому</a>
+
+  <header class="site-header" id="top">
+    <div class="stripe" aria-hidden="true"></div>
+    <div class="site-header__bar">
+      <div class="container site-header__inner">
+        <a class="brand" href="./" aria-label="LWL — на главную">
+          <img src="assets/img/logo.svg" width="44" height="44" alt="">
+          <span class="brand__name" aria-hidden="true">LWL</span>
+        </a>
+        <nav class="site-nav" aria-label="Основное меню">
+          <a class="site-nav__link" href="./#about">О сервере</a>
+          <a class="site-nav__link" href="./#how">Как попасть</a>
+          <a class="site-nav__link" href="players.html" aria-current="page">Игроки</a>
+          <a class="site-nav__link" href="./#telegram">Telegram</a>
+        </nav>
+        <div class="site-header__actions">
+          <a class="btn btn--sm btn--ghost" href="lk.html" data-auth-link="account" data-account-label>Войти</a>
+          <a class="btn btn--sm" href="lk.html#/apply" data-auth-link="apply">Подать заявку</a>
+        </div>
+        <button class="burger" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Открыть меню">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+    <div class="mobile-menu" id="mobile-menu" hidden>
+      <nav class="mobile-menu__nav" aria-label="Меню">
+        <a class="mobile-menu__link" href="./#about">О сервере</a>
+        <a class="mobile-menu__link" href="./#how">Как попасть</a>
+        <a class="mobile-menu__link" href="players.html" aria-current="page">Игроки</a>
+        <a class="mobile-menu__link" href="./#telegram">Telegram</a>
+      </nav>
+      <div class="mobile-menu__actions">
+        <a class="btn btn--lg" href="lk.html#/apply" data-auth-link="apply">Подать заявку</a>
+        <a class="btn btn--lg btn--secondary" href="lk.html" data-auth-link="account" data-account-label>Войти</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="players-page">
+    <div class="container">
+      <div class="players-page__head">
+        <div>
+          <p class="eyebrow">Сообщество</p>
+          <h1 class="section-title players-page__title">Игроки сервера</h1>
+          <p class="players-page__lead">Кто играет на LWL: скины, пара слов о себе и где найти человека. Нажмите на карточку, чтобы покрутить скин.</p>
+        </div>
+        <p class="online-pill" data-online hidden><span class="pcard__dot" aria-hidden="true"></span><span data-online-text>Сейчас на сервере: 0</span></p>
+      </div>
+      <p class="players-page__note" data-players-note hidden>Статистику из игры — сколько наиграно, кто сейчас в сети — видят игроки сервера после входа на сайт. <a class="link" href="lk.html#/apply" data-auth-link="apply">Подать заявку</a></p>
+      <div data-players></div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container site-footer__inner">
+      <div class="site-footer__brand">
+        <a class="brand" href="./" aria-label="LWL — на главную">
+          <img src="assets/img/logo.svg" width="44" height="44" alt="" loading="lazy">
+          <span class="brand__name" aria-hidden="true">LWL</span>
+        </a>
+        <p class="site-footer__slogan">ВЫ творите историю — начните своё путешествие на проекте LWL!</p>
+      </div>
+      <nav class="site-footer__nav" aria-label="Ссылки в подвале">
+        <a href="./#about">О сервере</a>
+        <a href="./#how">Как попасть</a>
+        <a href="players.html">Игроки</a>
+        <a href="lk.html" data-auth-link="account">Личный кабинет</a>
+        <a data-telegram-link href="https://t.me/" target="_blank" rel="noopener noreferrer">Telegram</a>
+      </nav>
+    </div>
+    <div class="container site-footer__bottom">
+      <p>© <span data-year>2026</span> LWL</p>
+      <p>Не является официальным продуктом Minecraft. Не связан с Mojang Studios и Microsoft.</p>
+    </div>
+  </footer>
+
+  <div class="toasts" aria-live="polite"></div>
+
+  <script src="assets/js/api.js"></script>
+  <script src="assets/js/ui.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/skin3d.js"></script>
+  <script src="assets/js/players.js"></script>
+  <script src="assets/js/landing.js"></script>
+  <script src="assets/js/players-page.js"></script>
+</body>
+</html>

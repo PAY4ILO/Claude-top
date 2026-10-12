@@ -129,17 +129,19 @@ export default function register(router, s) {
       tx(db, () => {
         const up = db.prepare(
           `INSERT INTO player_stats (nick_key, nickname, uuid, first_seen, last_seen, online, playtime_sec, deaths, mob_kills, player_kills,
-             blocks_mined, advancements, distance_m, skin_url, skin_slim, stats_at)
-           VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             blocks_mined, advancements, distance_m, skin_url, skin_slim, stats_at, skin_changed_at)
+           VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(nick_key) DO UPDATE SET nickname = excluded.nickname, uuid = COALESCE(excluded.uuid, uuid),
              first_seen = MIN(first_seen, excluded.first_seen), playtime_sec = excluded.playtime_sec, deaths = excluded.deaths,
              mob_kills = excluded.mob_kills, player_kills = excluded.player_kills, blocks_mined = excluded.blocks_mined,
              advancements = excluded.advancements, distance_m = excluded.distance_m,
+             skin_changed_at = CASE WHEN excluded.skin_url IS NOT NULL AND excluded.skin_url IS NOT skin_url THEN excluded.skin_changed_at ELSE skin_changed_at END,
+             skin_hash = CASE WHEN excluded.skin_url IS NOT NULL AND excluded.skin_url IS NOT skin_url THEN NULL ELSE skin_hash END,
              skin_url = COALESCE(excluded.skin_url, skin_url), skin_slim = CASE WHEN excluded.skin_url IS NULL THEN skin_slim ELSE excluded.skin_slim END,
              stats_at = excluded.stats_at`
         );
         for (const r of rows) {
-          up.run(r.key, r.nickname, r.uuid, r.firstPlayed ?? now, now, r.playtime, r.deaths, r.mobKills, r.playerKills, r.blocksMined, r.advancements, r.distance, r.skin ? r.skin.url : null, r.skin ? r.skin.slim : 0, now);
+          up.run(r.key, r.nickname, r.uuid, r.firstPlayed ?? now, now, r.playtime, r.deaths, r.mobKills, r.playerKills, r.blocksMined, r.advancements, r.distance, r.skin ? r.skin.url : null, r.skin ? r.skin.slim : 0, now, r.skin ? now : null);
         }
       });
       // Скины качаются в фоне, ответ серверу Minecraft не ждёт.

@@ -2463,7 +2463,7 @@ a.att-file:hover .att-file__icon {
     bottom: 0;
     z-index: 25;
     display: grid;
-    /* 4–6 вкладок (у игрока есть «Сервер», у админа — «Люди»): всегда в одну строку */
+    /* 5–7 вкладок (у игрока есть «Сервер», у админа — «Люди»): всегда в одну строку */
     grid-auto-flow: column;
     grid-auto-columns: minmax(0, 1fr);
     padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
@@ -2480,6 +2480,25 @@ a.att-file:hover .att-file__icon {
     font-size: 11.5px;
     font-weight: 600;
     color: var(--c-text-3);
+  }
+  /* 7 вкладок у админа: чуть плотнее, чтобы подписи влезли и на 320px */
+  .tabbar:has(> .tab:nth-child(7)) {
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+  .tabbar:has(> .tab:nth-child(7)) .tab {
+    padding: 6px 1px;
+    font-size: 10.5px;
+  }
+  @media (max-width: 359px) {
+    .tabbar:has(> .tab:nth-child(7)) {
+      padding-left: 0;
+      padding-right: 0;
+    }
+    .tabbar:has(> .tab:nth-child(7)) .tab {
+      font-size: 10px;
+      letter-spacing: -0.02em;
+    }
   }
   .tab__label {
     max-width: 100%;

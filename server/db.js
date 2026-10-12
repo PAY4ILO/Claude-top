@@ -218,6 +218,23 @@ const MIGRATIONS = [
     updated_at INTEGER NOT NULL
   );
   `,
+
+  /* 6: карточки видны всем (гостям — без статистики); поза, фон, соцсети, свой скин из кабинета */
+  `
+  -- pose/background — ключи из CARD_POSES/CARD_BACKGROUNDS (lib/validate.js), socials — JSON {сеть: ник}.
+  -- skin_hash — PNG, загруженный в кабинете (LWL_DATA_DIR/skins/<hash>.png), skin_at — когда;
+  -- skin_sync — отправлен ли на Minecraft-сервер через RCON: 'ok' | 'error' | 'off' (RCON не настроен), текст — в skin_sync_note.
+  ALTER TABLE player_cards ADD COLUMN pose TEXT NOT NULL DEFAULT 'stand';
+  ALTER TABLE player_cards ADD COLUMN background TEXT NOT NULL DEFAULT 'meadow';
+  ALTER TABLE player_cards ADD COLUMN socials TEXT NOT NULL DEFAULT '{}';
+  ALTER TABLE player_cards ADD COLUMN skin_hash TEXT;
+  ALTER TABLE player_cards ADD COLUMN skin_slim INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE player_cards ADD COLUMN skin_at INTEGER;
+  ALTER TABLE player_cards ADD COLUMN skin_sync TEXT;
+  ALTER TABLE player_cards ADD COLUMN skin_sync_note TEXT;
+  -- Когда игровой сервер прислал другой скин: показывается тот, что новее — из игры или из кабинета.
+  ALTER TABLE player_stats ADD COLUMN skin_changed_at INTEGER;
+  `,
 ];
 
 export function openDb(file) {
