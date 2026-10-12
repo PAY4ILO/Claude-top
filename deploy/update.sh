@@ -30,7 +30,7 @@ if [ -f /etc/lwl/lwl.env ] && ! grep -q '^LWL_GAME_TOKEN=.' /etc/lwl/lwl.env; th
     printf '\n# Токен игрового сервера: вход по коду (мод LWL, config/lwl/connect.json → siteToken)\nLWL_GAME_TOKEN=%s\n' "$GAME_TOKEN" >>/etc/lwl/lwl.env
   fi
   echo "==> Создан токен игрового сервера для входа по коду. Впишите его на Minecraft-сервере"
-  echo "    в config/lwl/connect.json: \"siteToken\": \"$GAME_TOKEN\" (и \"siteUrl\": \"http://127.0.0.1:$PORT\", если сервер на этой машине)."
+  echo "    в config/lwl/connect.json и config/lwl-stats.json: \"siteToken\": \"$GAME_TOKEN\" (и \"siteUrl\": \"http://127.0.0.1:$PORT\", если сервер на этой машине)."
 fi
 
 echo "==> Перезапуск"

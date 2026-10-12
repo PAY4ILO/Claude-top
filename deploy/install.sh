@@ -248,7 +248,8 @@ DONE
 GAME_TOKEN="$(sed -n 's/^LWL_GAME_TOKEN=//p' /etc/lwl/lwl.env | tail -n 1)"
 cat <<TOKEN
 
-Вход на сервер по коду (мод LWL). На Minecraft-сервере в config/lwl/connect.json впишите:
+Вход на сервер по коду (мод LWL) и карточки игроков (мод LWL Stats). На Minecraft-сервере
+в config/lwl/connect.json и config/lwl-stats.json впишите:
   "siteUrl": "http://127.0.0.1:$PORT"   (если Minecraft на этой машине; иначе "https://$DOMAIN")
   "siteToken": "$GAME_TOKEN"
 и перезапустите сервер. Токен лежит в /etc/lwl/lwl.env (LWL_GAME_TOKEN): sudo grep LWL_GAME_TOKEN /etc/lwl/lwl.env
