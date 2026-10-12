@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,16 +17,32 @@ let base;
 let dataDir;
 const GAME_TOKEN = 'game-token-for-tests-0123456789';
 
+// Поддельный textures.minecraft.net: сайт качает скины только отсюда (в тестах — без интернета).
+const SKIN_PNG = fs.readFileSync(new URL('../assets/img/skin-default.png', import.meta.url));
+const textureHits = [];
+const textures = http.createServer((req, res) => {
+  textureHits.push(req.url);
+  if (req.url === '/texture/badbadbadbadbad0') return res.writeHead(200, { 'Content-Type': 'image/png' }).end('<html>не картинка</html>');
+  if (req.url === '/texture/b16b16b16b16b16b') return res.writeHead(200, { 'Content-Type': 'image/png' }).end(Buffer.concat([SKIN_PNG, Buffer.alloc(70 * 1024)]));
+  if (/^\/texture\/[0-9a-f]+$/.test(req.url)) return res.writeHead(200, { 'Content-Type': 'image/png' }).end(SKIN_PNG);
+  res.writeHead(404).end();
+});
+let texturesOrigin;
+
 before(async () => {
+  await new Promise((r) => textures.listen(0, '127.0.0.1', r));
+  texturesOrigin = `http://127.0.0.1:${textures.address().port}`;
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-api-'));
   // LWL_TRUST_PROXY — чтобы тесты кодов входа подставляли разные IP (X-Real-IP) и не упирались в лимит по IP.
   const config = loadConfig({ LWL_DATA_DIR: dataDir, LWL_ADMINS: 'owner@example.com', LWL_FAST_HASH: '1', LWL_MAX_UPLOAD_MB: '1', LWL_CHAT_MAX_FILE_MB: '1', LWL_GAME_TOKEN: GAME_TOKEN, LWL_TRUST_PROXY: '1' });
+  config.skinOrigin = texturesOrigin;
   app = createApp(config);
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
 });
 
 after(async () => {
+  textures.close();
   await app.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
@@ -702,6 +719,8 @@ test('коды: без LWL_GAME_TOKEN маршруты сервера отвеч
       ['POST', '/api/game/codes/verify', { nickname: 'Alice_07', code: 'AAAA-AAAA-AAAA' }],
       ['POST', '/api/game/codes', { nickname: 'Alice_07' }],
       ['DELETE', '/api/game/codes/Alice_07'],
+      ['POST', '/api/game/presence', { players: [] }],
+      ['POST', '/api/game/stats', { players: [] }],
     ]) {
       const r = await mod(method, url, body, { token: GAME_TOKEN });
       assert.equal(r.status, 503, url);
@@ -713,6 +732,229 @@ test('коды: без LWL_GAME_TOKEN маршруты сервера отвеч
     await app2.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/* ------------------------------------------------------------ карточки игроков (мод lwl-stats) */
+
+const statsOf = (nickname, extra = {}) => ({
+  nickname,
+  uuid: '0f6d3a2e-1111-3222-8333-444455556666',
+  playTimeSec: 7200,
+  deaths: 3,
+  mobKills: 120,
+  playerKills: 0,
+  blocksMined: 15000,
+  distanceM: 3400,
+  advancements: 12,
+  ...extra,
+});
+const statsRow = (nick) => app.db.prepare('SELECT * FROM player_stats WHERE nick_key = ?').get(nick.toLowerCase());
+
+test('карточки: presence и stats — только с токеном сервера, ошибки { code, message }', async () => {
+  for (const url of ['/api/game/presence', '/api/game/stats']) {
+    for (const token of [undefined, 'wrong-token']) {
+      const r = await mod('POST', url, { players: [] }, { token });
+      assert.equal(r.status, 401, `${url} ${token}`);
+      assert.deepEqual(Object.keys(r.data).sort(), ['code', 'message']);
+      assert.equal(r.data.code, 'unauthorized');
+    }
+    assert.equal((await mod('POST', url, { players: [] }, { token: GAME_TOKEN, omit: ['X-Requested-With'] })).status, 403);
+  }
+  // Неверные данные — 400, весь запрос отклоняется.
+  for (const body of [
+    {},
+    { players: 'Alice_07' },
+    { players: [statsOf('Alice 07')] },
+    { players: [statsOf('Alice_07', { deaths: -1 })] },
+    { players: [statsOf('Alice_07', { deaths: '3' })] },
+    { players: [statsOf('Alice_07', { playTimeSec: null })] },
+    { players: [statsOf('Alice_07', { uuid: 'не uuid' })] },
+    { players: [statsOf('Alice_07', { skin: 'https://textures.minecraft.net/texture/abc' })] },
+    { players: Array.from({ length: 51 }, (_, i) => statsOf(`p${i}`)) },
+  ]) {
+    const r = await game('POST', '/api/game/stats', body);
+    assert.equal(r.status, 400, JSON.stringify(body).slice(0, 80));
+    assert.deepEqual(Object.keys(r.data).sort(), ['code', 'message']);
+    assert.equal(r.data.code, 'bad_request');
+  }
+  assert.equal(statsRow('Alice_07'), undefined, 'ничего не записано');
+  // Больше 256 КБ — 413.
+  const big = await game('POST', '/api/game/stats', { players: [], pad: 'x'.repeat(300 * 1024) });
+  assert.equal(big.status, 413);
+  assert.equal(big.data.code, 'too_large');
+  assert.equal((await game('POST', '/api/game/presence', { players: [{ nickname: 'bad nick' }] })).status, 400);
+});
+
+test('карточки: presence — в сети, вышел, и тайм-аут 150 секунд', async () => {
+  const first = await game('POST', '/api/game/presence', { players: [{ nickname: 'Alice_07', uuid: '0f6d3a2e-1111-3222-8333-444455556666' }, 'Steve_Bot'] });
+  assert.equal(first.status, 204);
+  assert.equal(first.text, '');
+  let list = (await alice.get('/api/players')).data.players;
+  assert.deepEqual(
+    list.map((p) => [p.nickname, p.online]),
+    [
+      ['Alice_07', true],
+      ['Steve_Bot', true],
+    ]
+  );
+  const firstSeen = statsRow('Alice_07').first_seen;
+
+  // Steve_Bot вышел: его нет в полном списке.
+  await game('POST', '/api/game/presence', { players: [{ nickname: 'alice_07' }] });
+  list = (await alice.get('/api/players')).data.players;
+  assert.equal(list.find((p) => p.nickname === 'Steve_Bot').online, false);
+  assert.ok(list.some((p) => p.nickname === 'alice_07' && p.online), 'ник — как прислал сервер');
+  assert.equal(statsRow('Alice_07').uuid, '0f6d3a2e-1111-3222-8333-444455556666', 'uuid не стёрся');
+  assert.equal(statsRow('Alice_07').first_seen, firstSeen, 'первый вход не меняется');
+
+  // Сервер пропал (не шлёт presence) — через 150 с игрок уже не «в сети».
+  app.db.prepare('UPDATE player_stats SET presence_at = presence_at - 145000').run();
+  assert.equal((await alice.get('/api/players/Alice_07')).data.player.online, true);
+  app.db.prepare('UPDATE player_stats SET presence_at = presence_at - 6000').run();
+  assert.equal((await alice.get('/api/players/Alice_07')).data.player.online, false);
+
+  // Остановка сервера — пустой список: все вышли.
+  await game('POST', '/api/game/presence', { players: [{ nickname: 'Alice_07' }] });
+  await game('POST', '/api/game/presence', { players: [] });
+  assert.equal(statsRow('Alice_07').online, 0);
+});
+
+test('карточки: статистика сохраняется и отдаётся, без координат и способа входа', async () => {
+  const r = await game('POST', '/api/game/stats', {
+    players: [
+      statsOf('Alice_07', { firstPlayed: Date.UTC(2026, 0, 2), x: 10, ip: '1.2.3.4', license: 'cracked', inventory: ['diamond'] }),
+      statsOf('Steve_Bot', { playTimeSec: 60, deaths: 0, uuid: undefined }),
+      statsOf('New_Guy', { playTimeSec: 99999 }),
+    ],
+  });
+  assert.equal(r.status, 204, r.text);
+  const p = (await alice.get('/api/players/alice_07')).data.player;
+  assert.deepEqual(p.stats, { playtimeSec: 7200, deaths: 3, mobKills: 120, playerKills: 0, blocksMined: 15000, distanceM: 3400, advancements: 12 });
+  assert.equal(p.nickname, 'Alice_07');
+  assert.equal(p.role, 'player', 'есть аккаунт на сайте');
+  assert.equal(p.firstSeen, Date.UTC(2026, 0, 2), 'первый вход — из игры, если раньше');
+  assert.equal(p.skinUrl, '/assets/img/skin-default.png');
+  assert.equal(p.skinSlim, false);
+  const json = JSON.stringify(p);
+  for (const word of ['1.2.3.4', 'cracked', 'license', 'diamond', 'uuid', 'email', 'example.com']) assert.ok(!json.includes(word), word);
+  assert.equal(statsRow('Alice_07').extra, null, 'лишние поля не сохраняются');
+  const bot = (await alice.get('/api/players/Steve_Bot')).data.player;
+  assert.equal(bot.role, null, 'без аккаунта на сайте');
+  assert.equal(bot.stats.deaths, 0);
+  assert.equal(bot.avatar, null);
+
+  // Сортировки и поиск.
+  const nicks = async (sort, query = '') => (await alice.get(`/api/players?sort=${sort}&q=${encodeURIComponent(query)}`)).data.players.map((x) => x.nickname);
+  assert.deepEqual(await nicks('playtime'), ['New_Guy', 'Alice_07', 'Steve_Bot']);
+  await game('POST', '/api/game/presence', { players: ['Steve_Bot'] });
+  assert.deepEqual(await nicks('online'), ['Steve_Bot', 'New_Guy', 'Alice_07']);
+  assert.equal((await nicks('recent'))[0], 'Steve_Bot');
+  assert.deepEqual(await nicks('online', 'ALI'), ['Alice_07']);
+  assert.deepEqual(await nicks('online', 'нет такого'), []);
+  assert.equal((await alice.get('/api/players/nobody_here')).status, 404);
+});
+
+test('карточки: «Пользователю» — 403, без входа — 401, видят игроки и админы', async () => {
+  for (const url of ['/api/players', '/api/players/Alice_07', '/api/me/card']) {
+    assert.equal((await bob.get(url)).status, 403, url);
+    assert.equal((await client().get(url)).status, 401, url);
+  }
+  assert.equal((await bob.patch('/api/me/card', { bio: 'привет' })).status, 403);
+  assert.equal((await owner.get('/api/players')).status, 200);
+});
+
+test('карточки: «о себе», скрыть поля и всю карточку; проверка PATCH /api/me/card', async () => {
+  const empty = (await alice.get('/api/me/card')).data;
+  assert.deepEqual({ ...empty, player: !!empty.player }, { bio: '', hidden: false, hideFields: [], player: true });
+
+  for (const [body, field] of [
+    [{ bio: 'x'.repeat(141) }, 'bio'],
+    [{ bio: 42 }, 'bio'],
+    [{ hidden: 'yes' }, 'hidden'],
+    [{ hideFields: ['coords'] }, 'hideFields'],
+    [{ hideFields: 'deaths' }, 'hideFields'],
+  ]) {
+    const r = await alice.patch('/api/me/card', body);
+    assert.equal(r.status, 422, JSON.stringify(body));
+    assert.ok(r.data.fields[field], field);
+  }
+
+  const saved = await alice.patch('/api/me/card', { bio: '  Строю\nзамки  ', hideFields: ['deaths', 'lastSeen', 'deaths'] });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.data.bio, 'Строю замки');
+  assert.deepEqual(saved.data.hideFields, ['deaths', 'lastSeen']);
+  assert.equal((await alice.patch('/api/me/card', { bio: 'й'.repeat(140) })).status, 200, 'ровно 140 — можно');
+  await alice.patch('/api/me/card', { bio: 'Строю замки' });
+
+  // Скрытые поля вырезает сервер: их нет ни в списке, ни в карточке.
+  const seen = (await owner.get('/api/players/Alice_07')).data.player;
+  assert.equal(seen.bio, 'Строю замки');
+  assert.ok(!('deaths' in seen.stats));
+  assert.ok(!('lastSeen' in seen) && !('online' in seen), '«в сети» скрыт вместе с «когда был»');
+  assert.equal(seen.stats.mobKills, 120);
+  const inList = (await owner.get('/api/players')).data.players.find((x) => x.nickname === 'Alice_07');
+  assert.ok(!('deaths' in inList.stats) && !('lastSeen' in inList));
+
+  // Скрытая карточка не отдаётся никому — 404 как у несуществующей.
+  assert.equal((await alice.patch('/api/me/card', { hidden: true })).data.hidden, true);
+  assert.ok(!(await owner.get('/api/players')).data.players.some((x) => x.nickname === 'Alice_07'));
+  assert.equal((await alice.get('/api/players?q=alice')).data.players.length, 0);
+  const hidden = await owner.get('/api/players/Alice_07');
+  assert.equal(hidden.status, 404);
+  assert.equal(hidden.data.message, (await owner.get('/api/players/nobody_here')).data.message);
+  const mine = (await alice.get('/api/me/card')).data;
+  assert.equal(mine.hidden, true);
+  assert.equal(mine.bio, 'Строю замки', 'остальное сохранилось');
+
+  await alice.patch('/api/me/card', { hidden: false, hideFields: [] });
+  assert.equal((await owner.get('/api/players/Alice_07')).data.player.stats.deaths, 3);
+});
+
+test('карточки: скин качается только с textures.minecraft.net, отдаётся игрокам с ETag', async () => {
+  const hitsBefore = textureHits.length;
+  const hex = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  const evil = [
+    'https://evil.example/texture/abcdef0123456789',
+    `${texturesOrigin}.evil.example/texture/abcdef0123456789`,
+    `${texturesOrigin}/texture/abcdef0123456789?x=1`,
+    `${texturesOrigin}/other/abcdef0123456789`,
+    `${texturesOrigin.replace(/:\d+$/, ':1')}/texture/abcdef0123456789`,
+    'file:///etc/passwd',
+  ];
+  const players = evil.map((url, i) => statsOf(`Evil_${i}`, { skin: { url, slim: true } }));
+  players.push(statsOf('Steve_Bot', { skin: { url: `${texturesOrigin}/texture/badbadbadbadbad0`, slim: false } }));
+  players.push(statsOf('New_Guy', { skin: { url: `${texturesOrigin}/texture/b16b16b16b16b16b`, slim: false } }));
+  players.push(statsOf('Alice_07', { skin: { url: `${texturesOrigin}/texture/${hex}`, slim: true } }));
+  assert.equal((await game('POST', '/api/game/stats', { players })).status, 204, 'плохой скин не мешает статистике');
+  await app.skins.idle();
+  assert.deepEqual(textureHits.slice(hitsBefore).sort(), ['/texture/b16b16b16b16b16b', '/texture/badbadbadbadbad0', `/texture/${hex}`].sort(), 'чужие адреса не запрашивались');
+  for (let i = 0; i < evil.length; i++) assert.equal(statsRow(`Evil_${i}`).skin_url, null);
+  assert.equal(statsRow('Steve_Bot').skin_hash, null, 'не PNG');
+  assert.equal(statsRow('New_Guy').skin_hash, null, 'больше 64 КБ');
+
+  const p = (await alice.get('/api/players/Alice_07')).data.player;
+  assert.match(p.skinUrl, /^\/api\/skins\/[0-9a-f]{64}$/);
+  assert.equal(p.skinSlim, true);
+  assert.ok(fs.existsSync(path.join(dataDir, 'skins', p.skinUrl.split('/').pop() + '.png')));
+
+  const img = await alice.get(p.skinUrl);
+  assert.equal(img.status, 200);
+  assert.equal(img.headers.get('content-type'), 'image/png');
+  assert.equal(img.headers.get('cache-control'), 'private, no-cache');
+  assert.equal(img.headers.get('x-content-type-options'), 'nosniff');
+  assert.ok(img.data.equals(SKIN_PNG));
+  assert.equal((await alice.get(p.skinUrl, { 'If-None-Match': img.headers.get('etag') })).status, 304);
+  assert.equal((await bob.get(p.skinUrl)).status, 403);
+  assert.equal((await client().get(p.skinUrl)).status, 401);
+  assert.equal((await alice.get('/api/skins/..%2F..%2Flwl.db')).status, 404);
+
+  // Тот же скин ещё раз — заново не качается; без скина в запросе — старый остаётся.
+  const hits = textureHits.length;
+  await game('POST', '/api/game/stats', { players: [statsOf('Alice_07', { skin: { url: `${texturesOrigin}/texture/${hex}`, slim: true } })] });
+  await app.skins.idle();
+  assert.equal(textureHits.length, hits);
+  await game('POST', '/api/game/stats', { players: [statsOf('Alice_07')] });
+  assert.equal((await alice.get('/api/players/Alice_07')).data.player.skinUrl, p.skinUrl);
 });
 
 test('сборки: загрузка, проверка файла, публикация, скачивание с докачкой', async () => {
@@ -759,6 +1001,7 @@ test('удаление аккаунта удаляет заявки, переп�
   assert.equal((await owner.get('/api/conversations?status=all')).data.items.length, 0);
   assert.ok(aliceFiles.length > 0 && aliceFiles.every((id) => !fs.existsSync(attachmentFile(id))), 'фото и файлы из чата удалены с диска');
   assert.equal(app.db.prepare('SELECT COUNT(*) AS n FROM connect_codes c LEFT JOIN users u ON u.id = c.user_id WHERE u.id IS NULL').get().n, 0, 'код входа удалён вместе с аккаунтом');
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS n FROM player_cards c LEFT JOIN users u ON u.id = c.user_id WHERE u.id IS NULL').get().n, 0, '«о себе» удалено вместе с аккаунтом');
   assert.equal((await connect(aliceCode, 'Alice_07')).status, 404);
 });
 

@@ -179,6 +179,45 @@ const MIGRATIONS = [
   );
   CREATE INDEX attachments_message ON attachments(message_id);
   `,
+
+  /* 5: карточки игроков — статистика с Minecraft-сервера (мод lwl-stats) */
+  `
+  -- Что прислал игровой сервер. Ключ — ник в нижнем регистре; с аккаунтом сайта связь по нику (без FK:
+  -- в игре можно быть без аккаунта, а аккаунт — без игры). Координат, инвентаря, IP и способа входа здесь нет.
+  -- online/presence_at — из /api/game/presence; «в сети» считается так: online = 1 и presence_at не старше 150 с.
+  -- skin_url — ссылка textures.minecraft.net, skin_hash — sha256 скачанного PNG (LWL_DATA_DIR/skins/<hash>.png).
+  CREATE TABLE player_stats (
+    nick_key TEXT PRIMARY KEY,
+    nickname TEXT NOT NULL,
+    uuid TEXT,
+    first_seen INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    online INTEGER NOT NULL DEFAULT 0,
+    presence_at INTEGER,
+    playtime_sec INTEGER NOT NULL DEFAULT 0,
+    deaths INTEGER NOT NULL DEFAULT 0,
+    mob_kills INTEGER NOT NULL DEFAULT 0,
+    player_kills INTEGER NOT NULL DEFAULT 0,
+    blocks_mined INTEGER NOT NULL DEFAULT 0,
+    advancements INTEGER NOT NULL DEFAULT 0,
+    distance_m INTEGER NOT NULL DEFAULT 0,
+    skin_url TEXT,
+    skin_hash TEXT,
+    skin_slim INTEGER NOT NULL DEFAULT 0,
+    extra TEXT,
+    stats_at INTEGER
+  );
+  CREATE INDEX player_stats_online ON player_stats(online);
+
+  -- Что игрок сам настроил в кабинете: «о себе», скрыть карточку, скрыть отдельные поля (JSON-массив ключей).
+  CREATE TABLE player_cards (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    bio TEXT NOT NULL DEFAULT '',
+    hidden INTEGER NOT NULL DEFAULT 0,
+    hide_fields TEXT NOT NULL DEFAULT '[]',
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(file) {

@@ -1,0 +1,19 @@
+{
+	"schemaVersion": 1,
+	"id": "lwl-stats",
+	"version": "${version}",
+	"name": "LWL Stats",
+	"description": "Отправляет на сайт LWL, кто сейчас в игре, и статистику игроков для карточек (время в игре, смерти, мобы, блоки, путь, достижения, скин). Координаты, инвентарь, IP и способ входа не отправляются. Ставится только на сервер.",
+	"authors": ["LWL"],
+	"license": "MIT",
+	"environment": "server",
+	"entrypoints": {
+		"main": ["ru.lwl.stats.LwlStats"]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

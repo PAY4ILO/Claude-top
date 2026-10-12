@@ -14,4 +14,4 @@ plugins {
 }
 
 rootProject.name = 'lwl-mods'
-include 'lwl-skins', 'lwl-auth'
+include 'lwl-skins', 'lwl-auth', 'lwl-stats'

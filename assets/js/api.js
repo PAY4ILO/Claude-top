@@ -30,6 +30,7 @@
     packTitle: { max: 80 },
     packDescription: { max: 1000 },
     packVersion: { max: 40 },
+    cardBio: { max: 140 },
   };
 
   const APPLICATION_SOURCES = ['Друзья', 'YouTube', 'TikTok', 'Telegram', 'Другое'];
@@ -43,6 +44,18 @@
   const ROLES = { user: 'Пользователь', player: 'Игрок', admin: 'Админ' };
   const CREATOR_LABEL = 'Создатель';
   const LAUNCHERS = { prism: 'Prism Launcher', curseforge: 'CurseForge', modrinth: 'Modrinth', other: 'Другой лаунчер' };
+  /** Что игрок может скрыть на своей карточке (ключи — как в server/lib/validate.js → CARD_FIELDS). */
+  const CARD_FIELDS = {
+    playtime: 'Время в игре',
+    deaths: 'Смерти',
+    mobKills: 'Убито мобов',
+    playerKills: 'Убито игроков',
+    blocksMined: 'Добыто блоков',
+    distance: 'Пройдено',
+    advancements: 'Достижения',
+    firstSeen: 'Первый вход',
+    lastSeen: 'Когда был в игре',
+  };
 
   /* ------------------------------------------------------------------ ошибки */
 
@@ -123,6 +136,20 @@
       if (!Object.hasOwn(LICENSES, d.license)) f.license = 'Укажите, есть ли у вас лицензия Minecraft.';
       if (String(d.contact || '').trim().length > LIMITS.contact.max) f.contact = `Максимум ${LIMITS.contact.max} символов.`;
       if (!d.agree) f.agree = 'Нужно согласиться с правилами сервера.';
+      return f;
+    },
+    /** «Моя карточка»: проверяются только переданные поля. */
+    card(d) {
+      const f = {};
+      if (d.bio !== undefined) {
+        if (typeof d.bio !== 'string') f.bio = 'Это должен быть текст.';
+        else if (d.bio.trim().length > LIMITS.cardBio.max) f.bio = `Максимум ${LIMITS.cardBio.max} символов.`;
+      }
+      if (d.hidden !== undefined && typeof d.hidden !== 'boolean') f.hidden = 'Нужно «да» или «нет».';
+      if (d.hideFields !== undefined) {
+        const keys = Object.keys(CARD_FIELDS);
+        if (!Array.isArray(d.hideFields) || d.hideFields.length > keys.length || d.hideFields.some((k) => !keys.includes(k))) f.hideFields = 'Неизвестное поле карточки.';
+      }
       return f;
     },
   };
@@ -261,6 +288,7 @@
     ROLES,
     CREATOR_LABEL,
     LAUNCHERS,
+    CARD_FIELDS,
     ApiError,
     validate,
     on,
@@ -375,6 +403,23 @@
       info: () => http('GET', '/me/server'),
       /** Новый личный код (старый перестаёт работать): { code: 'XXXX-XXXX-XXXX', info }. Целиком код приходит только здесь. */
       newCode: () => http('POST', '/me/connect-code'),
+    },
+
+    /** Карточки игроков (статистика с Minecraft-сервера). Только «Игрокам» и админам. */
+    players: {
+      /** sort: 'online' | 'playtime' | 'recent'; → { players: [карточка], total } */
+      list: ({ sort = 'online', query = '' } = {}) => http('GET', '/players' + q({ sort, q: query.trim() })),
+      get: (nickname) => http('GET', `/players/${enc(nickname)}`).then((d) => d.player),
+      /** Своя карточка: { bio, hidden, hideFields, player (как видят другие, или null — ещё не заходил) } */
+      myCard: () => http('GET', '/me/card'),
+      /** Меняет только переданное: { bio?, hidden?, hideFields? } */
+      async updateMyCard(patch) {
+        const fields = validate.card(patch);
+        if (Object.keys(fields).length) throw new ApiError('VALIDATION', null, { fields });
+        const card = await http('PATCH', '/me/card', patch);
+        emit('players');
+        return card;
+      },
     },
 
     /** Ссылки для страниц сайта (Telegram, Discord); запрашиваются один раз. */

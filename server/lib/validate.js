@@ -16,12 +16,15 @@ export const LIMITS = {
   packDescription: { max: 1000 },
   packVersion: { max: 40 },
   setting: { max: 1000 },
+  cardBio: { max: 140 },
 };
 
 export const APPLICATION_SOURCES = ['Друзья', 'YouTube', 'TikTok', 'Telegram', 'Другое'];
 export const LICENSES = ['premium', 'cracked'];
 export const ROLES = ['user', 'player', 'admin'];
 export const LAUNCHERS = ['prism', 'curseforge', 'modrinth', 'other'];
+// Что игрок может скрыть на своей карточке (PATCH /api/me/card → hideFields).
+export const CARD_FIELDS = ['playtime', 'deaths', 'mobKills', 'playerKills', 'blocksMined', 'distance', 'advancements', 'firstSeen', 'lastSeen'];
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
@@ -70,6 +73,19 @@ export const validate = {
     if (!LICENSES.includes(d.license)) f.license = 'Укажите, есть ли у вас лицензия Minecraft.';
     if (str(d.contact).trim().length > LIMITS.contact.max) f.contact = `Максимум ${LIMITS.contact.max} символов.`;
     if (d.agree !== true) f.agree = 'Нужно согласиться с правилами сервера.';
+    return f;
+  },
+  /** «Моя карточка»: проверяются только присланные поля. */
+  card(d) {
+    const f = {};
+    if (d.bio !== undefined) {
+      if (typeof d.bio !== 'string') f.bio = 'Это должен быть текст.';
+      else if (d.bio.trim().length > LIMITS.cardBio.max) f.bio = `Максимум ${LIMITS.cardBio.max} символов.`;
+    }
+    if (d.hidden !== undefined && typeof d.hidden !== 'boolean') f.hidden = 'Нужно «да» или «нет».';
+    if (d.hideFields !== undefined) {
+      if (!Array.isArray(d.hideFields) || d.hideFields.length > CARD_FIELDS.length || d.hideFields.some((k) => !CARD_FIELDS.includes(k))) f.hideFields = 'Неизвестное поле карточки.';
+    }
     return f;
   },
 };

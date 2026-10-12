@@ -40,6 +40,9 @@ export function loadConfig(env = process.env) {
     // Токен игрового сервера для /api/game/… (мод LWL: config/lwl/connect.json → siteToken).
     // Пусто — эти маршруты отвечают 503, и сервер не может проверять коды входа.
     gameToken: String(env.LWL_GAME_TOKEN || '').trim(),
+    // Откуда сайт качает скины для карточек игроков. Не настраивается: другой адрес = дыра (SSRF).
+    // Только тесты подменяют его в объекте настроек на локальный сервер.
+    skinOrigin: 'https://textures.minecraft.net',
     staticRoot: ROOT,
     // Для тестов: ускорить хеширование паролей (никогда не включать на проде)
     fastHash: env.LWL_FAST_HASH === '1',

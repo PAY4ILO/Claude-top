@@ -17,6 +17,9 @@ import registerAdmin from './routes/admin.js';
 import registerPacks from './routes/packs.js';
 import registerConnect from './routes/connect.js';
 import registerAttachments from './routes/attachments.js';
+import registerGame from './routes/game.js';
+import registerPlayers from './routes/players.js';
+import { createSkins } from './lib/skins.js';
 
 const SESSION_COOKIE = 'lwl_session';
 const DAY = 24 * 3600 * 1000;
@@ -28,6 +31,7 @@ export const ROLE_LABELS = { user: 'Пользователь', player: 'Игро
 export function createApp(config) {
   fs.mkdirSync(path.join(config.dataDir, 'packs'), { recursive: true });
   fs.mkdirSync(path.join(config.dataDir, 'attachments'), { recursive: true });
+  fs.mkdirSync(path.join(config.dataDir, 'skins'), { recursive: true });
   useFastHashing(config.fastHash);
   const db = openDb(path.join(config.dataDir, 'lwl.db'));
   const limiter = new RateLimiter();
@@ -128,6 +132,7 @@ export function createApp(config) {
     db.prepare('DELETE FROM password_resets WHERE expires_at < ?').run(now);
     db.prepare('DELETE FROM login_failures WHERE updated_at < ?').run(now - DAY);
     s.attachments.sweep();
+    s.skins.sweep();
   }, 3600 * 1000);
   cleanupTimer.unref();
 
@@ -190,6 +195,8 @@ export function createApp(config) {
   };
 
   const s = { db, config, limiter, views, getUser, startSession, endSession, need, settings, isOwner, permsOf, can, ROLE_LABELS };
+  // Скины для карточек игроков: LWL_DATA_DIR/skins/<sha256>.png, качаются только с config.skinOrigin.
+  s.skins = createSkins({ db, dir: path.join(config.dataDir, 'skins'), origin: config.skinOrigin || 'https://textures.minecraft.net' });
 
   /* ------------------------------------------------------------ маршруты */
 
@@ -202,6 +209,8 @@ export function createApp(config) {
   registerAdmin(router, s);
   registerPacks(router, s);
   registerConnect(router, s);
+  registerGame(router, s);
+  registerPlayers(router, s);
 
   async function handleApi(req, res, url) {
     const m = router.match(req.method, url.pathname);
@@ -270,6 +279,7 @@ export function createApp(config) {
   return {
     server,
     db,
+    skins: s.skins,
     close() {
       clearInterval(cleanupTimer);
       limiter.stop();

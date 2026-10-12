@@ -88,6 +88,8 @@ export default function register(router, s) {
     const m = /^Bearer\s+(\S+)\s*$/i.exec(String(ctx.req.headers.authorization || ''));
     if (!m || !safeEqual(m[1], config.gameToken)) throw new HttpError(401, 'unauthorized', 'Неверный токен сайта (siteToken в config/lwl/connect.json).');
   }
+  // Та же проверка — для статистики с игрового сервера (routes/game.js, мод lwl-stats).
+  s.needGame = needGame;
 
   const VERIFY_MESSAGES = {
     no_player: (nick) => `Ника ${nick} нет среди игроков сайта LWL. Подайте заявку на сайте — после одобрения там появится код.`,
