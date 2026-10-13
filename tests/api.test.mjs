@@ -1558,12 +1558,14 @@ function fakeRcon(password) {
           else if (/^skin of \w+ url /.test(text)) send(id, 0, 'Загружаю скин по ссылке, это займёт несколько секунд…');
           else if (/^skin of \w+ set (\w+)$/.test(text)) send(id, 0, `Ищу скин лицензии ${text.split(' ').pop()}…`);
           else if (/^skin of \w+ clear$/.test(text)) send(id, 0, '');
+          else if (/^skin of \w+ status$/.test(text)) send(id, 0, self.status);
           else send(id, 0, m ? `${m[1]} добавлен в вайтлист.` : 'Вайтлист выключен, в нём пока никого нет.');
         }
       }
     });
   });
-  return { server, commands };
+  const self = { server, commands, status: 'Скин: готов.' };
+  return self;
 }
 
 test('автовайтлист: одобрение сразу добавляет ник через RCON, ошибки видны и повторяемы', async () => {
@@ -1670,6 +1672,17 @@ test('свой скин: сайт сам ставит его на сервер �
     assert.equal(rcon.commands.at(-1), 'skin of Boss_1 set Notch');
     assert.equal((await boss.post('/api/me/skin/sync')).data.skin.sync.status, 'ok');
     assert.equal(rcon.commands.at(-1), 'skin of Boss_1 set Notch', '«Повторить» — та же команда');
+
+    // Через несколько секунд сайт спрашивает у мода, чем кончилось: ошибка MineSkin/Mojang видна в кабинете.
+    config2.skinCheckMs = 30;
+    rcon.status = 'Скин Boss_1: загружается…';
+    assert.equal((await boss.post('/api/me/skin/sync')).data.skin.sync.status, 'ok');
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(rcon.commands.at(-1), 'skin of Boss_1 status');
+    rcon.status = 'Скин Boss_1: ошибка — MineSkin не принял картинку.';
+    await new Promise((r) => setTimeout(r, 120));
+    const card = await boss.get('/api/me/card');
+    assert.deepEqual(card.data.skin.sync, { status: 'error', message: 'MineSkin не принял картинку.' });
   } finally {
     base = saved;
     await app2.close();

@@ -100,7 +100,8 @@
   `LWL_DATA_DIR/skins/<sha256>.png`, отдаёт `GET /api/skins/<hash>.png` (immutable). Свой скин —
   `PUT /api/me/skin` сырым PNG (проверка `isSkinPng`: 64×64 или 64×32, ≤64 КБ); если есть RCON и публичный
   `LWL_PUBLIC_URL` (`publicBase` отсекает localhost и адреса домашней сети) — `skin of <ник> url <сайт>/api/skins/<hash>.png [slim]`
-  (ответ lwl-skins «Загружаю скин…» = принято; сам MineSkin может ещё упасть — это видно только в логе сервера).
+  (ответ lwl-skins «Загружаю скин…» = принято; через `config.skinCheckMs` (15 с) сайт спрашивает `skin of <ник> status`
+  и, если MineSkin/Mojang не справились, пишет ошибку в `skin_sync` — `checkLater` в `routes/players.js`, тексты — в `SkinCommands.status`).
   Скин по нику — `POST /api/me/skin/nick`: `lib/mojang.js` (адреса фиксированы в `config.mojang`, не env; тесты
   подменяют на локальный сервер; ник/UUID проверяются регэкспом, без редиректов, ≤32 КБ, кеш 10 мин) → URL текстуры →
   `skins.fetchNow` (всё равно только textures.minecraft.net) → `player_cards.skin_nick` (миграция 7) и RCON
@@ -219,5 +220,4 @@ Docker → находит Caddyfile на машине по `docker inspect` (Mou
 
 ## Что дальше (идеи, о которых говорили)
 
-- Узнавать, что MineSkin не смог взять свой скин игрока (сейчас «ок» = мод принял команду): ответ мода приходит позже, по RCON его не видно.
-- Проверить `lwl-stats` на настоящем сервере 26.3 (пока только сборка и тесты сайта).
+- Проверить `lwl-stats` и новую `/skin status` (lwl-skins) на настоящем сервере 26.3 (пока только сборка и тесты сайта).

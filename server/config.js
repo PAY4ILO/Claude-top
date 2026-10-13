@@ -51,6 +51,8 @@ export function loadConfig(env = process.env) {
     defaultSkinTexture: '31f477eb1a7beee631c2ca64d06f8f68fa93a3386d04452ab27f43acdf1b60cb',
     // Скин лицензии по нику (кабинет → «Скин по нику»): только эти адреса Mojang. Тоже не настраиваются, тесты подменяют.
     mojang: { api: 'https://api.mojang.com', servicesApi: 'https://api.minecraftservices.com', session: 'https://sessionserver.mojang.com' },
+    // Через сколько спросить у мода (/skin of <ник> status), взял ли MineSkin/Mojang свой скин игрока. Тесты уменьшают.
+    skinCheckMs: 15_000,
     staticRoot: ROOT,
     // Для тестов: ускорить хеширование паролей (никогда не включать на проде)
     fastHash: env.LWL_FAST_HASH === '1',

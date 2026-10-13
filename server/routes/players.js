@@ -310,6 +310,33 @@ export default function register(router, s) {
    * тогда `set <ник>` (мод сам возьмёт подписанный скин у Mojang). Ничего не бросает —
    * результат пишется в player_cards.skin_sync: 'ok' | 'error' | 'off'.
    */
+  // Мод отвечает сразу, а MineSkin/Mojang готовят скин несколько секунд — потом спрашиваем у мода, чем кончилось
+  // (`/skin of <ник> status`, lwl-skins). «загружается…» — спросим ещё (до 3 раз); старый мод без status — молчим.
+  const checks = new Map(); // id пользователя → таймер
+  s.onClose(() => {
+    for (const t of checks.values()) clearTimeout(t);
+  });
+  function checkLater(user, tries = 3) {
+    clearTimeout(checks.get(user.id));
+    const t = setTimeout(async () => {
+      checks.delete(user.id);
+      let reply;
+      try {
+        reply = await rconCommand(config.rcon, `skin of ${user.nickname} status`);
+      } catch {
+        return;
+      }
+      if (/: загружается/.test(reply)) {
+        if (tries > 1) checkLater(user, tries - 1);
+        return;
+      }
+      const m = /: ошибка — ([\s\S]+)/.exec(reply);
+      if (m) setSync.run('error', m[1].trim().slice(0, 300), user.id);
+    }, config.skinCheckMs);
+    t.unref?.();
+    checks.set(user.id, t);
+  }
+
   async function syncSkin(user, hash, slim, nick = null) {
     const base = publicBase(config.publicUrl);
     if (!rconConfigured(config.rcon) || (hash && !nick && !base)) {
@@ -333,8 +360,11 @@ export default function register(router, s) {
       // При сбросе ответ приходит позже (или «не выбран свой скин» — сбрасывать нечего): оба случая — успех.
       // По нику мод так же сразу пишет «Ищу скин лицензии…», а Mojang спрашивает уже без нас.
       const ok = hash ? /Загружаю скин|Ищу скин лицензии|обновлён|теперь как у/.test(reply) : !reply || /сброшен|не выбран свой скин/.test(reply);
-      if (ok) setSync.run('ok', '', user.id);
-      else if (/unknown or incomplete command|неизвестная или неполная команда/i.test(reply)) setSync.run('error', 'На сервере нет команды /skin — установлен ли мод LWL Skins?', user.id);
+      if (ok) {
+        setSync.run('ok', '', user.id);
+        if (hash) checkLater(user);
+        else clearTimeout(checks.get(user.id));
+      } else if (/unknown or incomplete command|неизвестная или неполная команда/i.test(reply)) setSync.run('error', 'На сервере нет команды /skin — установлен ли мод LWL Skins?', user.id);
       else setSync.run('error', reply.slice(0, 300) || 'Сервер Minecraft ничего не ответил.', user.id);
     } catch (e) {
       setSync.run('error', e.message, user.id);

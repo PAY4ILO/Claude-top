@@ -21,6 +21,8 @@ import net.minecraft.server.permissions.Permissions;
 import java.net.URI;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static com.mojang.brigadier.arguments.StringArgumentType.getString;
 import static com.mojang.brigadier.arguments.StringArgumentType.greedyString;
@@ -33,6 +35,7 @@ import static net.minecraft.commands.Commands.literal;
  * /skin url <ссылка> [slim]  — скин из PNG по ссылке
  * /skin clear                — вернуть скин по умолчанию
  * /skin update               — перекачать текущий скин
+ * /skin status               — чем кончилась последняя смена скина (сайт спрашивает её по RCON)
  * /skin of <игрок> …         — то же для другого игрока (админ)
  * /skin reload               — перечитать настройки (админ)
  */
@@ -56,6 +59,16 @@ public final class SkinCommands {
 		}
 		return variant.buildFuture();
 	};
+
+	/** Чем кончилась последняя смена скина: state — pending | ok | error. Только в памяти, до перезапуска. */
+	private record Result(String state, String message) {
+	}
+
+	private static final Map<String, Result> RESULTS = new ConcurrentHashMap<>();
+
+	private static void result(Target target, String state, String message) {
+		RESULTS.put(target.name().toLowerCase(Locale.ROOT), new Result(state, message));
+	}
 
 	private SkinCommands() {
 	}
@@ -88,6 +101,8 @@ public final class SkinCommands {
 			.executes(ctx -> clear(ctx.getSource(), target.resolve(ctx))));
 		parent.then(literal("update")
 			.executes(ctx -> update(ctx.getSource(), target.resolve(ctx))));
+		parent.then(literal("status")
+			.executes(ctx -> status(ctx.getSource(), target.resolve(ctx))));
 		return parent;
 	}
 
@@ -123,14 +138,19 @@ public final class SkinCommands {
 			return 0;
 		}
 		info(source, "Ищу скин лицензии " + nick + "…");
+		result(target, "pending", "");
 		SkinManager manager = manager();
 		manager.fetchNickname(nick).whenCompleteAsync((skin, error) -> {
 			if (error != null) {
+				result(target, "error", SkinException.userMessage(error));
 				source.sendFailure(Component.literal(SkinException.userMessage(error)));
 			} else if (skin.isEmpty()) {
-				source.sendFailure(Component.literal("Лицензионного аккаунта с ником " + nick + " нет — скин взять неоткуда. Проверьте написание или используйте /skin url."));
+				String why = "Лицензионного аккаунта с ником " + nick + " нет — скин взять неоткуда. Проверьте написание или используйте /skin url.";
+				result(target, "error", why);
+				source.sendFailure(Component.literal(why));
 			} else {
 				manager.setSkin(target.name(), new SkinStore.PlayerSkin(target.name(), "nick", nick, skin.get().isSlim(), skin.get()));
+				result(target, "ok", "");
 				success(source, target, target.whose() + " теперь как у " + nick + ".", skin.get());
 			}
 		}, manager.server());
@@ -161,15 +181,32 @@ public final class SkinCommands {
 			return 0;
 		}
 		info(source, "Загружаю скин по ссылке, это займёт несколько секунд…");
+		result(target, "pending", "");
 		SkinManager manager = manager();
 		manager.fetchUrl(url, slim).whenCompleteAsync((skin, error) -> {
 			if (error != null) {
+				result(target, "error", SkinException.userMessage(error));
 				source.sendFailure(Component.literal(SkinException.userMessage(error)));
 			} else {
 				manager.setSkin(target.name(), new SkinStore.PlayerSkin(target.name(), "url", url, slim, skin));
+				result(target, "ok", "");
 				success(source, target, target.whose() + " обновлён.", skin);
 			}
 		}, manager.server());
+		return 1;
+	}
+
+	/** Тексты читает сайт (server/routes/players.js, checkLater) — меняешь их, поправь и там. */
+	private static int status(CommandSourceStack source, Target target) {
+		Result r = RESULTS.get(target.name().toLowerCase(Locale.ROOT));
+		String text = "Скин " + target.name() + ": " + (r == null
+			? "смен скина ещё не было."
+			: switch (r.state()) {
+				case "pending" -> "загружается…";
+				case "ok" -> "готов.";
+				default -> "ошибка — " + r.message();
+			});
+		source.sendSuccess(() -> Component.literal(text), false);
 		return 1;
 	}
 
