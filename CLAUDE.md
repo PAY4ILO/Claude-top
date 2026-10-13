@@ -105,6 +105,12 @@
   Пределы `LOOK` — и в `api.js`, и в `server/lib/validate.js` (`normalizeLook`). Старая колонка `pose` = поза карточки
   (если она не custom); старое поле `pose` в PATCH меняет `looks.card.pose`. Рисует `Skin3D.draw` (`zoom` растёт от ног,
   голова и руки поворачиваются вместе с телом); `scale` — размер фигуры, не пропорции тела.
+  Своя поза в кабинете — `Skin3D.poser` (как в Blockbench): `draw()` возвращает `{scale, toScreen, camera, pivot, axes}`
+  и собирает в `opts.hits` грани частей (выбор нажатием). Кольца — «карданные» оси углов части (x — вокруг оси X,
+  повёрнутой на y; y — вертикаль; z — после x и y), поэтому каждое кольцо меняет ровно один угол. Ползунки
+  перечитывают углы (`read` в `slider()`), история для «Отменить»/Ctrl+Z — в `lookSection()`. e2e считает, где
+  кольцо и стрелка «Присесть», той же математикой — меняешь радиус колец (`px`) или место стрелки в `skin3d.js`,
+  поправь `poserPoints()` в `tests/e2e.mjs`.
   **Свой фон** (`lib/backgrounds.js`, `player_cards.bg_file`): браузер сжимает (`compressBackground` в `api.js`: WebP,
   запасной JPEG, ≤1280 точек), сервер принимает `PUT /api/me/background` сырым телом WebP/JPEG/PNG ≤400 КБ и ≤1600 точек,
   без анимированного WebP (проверка по первым байтам `sniffImage`), хранит `LWL_DATA_DIR/backgrounds/<sha256>.<ext>`,

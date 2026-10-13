@@ -546,9 +546,31 @@
   font-size: 14px;
 }
 .look__name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   color: var(--c-text-2);
 }
-.look__range {
+/* Цвет оси — как у колец в редакторе позы (Blockbench): X красная, Y зелёная, Z синяя. */
+.look__axis {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.look__slider[data-axis='x'] .look__axis {
+  background: #f0484e;
+}
+.look__slider[data-axis='y'] .look__axis {
+  background: #5cd65c;
+}
+.look__slider[data-axis='z'] .look__axis {
+  background: #3d8bff;
+}
+.poser__reset {
+  top: 10px;
+  bottom: auto;
+}.look__range {
   width: 100%;
   accent-color: var(--c-blue-2);
 }

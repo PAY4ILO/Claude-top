@@ -7,6 +7,8 @@
  *   Skin3D.draw(canvas, skin, opts)      — один кадр: { slim, pose, angles, zoom, yaw, pitch, time }
  *   Skin3D.viewer({ url, slim, pose, look, label }) → { el, set({url, slim, pose, look}), destroy() } — крутится мышью/пальцем/стрелками
  *   Skin3D.figure({ url, slim, pose, look }) → <canvas> с методом update(look) — неподвижная картинка для карточки
+ *   Skin3D.poser({ url, slim, look, part, yaw, pitch, onSelect, onStart, onChange, onEnd }) → { el, set({look, part}), resetCamera(), destroy() }
+ *                                        — редактор позы как в Blockbench: нажать на часть тела, тянуть цветные кольца
  *   Skin3D.poseAngles(key)               — углы позы без анимации (с них начинается «Своя поза»)
  *   look — как стоит персонаж на карточке: { pose: ключ | 'custom', angles (у custom), scale, turn } (см. Api.LOOK)
  *   Skin3D.guessSlim(skin)               — тонкие ли руки (по пустым пикселям, как это определяет сама игра — никак, поэтому «угадать»)
@@ -173,6 +175,9 @@
 
   const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
   const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const norm = (a) => mul(a, 1 / (Math.hypot(a[0], a[1], a[2]) || 1));
 
   /* ------------------------------------------------------------ рисование */
 
@@ -185,6 +190,8 @@
    * Один кадр. canvas — уже нужного размера (в пикселях устройства), skin — 64×64 из load().
    * yaw/pitch — поворот камеры в градусах, pose — ключ позы ('custom' — углы из angles), time — секунды анимации (null — без анимации).
    * zoom — размер фигуры: растёт вверх от ног, ноги остаются на месте.
+   * hits — массив: в него попадут нарисованные грани { key, poly } (для выбора части мышью), в порядке рисования.
+   * Возвращает, как модель легла на холст (для колец редактора позы), или null без скина.
    */
   function draw(canvas, skin, opts = {}) {
     const g = canvas.getContext('2d');
@@ -192,7 +199,7 @@
     const H = canvas.height;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, W, H);
-    if (!skin) return;
+    if (!skin) return null;
     g.imageSmoothingEnabled = false;
     const fitScale = Math.min(W / WIDTH, H / HEIGHT);
     const zoom = opts.zoom || 1;
@@ -232,11 +239,13 @@
         paint() {
           g.setTransform((su[0] - s0[0]) / tw, (su[1] - s0[1]) / tw, (sv[0] - s0[0]) / th, (sv[1] - s0[1]) / th, s0[0], s0[1]);
           g.drawImage(skin, sx, sy, tw, th, -seam, -seam, tw + 2 * seam, th + 2 * seam);
+          if (opts.hits) opts.hits.push({ key: part.key, poly: [s0, su, [su[0] + sv[0] - s0[0], su[1] + sv[1] - s0[1]], sv] });
         },
       };
     };
 
-    const queue = model(opts.slim).map((part) => {
+    const parts = model(opts.slim);
+    const queue = parts.map((part) => {
       const [w, h, d] = part.size;
       const [x0, y0, z0] = part.at;
       const box = (grow, [u, v]) => faces(x0 - grow, y0 - grow, z0 - grow, x0 + w + grow, y0 + h + grow, z0 + d + grow, u, v, w, h, d).map((f) => drawFace(f, part));
@@ -251,6 +260,28 @@
       for (const f of q.outer) if (f.nz > 1e-6) f.paint();
     }
     g.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Направление из мира модели в вид (только камера) и из системы родителя части в вид.
+    const camera = (d) => rotate(rotate(d, [0, yaw, 0]), [pitch, 0, 0]);
+    const fromParent = (key, d) => camera(bodyTurned && ATTACHED.has(key) ? rotate(d, angles.body) : d);
+    return {
+      scale,
+      toScreen,
+      camera,
+      /** Сустав части в координатах вида. */
+      pivot: (key) => {
+        const part = parts.find((p) => p.key === key);
+        return toView(part, part.pivot);
+      },
+      /**
+       * Оси, вокруг которых поворачивают углы [rx, ry, rz] этой части (как «гимбал» в Blockbench):
+       * поворот считается rz → rx → ry, поэтому ось ry — вертикаль родителя, rx — после ry, rz — после rx и ry.
+       */
+      axes: (key) => {
+        const [rx, ry] = angles[key];
+        return [rotate([1, 0, 0], [0, ry, 0]), [0, 1, 0], rotate([0, 0, 1], [rx, ry, 0])].map((d) => norm(fromParent(key, d)));
+      },
+    };
   }
 
   /* ------------------------------------------------------------ загрузка */
@@ -457,6 +488,350 @@
     return { el, canvas, set, destroy, get state() { return { ...state, pose: state.look.pose, skin: undefined }; } };
   }
 
+  /* ------------------------------------------------------------ редактор позы (как в Blockbench) */
+
+  // Цвета осей — как в Blockbench: X красная, Y зелёная, Z синяя.
+  const AXIS_COLORS = ['#f0484e', '#5cd65c', '#3d8bff'];
+  const wrap180 = (v) => ((((v + 180) % 360) + 360) % 360) - 180;
+
+  function inPoly([a, b, , d], x, y) {
+    // Параллелограмм a, b, (b + d − a), d: x = a + s·(b − a) + t·(d − a), внутри — s, t от 0 до 1.
+    const ux = b[0] - a[0];
+    const uy = b[1] - a[1];
+    const vx = d[0] - a[0];
+    const vy = d[1] - a[1];
+    const det = ux * vy - uy * vx;
+    if (Math.abs(det) < 1e-9) return false;
+    const px = x - a[0];
+    const py = y - a[1];
+    const s = (px * vy - py * vx) / det;
+    const t = (ux * py - uy * px) / det;
+    return s >= 0 && s <= 1 && t >= 0 && t <= 1;
+  }
+
+  function segDist(p, a, b) {
+    const dx = b[0] - a[0];
+    const dy = b[1] - a[1];
+    const k = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+    return Math.hypot(p[0] - a[0] - k * dx, p[1] - a[1] - k * dy);
+  }
+
+  /**
+   * Нажать на голову, тело, руку или ногу — вокруг сустава появятся три кольца; тянуть кольцо — поворот вокруг
+   * этой оси (Shift — шагом 15°). У тела ещё зелёная стрелка «присесть» у правого края. Пустое место — повернуть камеру.
+   * Меняет look.angles на месте; onChange(part) — после каждого шага, onStart/onEnd — начало и конец движения.
+   */
+  function poser(opts = {}) {
+    const baseYaw = opts.yaw === undefined ? 25 : opts.yaw;
+    const basePitch = opts.pitch === undefined ? 10 : opts.pitch;
+    const state = { url: opts.url, slim: !!opts.slim, look: opts.look, part: opts.part || null, yaw: 0, pitch: basePitch, skin: null };
+    const canvas = document.createElement('canvas');
+    canvas.className = 'skin3d__canvas poser__canvas';
+    canvas.tabIndex = 0;
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', `${opts.label || 'Своя поза'}. Нажмите на часть тела и тяните цветные кольца; стрелки — повернуть камеру.`);
+    const el = document.createElement('div');
+    el.className = 'skin3d poser';
+    el.append(canvas);
+
+    let info = null; // как модель легла на холст в последнем кадре
+    let hits = [];
+    let gizmo = null; // кольца выбранной части в пикселях холста
+    let hover = null;
+    let drag = null;
+    let frame = 0;
+    let alive = true;
+
+    function resetCamera() {
+      state.yaw = lookOpts(state.look, baseYaw).yaw;
+      state.pitch = basePitch;
+      redraw();
+    }
+
+    function buildGizmo() {
+      if (!info || !state.part) return null;
+      const dpr = canvas.width / (canvas.clientWidth || canvas.width);
+      const px = Math.max(44 * dpr, Math.min(canvas.width, canvas.height) * 0.2);
+      const R = px / info.scale;
+      const c = info.pivot(state.part);
+      const cs = info.toScreen(c);
+      const rings = info.axes(state.part).map((A, i) => {
+        const u = norm(cross(A, Math.abs(A[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]));
+        const v = cross(A, u);
+        const pts = [];
+        for (let k = 0; k <= 64; k++) {
+          const t = (k / 64) * Math.PI * 2;
+          const p = add(c, add(mul(u, R * Math.cos(t)), mul(v, R * Math.sin(t))));
+          pts.push({ p, s: info.toScreen(p), front: p[2] >= c[2] });
+        }
+        return { i, A, pts };
+      });
+      // «Присесть» — стрелка у правого края на высоте пояса: на самой фигуре она закрывала бы ноги.
+      let arrow = null;
+      if (state.part === 'body') {
+        const down = info.camera([0, -1, 0]);
+        const x = canvas.width - 32 * dpr;
+        const y = Math.max(40 * dpr, Math.min(canvas.height - 56 * dpr, cs[1]));
+        arrow = { from: [x, y - 26 * dpr], to: [x, y + 26 * dpr], perUnit: [down[0] * info.scale, -down[1] * info.scale] };
+      }
+      return { c, cs, R, px, dpr, rings, arrow };
+    }
+
+    function paintGizmo() {
+      const g = canvas.getContext('2d');
+      const z = gizmo;
+      g.save();
+      g.lineCap = 'round';
+      g.lineJoin = 'round';
+      // Выбранная часть — тонкий контур.
+      g.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      g.lineWidth = 1.25 * z.dpr;
+      for (const hit of hits) {
+        if (hit.key !== state.part) continue;
+        g.beginPath();
+        hit.poly.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y)));
+        g.closePath();
+        g.stroke();
+      }
+      const active = (id) => (drag && drag.target === id) || (!drag && hover === id);
+      // Сначала задние половины колец (бледно), потом передние.
+      for (const front of [false, true]) {
+        for (const ring of z.rings) {
+          g.strokeStyle = AXIS_COLORS[ring.i];
+          g.globalAlpha = front ? 1 : 0.3;
+          g.lineWidth = (active(ring.i) ? 4 : 2.25) * z.dpr;
+          g.beginPath();
+          for (let k = 1; k < ring.pts.length; k++) {
+            const a = ring.pts[k - 1];
+            const b = ring.pts[k];
+            if (a.front !== front && b.front !== front) continue;
+            g.moveTo(a.s[0], a.s[1]);
+            g.lineTo(b.s[0], b.s[1]);
+          }
+          g.stroke();
+        }
+      }
+      g.globalAlpha = 1;
+      if (z.arrow) {
+        const { from, to } = z.arrow;
+        const w = (active('lift') ? 4 : 2.5) * z.dpr;
+        const ang = Math.atan2(to[1] - from[1], to[0] - from[0]);
+        const head = 9 * z.dpr;
+        g.strokeStyle = g.fillStyle = AXIS_COLORS[1];
+        g.lineWidth = w;
+        g.beginPath();
+        g.moveTo(from[0], from[1]);
+        g.lineTo(to[0] - Math.cos(ang) * head * 0.6, to[1] - Math.sin(ang) * head * 0.6);
+        g.stroke();
+        g.beginPath();
+        g.moveTo(to[0], to[1]);
+        g.lineTo(to[0] - Math.cos(ang - 0.45) * head, to[1] - Math.sin(ang - 0.45) * head);
+        g.lineTo(to[0] - Math.cos(ang + 0.45) * head, to[1] - Math.sin(ang + 0.45) * head);
+        g.closePath();
+        g.fill();
+        g.font = `600 ${11 * z.dpr}px system-ui, sans-serif`;
+        g.textAlign = 'center';
+        g.textBaseline = 'top';
+        g.fillText('присесть', to[0], to[1] + 5 * z.dpr);
+      }
+      // Сустав.
+      g.fillStyle = '#fff';
+      g.beginPath();
+      g.arc(z.cs[0], z.cs[1], 3 * z.dpr, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+
+    const render = () => {
+      frame = 0;
+      if (!alive) return;
+      if (!el.isConnected) {
+        if (el.dataset.mounted) return destroy();
+        frame = requestAnimationFrame(render);
+        return;
+      }
+      el.dataset.mounted = '1';
+      fit(canvas);
+      const look = lookOpts(state.look, 0);
+      hits = [];
+      info = draw(canvas, state.skin, { slim: state.slim, pose: look.pose, angles: look.angles, zoom: look.zoom, yaw: state.yaw, pitch: state.pitch, time: null, hits });
+      gizmo = look.pose === 'custom' ? buildGizmo() : null;
+      if (gizmo) paintGizmo();
+    };
+    const redraw = () => {
+      if (!frame) frame = requestAnimationFrame(render);
+    };
+
+    /** Что под точкой холста: кольцо (0, 1, 2), стрелка 'lift', часть тела { part } или null. */
+    function pick(x, y) {
+      if (gizmo) {
+        const near = 9 * gizmo.dpr;
+        let best = null;
+        for (const ring of gizmo.rings) {
+          for (let k = 1; k < ring.pts.length; k++) {
+            const a = ring.pts[k - 1];
+            const d = segDist([x, y], a.s, ring.pts[k].s) - (a.front ? 2 * gizmo.dpr : 0);
+            if (d < near && (!best || d < best.d)) best = { d, target: ring.i, ring, at: a };
+          }
+        }
+        if (gizmo.arrow) {
+          const d = segDist([x, y], gizmo.arrow.from, gizmo.arrow.to);
+          if (d < near && (!best || d < best.d)) best = { d, target: 'lift' };
+        }
+        if (best) return best;
+      }
+      for (let k = hits.length - 1; k >= 0; k--) if (inPoly(hits[k].poly, x, y)) return { part: hits[k].key };
+      return null;
+    }
+
+    const pointer = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return [((e.clientX - r.left) * canvas.width) / (r.width || 1), ((e.clientY - r.top) * canvas.height) / (r.height || 1)];
+    };
+
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      const [x, y] = pointer(e);
+      const hit = pick(x, y);
+      try {
+        canvas.setPointerCapture(e.pointerId);
+      } catch {
+        // указатель уже отпущен — тянуть всё равно можно, пока он над холстом
+      }
+      const angles = state.look && state.look.angles;
+      if (hit && hit.target === 'lift' && angles) {
+        drag = { target: 'lift', x, y, from: angles.lift || 0 };
+      } else if (hit && hit.target !== undefined && angles) {
+        const { A } = hit.ring;
+        const r = sub(hit.at.p, gizmo.c);
+        const t3 = cross(A, r);
+        drag = {
+          target: hit.target,
+          x,
+          y,
+          from: angles[state.part][hit.target],
+          // Кольцо смотрит на нас — крутим вокруг центра; стоит ребром — тянем вдоль касательной.
+          facing: Math.abs(A[2]) > 0.3 ? Math.sign(A[2]) : 0,
+          phi: Math.atan2(y - gizmo.cs[1], x - gizmo.cs[0]),
+          turned: 0,
+          tangent: [t3[0] * info.scale, -t3[1] * info.scale],
+          px: gizmo.px,
+        };
+      } else {
+        drag = { target: 'camera', x, y, yaw: state.yaw, pitch: state.pitch, moved: false, part: hit && hit.part };
+        return;
+      }
+      if (opts.onStart) opts.onStart(state.part);
+      redraw();
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+      const [x, y] = pointer(e);
+      if (!drag) {
+        const hit = pick(x, y);
+        const next = hit ? (hit.target !== undefined ? hit.target : 'part') : null;
+        canvas.style.cursor = next === null ? '' : next === 'part' ? 'pointer' : 'grab';
+        if (next !== hover) {
+          hover = next;
+          redraw();
+        }
+        return;
+      }
+      const dpr = canvas.width / (canvas.clientWidth || canvas.width);
+      if (drag.target === 'camera') {
+        if (Math.hypot(x - drag.x, y - drag.y) > 4 * dpr) drag.moved = true;
+        state.yaw = drag.yaw + ((x - drag.x) / dpr) * 0.7;
+        state.pitch = Math.max(-30, Math.min(45, drag.pitch + ((y - drag.y) / dpr) * 0.4));
+        redraw();
+        return;
+      }
+      const angles = state.look.angles;
+      if (drag.target === 'lift') {
+        const u = gizmo.arrow.perUnit;
+        const k = ((x - drag.x) * u[0] + (y - drag.y) * u[1]) / (u[0] * u[0] + u[1] * u[1] || 1);
+        angles.lift = Math.max(-12, Math.min(0, Math.round(drag.from - k)));
+      } else {
+        let delta;
+        if (drag.facing) {
+          const phi = Math.atan2(y - gizmo.cs[1], x - gizmo.cs[0]);
+          let d = phi - drag.phi;
+          if (d > Math.PI) d -= Math.PI * 2;
+          if (d < -Math.PI) d += Math.PI * 2;
+          drag.phi = phi;
+          drag.turned += d;
+          delta = -drag.turned * drag.facing;
+        } else {
+          const t = drag.tangent;
+          delta = ((x - drag.x) * t[0] + (y - drag.y) * t[1]) / Math.max(t[0] * t[0] + t[1] * t[1], (drag.px * 0.5) ** 2);
+        }
+        let v = drag.from + delta / DEG;
+        if (e.shiftKey) v = Math.round(v / 15) * 15;
+        angles[state.part][drag.target] = Math.round(wrap180(v));
+      }
+      redraw();
+      if (opts.onChange) opts.onChange(state.part);
+    });
+
+    const stop = () => {
+      if (!drag) return;
+      const was = drag;
+      drag = null;
+      if (was.target === 'camera') {
+        if (!was.moved && was.part && was.part !== state.part) {
+          state.part = was.part;
+          if (opts.onSelect) opts.onSelect(was.part);
+        }
+      } else if (opts.onEnd) opts.onEnd(state.part);
+      redraw();
+    };
+    canvas.addEventListener('pointerup', stop);
+    canvas.addEventListener('pointercancel', stop);
+    canvas.addEventListener('pointerleave', () => {
+      if (!drag && hover !== null) {
+        hover = null;
+        redraw();
+      }
+    });
+    canvas.addEventListener('keydown', (e) => {
+      const step = { ArrowLeft: [-15, 0], ArrowRight: [15, 0], ArrowUp: [0, -8], ArrowDown: [0, 8] }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      state.yaw += step[0];
+      state.pitch = Math.max(-30, Math.min(45, state.pitch + step[1]));
+      redraw();
+    });
+
+    function set(next = {}) {
+      if (next.look) {
+        if ((Number(next.look.turn) || 0) !== (Number(state.look && state.look.turn) || 0)) {
+          state.look = next.look;
+          resetCamera();
+        }
+        state.look = next.look;
+      }
+      if (next.part !== undefined) state.part = next.part;
+      if (next.slim !== undefined) state.slim = !!next.slim;
+      redraw();
+    }
+
+    function destroy() {
+      alive = false;
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+    }
+
+    resetCamera();
+    el.classList.add('is-loading');
+    load(state.url)
+      .then((skin) => {
+        state.skin = skin;
+        el.classList.remove('is-loading');
+        redraw();
+      })
+      .catch(() => el.classList.remove('is-loading'));
+    return { el, canvas, set, resetCamera, destroy, get part() { return state.part; } };
+  }
+
   /**
    * Неподвижная картинка для карточки в сетке: персонаж в позе, вполоборота.
    * Возвращает <canvas>; скин догружается сам.
@@ -484,5 +859,5 @@
     return canvas;
   }
 
-  window.Skin3D = { POSES, PARTS, load, draw, viewer, figure, poseAngles, guessSlim, fit };
+  window.Skin3D = { POSES, PARTS, AXIS_COLORS, load, draw, viewer, poser, figure, poseAngles, guessSlim, fit };
 })();

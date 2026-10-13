@@ -353,6 +353,57 @@ await B.focus('.look__custom .look__range'); await B.keyboard.press('ArrowLeft',
 await B.waitForSelector('.look__status:has-text("Сохранено")'); await settle(B, 800);
 const looks = (await (await B.request.get(BASE + '/api/me/card')).json()).looks;
 ok('своя поза для окна игрока, карточка — «Машет»', looks.detail.pose === 'custom' && looks.detail.angles && looks.card.pose === 'wave', JSON.stringify(looks));
+// Кольца как в Blockbench. Где на холсте кольцо, нога и стрелка — считаем той же математикой, что рисует редактор.
+const poserPoints = () =>
+  B.evaluate(async () => {
+    const cv = document.querySelector('.poser__canvas');
+    cv.scrollIntoView({ block: 'center' });
+    const me = await Api.players.myCard();
+    const look = me.looks.detail;
+    const off = document.createElement('canvas');
+    off.width = cv.width;
+    off.height = cv.height;
+    const hits = [];
+    const info = Skin3D.draw(off, await Skin3D.load(me.card.skinUrl), { slim: me.card.skinSlim, pose: 'custom', angles: look.angles, zoom: look.scale, yaw: 25 + look.turn, pitch: 10, hits });
+    const r = cv.getBoundingClientRect();
+    const toC = ([x, y]) => [r.left + (x * r.width) / cv.width, r.top + (y * r.height) / cv.height];
+    const dpr = cv.width / cv.clientWidth;
+    const c = info.pivot('rightArm');
+    const A = info.axes('rightArm')[0];
+    const h = Math.abs(A[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    let u = [A[1] * h[2] - A[2] * h[1], A[2] * h[0] - A[0] * h[2], A[0] * h[1] - A[1] * h[0]];
+    u = u.map((v) => v / Math.hypot(...u));
+    const R = Math.max(44 * dpr, Math.min(cv.width, cv.height) * 0.2) / info.scale;
+    const ring = toC(info.toScreen([c[0] + u[0] * R, c[1] + u[1] * R, c[2] + u[2] * R]));
+    const area = (q) => Math.abs((q[1][0] - q[0][0]) * (q[3][1] - q[0][1]) - (q[1][1] - q[0][1]) * (q[3][0] - q[0][0]));
+    const f = hits.filter((x) => x.key === 'leftLeg').sort((a, b) => area(b.poly) - area(a.poly))[0].poly;
+    const leg = toC([(f[0][0] + f[2][0]) / 2, (f[0][1] + f[2][1]) / 2]);
+    const hip = info.toScreen(info.pivot('body'))[1];
+    const arrow = toC([cv.width - 32 * dpr, Math.max(40 * dpr, Math.min(cv.height - 56 * dpr, hip))]);
+    return { ring, leg, arrow };
+  });
+const dragBy = async ([x, y], dx, dy) => {
+  await B.mouse.move(x, y);
+  await B.mouse.down();
+  await B.mouse.move(x + dx, y + dy, { steps: 12 });
+  await B.mouse.up();
+  await settle(B, 1200);
+};
+const armOf = async () => (await (await B.request.get(BASE + '/api/me/card')).json()).looks.detail;
+const armBefore = (await armOf()).angles.rightArm;
+let pts = await poserPoints();
+await dragBy(pts.ring, 4, -60);
+const armAfter = (await armOf()).angles.rightArm;
+const armSlider = await B.locator('.look__custom .look__slider[data-axis="x"] output').innerText();
+ok('кольцо: тянем красное — рука поворачивается, ползунок за ней', Math.abs(armAfter[0] - armBefore[0]) >= 20 && armSlider === `${-armAfter[0]}°`, JSON.stringify({ armBefore, armAfter, armSlider }));
+await B.keyboard.press('Control+z'); await settle(B, 1200);
+ok('Ctrl+Z отменяет поворот', JSON.stringify((await armOf()).angles.rightArm) === JSON.stringify(armBefore), JSON.stringify((await armOf()).angles.rightArm));
+await B.mouse.click(...pts.leg);
+ok('нажатие на ногу выбирает её', (await B.locator('.look__custom .chip[aria-checked="true"]').innerText()) === 'Левая нога');
+await B.click('.look__custom .chip[data-part="body"]');
+pts = await poserPoints();
+await dragBy(pts.arrow, 0, 70);
+ok('стрелка «присесть» у тела', (await armOf()).angles.lift <= -3, JSON.stringify((await armOf()).angles.lift));
 await B.click('.my-card .swatch[aria-label="Незер"]'); await B.waitForSelector('.toast:has-text("Фон сохранён")'); await settle(B, 300);
 await B.fill('.my-card textarea[name=bio]', 'Строю мосты над лавой');
 await B.fill('.my-card input[name=social-telegram]', 'https://t.me/hawker_tg');
