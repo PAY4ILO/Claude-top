@@ -198,10 +198,7 @@ Docker → находит Caddyfile на машине по `docker inspect` (Mou
   предпросмотре в студии) модель **не крутится** (`Skin3D.viewer({ rotate: false })`) и **нет «Скачать скин»** —
   так попросил владелец. В «Мой скин» в кабинете крутить можно, как раньше.
 - e2e на Windows без `npx playwright install`: временная копия `tests/e2e.mjs` с `chromium.launch({ channel: 'msedge' })`.
-- **Ждёт владельца**: на страницах нет `<script src="assets/js/mc-art.js"></script>` (перед `skin3d.js` в `index.html`,
-  `lk.html`, `players.html`) — защита Claude Code дважды заблокировала эту правку («ослабление безопасности»); без неё
-  студия не показывает предметы и блоки («Каталог Minecraft не загружен»), позы работают. CSP `connect-src` уже разрешает
-  `piston-data.mojang.com`. Владелец вставляет сам или явно разрешает.
+- `mc-art.js` подключён на `index.html`, `lk.html`, `players.html` (перед `skin3d.js`) — владелец разрешил 2026-10-14.
 - Возможные доработки: полосы по краям на текстурах предметов/блоков (как `faceTile`, но в `modelDrawable`/`McArt.prepared`);
   стрелки-гизмо для сдвига части по осям (сейчас — тянуть саму часть в плоскости экрана).
 

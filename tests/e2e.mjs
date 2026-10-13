@@ -351,7 +351,8 @@ await B.click('.my-card a[href="#/studio"]'); await B.waitForSelector('.studio .
 ok('студия: сцена, превью карточки и окна игрока, 4 вкладки инструментов',
   (await B.locator('.studio__work .poser__canvas').count()) === 1 && (await B.locator('.studio__previews .pcard').count()) === 1 && (await B.locator('.studio__previews .pdetail__stage canvas').count()) === 1 && (await B.locator('.studio__tools [role=tab]').count()) === 4);
 await B.click('.studio__tools [role=tab]:has-text("Предметы")');
-ok('без каталога Minecraft — понятное пояснение, без ошибок', (await B.locator('.studio__notice').innerText()).includes('Каталог Minecraft не загружен'));
+await B.waitForSelector('.studio__palette .studio__tile', { timeout: 15000 }).catch(() => {});
+ok('каталог Minecraft подключён: в «Предметах» — палитра, без пояснения «не загружен»', (await B.locator('.studio__palette .studio__tile').count()) > 0 && (await B.locator('.studio__notice').count()) === 0);
 await B.click('.studio__tools [role=tab]:has-text("Поза")');
 const statusText = () => B.locator('.studio__status').innerText();
 const savedLooks = async () => (await (await B.request.get(BASE + '/api/me/card')).json()).looks;
