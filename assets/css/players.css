@@ -105,16 +105,21 @@
 .pcard__figure {
   position: absolute;
   left: 50%;
-  bottom: -40px;
+  bottom: 0;
   width: 320px;
-  height: 270px;
+  height: 230px;
   margin-left: -160px;
-  transform-origin: 50% 230px;
+  overflow: hidden; /* по земле: ниже края сцены ничего не видно */
+  transform-origin: bottom center;
   transition: transform 0.3s var(--ease);
   pointer-events: none;
 }
 .pcard:hover .pcard__figure {
   transform: scale(1.05);
+}
+/* Холст на 40px выше видимой части: фигура по центру холста стоит на краю сцены. */
+.pcard__figure .skin3d__figure {
+  height: 270px;
 }
 .skin3d__figure {
   display: block;
