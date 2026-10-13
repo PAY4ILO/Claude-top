@@ -3,11 +3,12 @@
  * Непрочитанное считается для каждого читателя отдельно (conversation_reads); оттуда же «прочитано» (две галочки):
  * сообщения игрока прочитаны, когда их открыл кто-то из админов, сообщения админов — когда их открыл игрок.
  * Отвечать в обращениях могут админы с правом «Обращения».
- * Новые сообщения клиент забирает опросом раз в несколько секунд (Api.chats.subscribe).
+ * Открытый чат слушает поток GET /api/conversations/:id/events (SSE): «change» — пора перечитать переписку
+ * (новое сообщение, прочитано, закрыто/открыто, удалено). Без потока кабинет опрашивает редко (Api.chats.subscribe).
  * Фото и файлы — тоже сообщения (с вложением): загрузка и скачивание — routes/attachments.js.
  */
 import { tx } from '../db.js';
-import { fail } from '../lib/http.js';
+import { HANDLED, fail } from '../lib/http.js';
 import { newId } from '../lib/security.js';
 import { validate } from '../lib/validate.js';
 
@@ -21,6 +22,34 @@ export default function register(router, s) {
   const readAt = db.prepare('SELECT read_at FROM conversation_reads WHERE conversation_id = ? AND user_id = ?');
   const supportReadAt = db.prepare('SELECT MAX(read_at) AS t FROM conversation_reads WHERE conversation_id = ? AND user_id != ?');
   const setRead = db.prepare('INSERT INTO conversation_reads (conversation_id, user_id, read_at) VALUES (?, ?, ?) ON CONFLICT(conversation_id, user_id) DO UPDATE SET read_at = MAX(read_at, excluded.read_at)');
+
+  /* ------------------------------------------------------------ поток событий (SSE) */
+  const STREAMS_PER_USER = 8;
+  const KEEPALIVE_MS = 25_000;
+  const streams = new Map(); // id обращения → Set<{ res, userId, ctx }>
+
+  /** Сказать открытым чатам обращения «перечитайте». except — id того, кто сам это сделал (ему не нужно). */
+  function notify(conversationId, except = null) {
+    for (const st of streams.get(conversationId) || []) if (st.userId !== except) st.res.write('event: change\ndata: {}\n\n');
+  }
+
+  const keepalive = setInterval(() => {
+    for (const [id, set] of streams) {
+      const c = convById.get(id);
+      for (const st of set) {
+        // Вышел из аккаунта, потерял доступ или обращение удалили — поток закрываем.
+        const fresh = { cookies: st.ctx.cookies, user: null };
+        s.authenticate(fresh);
+        if (!c || !fresh.user || !canAccess(fresh.user, c)) st.res.end();
+        else st.res.write(': ping\n\n');
+      }
+    }
+  }, KEEPALIVE_MS);
+  keepalive.unref?.();
+  s.onClose(() => {
+    clearInterval(keepalive);
+    for (const set of streams.values()) for (const st of set) st.res.end();
+  });
 
   function unreadFor(user, c) {
     const since = (readAt.get(c.id, user.id) || {}).read_at || 0;
@@ -119,6 +148,7 @@ export default function register(router, s) {
     db.prepare(`UPDATE conversations SET updated_at = ?, player_messages = player_messages + ? ${isPlayer ? ", status = 'open'" : ''} WHERE id = ?`).run(now, isPlayer ? 1 : 0, c.id);
     setRead.run(c.id, user.id, now + 1);
     db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(now, user.id);
+    notify(c.id);
     return db.prepare('SELECT * FROM messages WHERE id = ?').get(id);
   }
 
@@ -205,8 +235,39 @@ export default function register(router, s) {
   router.add('POST', '/api/conversations/:id/read', (ctx) => {
     const user = need.user(ctx);
     const c = convById.get(ctx.params.id);
-    if (canAccess(user, c)) setRead.run(c.id, user.id, Date.now());
+    if (canAccess(user, c)) {
+      setRead.run(c.id, user.id, Date.now());
+      notify(c.id, user.id);
+    }
     return null;
+  });
+
+  router.add('GET', '/api/conversations/:id/events', (ctx) => {
+    const user = need.user(ctx);
+    const c = convById.get(ctx.params.id);
+    if (!canAccess(user, c)) throw fail.notFound('Обращение не найдено.');
+    let mine = 0;
+    for (const set of streams.values()) for (const st of set) if (st.userId === user.id) mine++;
+    if (mine >= STREAMS_PER_USER) throw fail.rateLimited(60, 'Слишком много открытых чатов.');
+    const { req, res } = ctx;
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Accel-Buffering': 'no', // nginx: не копить поток в буфере
+    });
+    res.write('retry: 5000\n\n');
+    const st = { res, userId: user.id, ctx };
+    if (!streams.has(c.id)) streams.set(c.id, new Set());
+    streams.get(c.id).add(st);
+    const drop = () => {
+      const set = streams.get(c.id);
+      if (!set) return;
+      set.delete(st);
+      if (!set.size) streams.delete(c.id);
+    };
+    req.on('close', drop);
+    res.on('close', drop);
+    return HANDLED;
   });
 
   for (const [action, status] of [
@@ -218,6 +279,7 @@ export default function register(router, s) {
       const c = convById.get(ctx.params.id);
       if (!c) throw fail.notFound('Обращение не найдено.');
       db.prepare('UPDATE conversations SET status = ?, updated_at = ? WHERE id = ?').run(status, Date.now(), c.id);
+      notify(c.id);
       return null;
     });
   }
@@ -230,6 +292,7 @@ export default function register(router, s) {
     const files = s.attachments.idsOfConversation(c.id);
     db.prepare('DELETE FROM conversations WHERE id = ?').run(c.id);
     s.attachments.removeFiles(files);
+    notify(c.id);
     return null;
   });
 }

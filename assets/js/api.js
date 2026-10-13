@@ -14,7 +14,7 @@
   const CONFIG = {
     apiBase: '/api',
     requestTimeoutMs: 20000,
-    pollIntervalMs: 4000, // как часто опрашиваются новые сообщения в открытом чате
+    pollIntervalMs: 4000, // опрос открытого чата, пока не работает поток событий (SSE)
   };
 
   const LIMITS = {
@@ -596,13 +596,45 @@
       reopen: (id) => http('POST', `/conversations/${enc(id)}/reopen`).then(() => (emit('conversations'), emit('messages', { conversationId: id }), true)),
       remove: (id) => http('DELETE', `/conversations/${enc(id)}`).then(() => (emit('conversations'), true)),
       onListChange: (cb) => on('conversations', cb),
-      /** Новые сообщения в диалоге: cb() вызывается, когда стоит перечитать ленту. */
+      /**
+       * Новые сообщения в диалоге: cb() вызывается, когда стоит перечитать ленту. Сервер сам говорит «change»
+       * по потоку (SSE); пока поток не работает — опрос. Скрытая вкладка не перечитывает (иначе отметит
+       * «прочитано» за человека) — догоняет, когда её откроют.
+       */
       subscribe(id, cb) {
         const off = on('messages', (p) => p && p.conversationId === id && cb());
-        const stop = poll(async () => cb(), CONFIG.pollIntervalMs);
+        let live = false;
+        let opened = false;
+        let pending = false;
+        const kick = () => {
+          if (document.visibilityState === 'visible') cb();
+          else pending = true;
+        };
+        const es = window.EventSource ? new EventSource(`${CONFIG.apiBase}/conversations/${enc(id)}/events`) : null;
+        if (es) {
+          es.addEventListener('change', kick);
+          es.onopen = () => {
+            if (opened) kick(); // переподключились — могли что-то пропустить
+            opened = live = true;
+          };
+          es.onerror = () => {
+            live = false;
+          };
+        }
+        const stop = poll(async () => {
+          if (!live) await cb();
+        }, CONFIG.pollIntervalMs);
+        const onVisible = () => {
+          if (document.visibilityState !== 'visible' || !pending) return;
+          pending = false;
+          cb();
+        };
+        document.addEventListener('visibilitychange', onVisible);
         return () => {
           off();
           stop();
+          if (es) es.close();
+          document.removeEventListener('visibilitychange', onVisible);
         };
       },
     },

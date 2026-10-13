@@ -114,6 +114,7 @@ function client() {
     put: (u, b, h) => call('PUT', u, b, h),
     del: (u, b) => call('DELETE', u, b),
     raw: call,
+    cookie: () => jar,
   };
 }
 
@@ -276,6 +277,41 @@ function tinyJpeg(width, height, orientation) {
   parts.push(sof, Buffer.from([0xff, 0xd9]));
   return Buffer.concat(parts);
 }
+
+test('поддержка: поток событий чата (SSE) — новое сообщение и «прочитано»; чужому и без входа — нет', async () => {
+  const url = `/api/conversations/${conversation.id}/events`;
+  assert.equal((await bob.get(url)).status, 404);
+  assert.equal((await client().get(url)).status, 401);
+  const ac = new AbortController();
+  const res = await fetch(base + url, { headers: { Cookie: alice.cookie() }, signal: ac.signal });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/event-stream/);
+  assert.equal(res.headers.get('x-accel-buffering'), 'no');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  async function waitFor(re) {
+    const deadline = Date.now() + 3000;
+    while (!re.test(buf)) {
+      const left = deadline - Date.now();
+      if (left <= 0) throw new Error('нет события, пришло: ' + JSON.stringify(buf));
+      const chunk = await Promise.race([reader.read(), new Promise((r) => setTimeout(() => r(null), left))]);
+      if (chunk && chunk.done) throw new Error('поток закрылся');
+      if (chunk) buf += decoder.decode(chunk.value);
+    }
+    buf = '';
+  }
+  try {
+    await waitFor(/retry: \d+/);
+    await owner.post(`/api/conversations/${conversation.id}/messages`, { text: 'Проверка потока', clientId: 'sse1' });
+    await waitFor(/event: change/);
+    await alice.post(`/api/conversations/${conversation.id}/read`);
+    await owner.post(`/api/conversations/${conversation.id}/read`);
+    await waitFor(/event: change/);
+  } finally {
+    ac.abort();
+  }
+});
 
 test('вложения: картинка узнаётся по первым байтам, размер — с учётом поворота фото', async () => {
   const { sniffImage, cleanFileName } = await import('../server/lib/files.js');

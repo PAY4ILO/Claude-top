@@ -199,7 +199,8 @@ export function createApp(config) {
     keys: Object.keys(SETTINGS_DEFAULTS),
   };
 
-  const s = { db, config, limiter, views, getUser, startSession, endSession, need, settings, isOwner, permsOf, can, ROLE_LABELS };
+  const closers = []; // что сделать при остановке (закрыть потоки чата)
+  const s = { db, config, limiter, views, getUser, startSession, endSession, need, settings, isOwner, permsOf, can, ROLE_LABELS, authenticate, onClose: (fn) => closers.push(fn) };
   // Скины для карточек игроков: LWL_DATA_DIR/skins/<sha256>.png, качаются только с config.skinOrigin.
   s.skins = createSkins({ db, dir: path.join(config.dataDir, 'skins'), origin: config.skinOrigin || 'https://textures.minecraft.net', defaultTexture: config.defaultSkinTexture });
   // Свои фоны карточек: LWL_DATA_DIR/backgrounds/<sha256>.<webp|jpg|png>.
@@ -307,6 +308,7 @@ export function createApp(config) {
     close() {
       clearInterval(cleanupTimer);
       limiter.stop();
+      for (const fn of closers) fn();
       return new Promise((resolve) => {
         server.close(() => {
           db.close();
