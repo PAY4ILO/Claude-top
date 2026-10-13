@@ -92,6 +92,7 @@ export default function register(router, s) {
     db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
     s.attachments.removeFiles(files);
     s.endSession(ctx);
+    await s.unwhitelist(user);
     return null;
   });
 

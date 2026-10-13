@@ -1515,7 +1515,9 @@ function fakeRcon(password) {
         } else if (type === 2 && authed) {
           commands.push(text);
           const m = /^wl add (\w+)/.exec(text);
-          if (/^skin of \w+ url /.test(text)) send(id, 0, 'Загружаю скин по ссылке, это займёт несколько секунд…');
+          const rm = /^wl remove (\w+)$/.exec(text);
+          if (rm) send(id, 0, `${rm[1]} убран из вайтлиста.`);
+          else if (/^skin of \w+ url /.test(text)) send(id, 0, 'Загружаю скин по ссылке, это займёт несколько секунд…');
           else if (/^skin of \w+ set (\w+)$/.test(text)) send(id, 0, `Ищу скин лицензии ${text.split(' ').pop()}…`);
           else if (/^skin of \w+ clear$/.test(text)) send(id, 0, '');
           else send(id, 0, m ? `${m[1]} добавлен в вайтлист.` : 'Вайтлист выключен, в нём пока никого нет.');
@@ -1568,6 +1570,17 @@ test('автовайтлист: одобрение сразу добавляет
     assert.ok(rcon.commands.includes('wl add Erin_1'), 'лицензия — без cracked');
     assert.equal((await boss.post(`/api/applications/${dApp.id}/whitelist`)).status, 200);
     assert.equal((await dave.post(`/api/applications/${dApp.id}/whitelist`)).status, 403);
+
+    // Роль «Игрок» сняли — ник убран из вайтлиста; удалили аккаунт — тоже. Обычного пользователя не трогаем.
+    const daveId = (await dave.get('/api/auth/me')).data.user.id;
+    assert.equal((await boss.patch(`/api/admin/users/${daveId}`, { role: 'user' })).status, 200);
+    assert.equal(rcon.commands.at(-1), 'wl remove Dave_1');
+    const erinId = (await erin.get('/api/auth/me')).data.user.id;
+    assert.equal((await boss.del(`/api/admin/users/${erinId}`)).status, 204);
+    assert.equal(rcon.commands.at(-1), 'wl remove Erin_1');
+    const n = rcon.commands.length;
+    assert.equal((await boss.del(`/api/admin/users/${daveId}`)).status, 204);
+    assert.equal(rcon.commands.length, n, 'у «Пользователя» на сервере нечего убирать');
   } finally {
     base = saved;
     await app2.close();

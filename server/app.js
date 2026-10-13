@@ -22,6 +22,7 @@ import registerPlayers from './routes/players.js';
 import { createMojang } from './lib/mojang.js';
 import { createBackgrounds } from './lib/backgrounds.js';
 import { createSkins } from './lib/skins.js';
+import { rconConfigured, whitelistRemove } from './lib/rcon.js';
 
 const SESSION_COOKIE = 'lwl_session';
 const DAY = 24 * 3600 * 1000;
@@ -204,6 +205,21 @@ export function createApp(config) {
   // Свои фоны карточек: LWL_DATA_DIR/backgrounds/<sha256>.<webp|jpg|png>.
   s.backgrounds = createBackgrounds({ db, dir: path.join(config.dataDir, 'backgrounds') });
   s.mojang = createMojang(config.mojang);
+  /**
+   * Аккаунт удалён или роль «Игрок» снята — убрать ник из вайтлиста Minecraft-сервера (если настроен RCON).
+   * Только у тех, кто мог там быть (игрок или админ). Ошибка не мешает удалению: её видно в журнале сервера,
+   * убрать можно и вручную (/wl remove). Возвращает true, если сервер подтвердил.
+   */
+  s.unwhitelist = async (user) => {
+    if (!user || user.role === 'user' || !rconConfigured(config.rcon)) return false;
+    try {
+      await whitelistRemove(config.rcon, user.nickname);
+      return true;
+    } catch (err) {
+      console.error(`[${new Date().toISOString()}] /wl remove ${user.nickname}: ${err.message}`);
+      return false;
+    }
+  };
 
   /* ------------------------------------------------------------ маршруты */
 

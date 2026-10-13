@@ -79,10 +79,11 @@ export default function register(router, s) {
     if (u.role === 'admin' && u.id !== admin.id && !s.can(admin, 'admins')) throw fail.forbidden(`${u.nickname} — админ: ${action} может только тот, у кого есть право «Админы».`);
   }
 
-  router.add('PATCH', '/api/admin/users/:id', (ctx) => {
+  router.add('PATCH', '/api/admin/users/:id', async (ctx) => {
     const admin = need.admin(ctx);
     const role = ctx.body.role;
     if (!ROLES.includes(role)) throw fail.validation({ role: 'Выберите роль.' });
+    const before = s.getUser(ctx.params.id);
     tx(db, () => {
       const u = s.getUser(ctx.params.id);
       if (!u) throw fail.notFound('Пользователь не найден.');
@@ -98,6 +99,8 @@ export default function register(router, s) {
       // Новый админ получает права по умолчанию; снятый — теряет настройки.
       db.prepare('UPDATE users SET role = ?, admin_perms = NULL WHERE id = ?').run(role, u.id);
     });
+    // Снова просто «Пользователь» — на сервер больше не пускаем.
+    if (role === 'user' && before.role !== 'user') await s.unwhitelist(before);
     return { user: userRow(s.getUser(ctx.params.id)) };
   });
 
@@ -115,7 +118,7 @@ export default function register(router, s) {
     return { user: userRow(s.getUser(u.id)) };
   });
 
-  router.add('DELETE', '/api/admin/users/:id', (ctx) => {
+  router.add('DELETE', '/api/admin/users/:id', async (ctx) => {
     const admin = need.perm(ctx, 'users', 'delete');
     const u = s.getUser(ctx.params.id);
     if (!u) throw fail.notFound('Пользователь не найден.');
@@ -124,6 +127,7 @@ export default function register(router, s) {
     const files = s.attachments.idsOfPlayer(u.id);
     db.prepare('DELETE FROM users WHERE id = ?').run(u.id);
     s.attachments.removeFiles(files);
+    await s.unwhitelist(u);
     return null;
   });
 

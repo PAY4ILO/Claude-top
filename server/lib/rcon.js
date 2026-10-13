@@ -82,4 +82,13 @@ export async function whitelistAdd(cfg, nickname, license) {
   throw new Error(reply || 'Сервер Minecraft ничего не ответил.');
 }
 
+/** Убрать ник из вайтлиста мода LWL Auth (/wl remove). «Его там и не было» — тоже успех. */
+export async function whitelistRemove(cfg, nickname) {
+  if (!NICK.test(nickname)) throw new Error('Такой ник в Minecraft невозможен.');
+  const reply = await rconCommand(cfg, `wl remove ${nickname}`);
+  if (/убран из вайтлиста|нет в вайтлисте/.test(reply)) return reply;
+  if (/unknown or incomplete command|неизвестная или неполная команда/i.test(reply)) throw new Error('Сервер не знает команду /wl — установлен ли на нём мод LWL Auth?');
+  throw new Error(reply || 'Сервер Minecraft ничего не ответил.');
+}
+
 export const whitelistList = (cfg) => rconCommand(cfg, 'wl list');
