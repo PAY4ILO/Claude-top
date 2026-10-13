@@ -19,6 +19,7 @@ import registerConnect from './routes/connect.js';
 import registerAttachments from './routes/attachments.js';
 import registerGame from './routes/game.js';
 import registerPlayers from './routes/players.js';
+import { createMailer } from './lib/mail.js';
 import { createMojang } from './lib/mojang.js';
 import { createBackgrounds } from './lib/backgrounds.js';
 import { createSkins } from './lib/skins.js';
@@ -206,6 +207,9 @@ export function createApp(config) {
   // Свои фоны карточек: LWL_DATA_DIR/backgrounds/<sha256>.<webp|jpg|png>.
   s.backgrounds = createBackgrounds({ db, dir: path.join(config.dataDir, 'backgrounds') });
   s.mojang = createMojang(config.mojang);
+  s.mail = createMailer(config.smtp);
+  /** Ссылка на страницу сайта для письма; без LWL_PUBLIC_URL — null (адрес из запроса в письмо не берём). */
+  s.siteLink = (hash = '') => (config.publicUrl ? `${config.publicUrl}/lk.html${hash}` : null);
   /**
    * Аккаунт удалён или роль «Игрок» снята — убрать ник из вайтлиста Minecraft-сервера (если настроен RCON).
    * Только у тех, кто мог там быть (игрок или админ). Ошибка не мешает удалению: её видно в журнале сервера,

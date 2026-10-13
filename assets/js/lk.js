@@ -1837,7 +1837,7 @@
       'section',
       { class: 'review' },
       h('h3', { class: 'review__title', text: 'Пароль' }),
-      h('p', { class: 'field__hint', text: 'Писем сайт не отправляет: если человек забыл пароль, создайте ссылку и пришлите её ему (Telegram, Discord).' }),
+      h('p', { class: 'field__hint', text: 'Если письма не настроены (LWL_SMTP_URL) или письмо не дошло — создайте ссылку и пришлите её человеку сами (Telegram, Discord).' }),
       h('div', { class: 'actions-row' }, btn),
       out
     );

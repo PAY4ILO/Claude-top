@@ -481,8 +481,10 @@ test('вложения: при запуске сайт убирает файлы
 });
 
 test('сброс пароля: запрос → ссылка от админа → новый пароль', async () => {
-  assert.equal((await client().post('/api/auth/password-reset', { email: 'nobody@example.com' })).status, 204);
-  assert.equal((await client().post('/api/auth/password-reset', { email: 'bob@example.com' })).status, 204);
+  const nobody = await client().post('/api/auth/password-reset', { email: 'nobody@example.com' });
+  assert.equal(nobody.status, 200);
+  assert.deepEqual(nobody.data, { mail: false }, 'без LWL_SMTP_URL писем нет');
+  assert.deepEqual((await client().post('/api/auth/password-reset', { email: 'bob@example.com' })).data, { mail: false });
   assert.equal((await owner.get('/api/me/summary')).data.resetRequests, 1);
   const users = await owner.get('/api/admin/users?role=reset');
   assert.equal(users.data.items.length, 1);
@@ -1684,5 +1686,106 @@ test('RCON: неверный пароль — понятная ошибка', as
     await assert.rejects(rconCommand({ host: '127.0.0.1', port: rcon.server.address().port, password: 'wrong', timeoutMs: 2000 }, 'wl list'), /не принял пароль/);
   } finally {
     await new Promise((r) => rcon.server.close(r));
+  }
+});
+
+/** Поддельный SMTP: принимает письма и складывает их в mails (тело уже раскодировано из base64). */
+function fakeSmtp() {
+  const mails = [];
+  const auths = [];
+  const server = net.createServer((sock) => {
+    let buf = '';
+    let data = null;
+    let mail = null;
+    sock.write('220 fake ESMTP\r\n');
+    sock.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      for (;;) {
+        if (data !== null) {
+          const end = buf.indexOf('\r\n.\r\n');
+          if (end < 0) return;
+          const raw = buf.slice(0, end).replace(/(^|\r\n)\.\./g, '$1.');
+          buf = buf.slice(end + 5);
+          data = null;
+          const [head, body] = raw.split('\r\n\r\n');
+          mails.push(Object.assign(mail, { head, text: Buffer.from(body.replace(/\r\n/g, ''), 'base64').toString('utf8') }));
+          sock.write('250 OK\r\n');
+          continue;
+        }
+        const i = buf.indexOf('\r\n');
+        if (i < 0) return;
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        if (/^EHLO/.test(line)) sock.write('250-fake\r\n250 AUTH PLAIN\r\n');
+        else if (/^AUTH PLAIN /.test(line)) {
+          auths.push(Buffer.from(line.slice(11), 'base64').toString('utf8'));
+          sock.write('235 OK\r\n');
+        } else if (/^MAIL FROM:/.test(line)) {
+          mail = { from: line.slice(10) };
+          sock.write('250 OK\r\n');
+        } else if (/^RCPT TO:/.test(line)) {
+          mail.to = line.slice(8);
+          sock.write('250 OK\r\n');
+        } else if (line === 'DATA') {
+          data = '';
+          sock.write('354 go\r\n');
+        } else if (line === 'QUIT') sock.end('221 bye\r\n');
+        else sock.write('500 ?\r\n');
+      }
+    });
+    sock.on('error', () => {});
+  });
+  return { server, mails, auths };
+}
+
+test('письма: ссылка сброса пароля приходит на почту и работает, решение по заявке — тоже письмом', async () => {
+  const smtp = fakeSmtp();
+  await new Promise((r) => smtp.server.listen(0, '127.0.0.1', r));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-mail-'));
+  const mailApp = createApp(
+    loadConfig({ LWL_DATA_DIR: dir, LWL_ADMINS: 'boss@example.com', LWL_FAST_HASH: '1', LWL_PUBLIC_URL: 'https://lwl.test', LWL_MAIL_FROM: 'site@lwl.test', LWL_SMTP_URL: `smtp://mailer:p%40ss@127.0.0.1:${smtp.server.address().port}` })
+  );
+  await new Promise((r) => mailApp.server.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${mailApp.server.address().port}`;
+  const call = (method, u, body, cookie) =>
+    fetch(url + u, { method, headers: Object.assign({ 'X-Requested-With': 'lwl', 'Content-Type': 'application/json' }, cookie ? { Cookie: cookie } : {}), body: body && JSON.stringify(body) });
+  const waitMails = async (n) => {
+    for (let i = 0; i < 100 && smtp.mails.length < n; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(smtp.mails.length, n);
+  };
+  const login = (res) => res.headers.getSetCookie()[0].split(';')[0];
+  try {
+    const boss = login(await call('POST', '/api/auth/register', { nickname: 'Boss_1', email: 'boss@example.com', password: 'password123' }));
+    const carl = login(await call('POST', '/api/auth/register', { nickname: 'Carl_1', email: 'carl@example.com', password: 'password123' }));
+
+    const res = await call('POST', '/api/auth/password-reset', { email: 'carl@example.com' });
+    assert.deepEqual(await res.json(), { mail: true });
+    assert.deepEqual(await (await call('POST', '/api/auth/password-reset', { email: 'nobody@example.com' })).json(), { mail: true }, 'ответ тот же для чужой почты');
+    await waitMails(1);
+    const m = smtp.mails[0];
+    assert.equal(m.to, '<carl@example.com>');
+    assert.equal(m.from, '<site@lwl.test>');
+    assert.equal(smtp.auths[0], '\0mailer\0p@ss', 'логин и пароль из адреса раскодированы');
+    assert.match(m.head, /Subject: =\?UTF-8\?B\?/);
+    const token = m.text.match(/https:\/\/lwl\.test\/lk\.html#\/reset\/([\w-]+)/)[1];
+    assert.equal((await call('GET', `/api/auth/password-reset/${token}`)).status, 200);
+    await call('POST', '/api/auth/password-reset', { email: 'carl@example.com' });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(smtp.mails.length, 1, 'второе письмо на тот же аккаунт — не раньше чем через 10 минут');
+    assert.equal((await call('POST', `/api/auth/password-reset/${token}`, { password: 'newpassword1' })).status, 200);
+    const relogin = await call('POST', '/api/auth/login', { login: 'Carl_1', password: 'newpassword1' });
+    assert.equal(relogin.status, 200);
+    assert.equal((await call('GET', '/api/auth/me', undefined, carl)).status, 401, 'смена пароля завершает старые сессии');
+
+    const app1 = await (await call('POST', '/api/applications', application, login(relogin))).json();
+    assert.ok(app1.application, JSON.stringify(app1));
+    assert.equal((await call('POST', `/api/applications/${app1.application.id}/review`, { status: 'approved' }, boss)).status, 200);
+    await waitMails(2);
+    assert.equal(smtp.mails[1].to, '<carl@example.com>');
+    assert.match(smtp.mails[1].text, /одобрили[\s\S]*https:\/\/lwl\.test\/lk\.html#\/server/);
+  } finally {
+    await mailApp.close();
+    await new Promise((r) => smtp.server.close(r));
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -158,6 +158,17 @@ export default function register(router, s) {
     });
     // Решение уже сохранено; вайтлист — после, и его ошибка решение не отменяет.
     if (status === 'approved') await syncWhitelist(byId.get(ctx.params.id));
+    const who = s.getUser(byId.get(ctx.params.id).user_id);
+    if (who) {
+      const link = s.siteLink(status === 'approved' ? '#/server' : '#/application');
+      s.mail.send(
+        who.email,
+        status === 'approved' ? 'Заявка на сервер LWL одобрена' : 'Заявка на сервер LWL отклонена',
+        status === 'approved'
+          ? `Здравствуйте, ${who.nickname}!\n\nВашу заявку на сервер LWL одобрили. Как зайти — во вкладке «Сервер» в личном кабинете${link ? ':\n' + link : '.'}\n\nДо встречи в игре!`
+          : `Здравствуйте, ${who.nickname}!\n\nВашу заявку на сервер LWL отклонили. Причина: ${comment}\n\nПодробнее — в личном кабинете${link ? ':\n' + link : '.'}`
+      );
+    }
     return { application: view(byId.get(ctx.params.id)) };
   });
 

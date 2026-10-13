@@ -530,6 +530,7 @@
           throw e;
         }
       },
+      /** → { mail }: true — ссылка уходит и письмом (если почта есть на сайте). */
       requestPasswordReset: ({ email }) => http('POST', '/auth/password-reset', { email }),
       /** Проверить ссылку сброса: { nickname } или ошибка NOT_FOUND. */
       resetInfo: (token) => http('GET', `/auth/password-reset/${enc(token)}`),

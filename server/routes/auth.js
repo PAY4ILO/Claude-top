@@ -1,12 +1,14 @@
 /** Регистрация, вход, выход, «Забыли пароль?» (через ссылку от администратора). */
 import { tx } from '../db.js';
 import { fail } from '../lib/http.js';
-import { burnPasswordTime, hashPassword, newId, sha256, verifyPassword } from '../lib/security.js';
+import { burnPasswordTime, hashPassword, newId, randomToken, sha256, verifyPassword } from '../lib/security.js';
 import { clean, validate } from '../lib/validate.js';
 
 const str = (v) => (typeof v === 'string' ? v : '');
 const LOCK_AFTER = 5;
 const LOCK_MS = 60 * 1000;
+const MAIL_RESET_TTL = 3600 * 1000; // ссылка из письма — на час
+const MAIL_RESET_EVERY = 10 * 60 * 1000; // не чаще одного письма на аккаунт за 10 минут
 
 export default function register(router, s) {
   const { db, need, views } = s;
@@ -78,16 +80,32 @@ export default function register(router, s) {
 
   router.add('GET', '/api/auth/me', (ctx) => ({ user: views.user(need.user(ctx)) }));
 
-  // Писем сайт не отправляет: запрос видят админы в разделе «Пользователи» и присылают ссылку.
-  // Ответ одинаковый для любой почты, чтобы по нему нельзя было проверять, кто зарегистрирован.
+  // Запрос видят админы в разделе «Пользователи» и присылают ссылку. Если настроены письма (LWL_SMTP_URL
+  // и LWL_PUBLIC_URL) — ссылка на час ещё и уходит на почту. Ответ одинаковый для любой почты
+  // ({ mail } зависит только от настроек), чтобы по нему нельзя было проверять, кто зарегистрирован.
   router.add('POST', '/api/auth/password-reset', (ctx) => {
     need.rate(ctx, 'reset-request', 5, 3600_000);
     const email = str(ctx.body.email).trim().toLowerCase();
     const err = validate.email(email);
     if (err) throw fail.validation({ email: err });
+    const mail = s.mail.enabled && !!s.siteLink();
     const user = byEmail.get(email);
-    if (user) db.prepare('INSERT INTO reset_requests (user_id, created_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET created_at = excluded.created_at').run(user.id, Date.now());
-    return null;
+    if (user) {
+      const now = Date.now();
+      db.prepare('INSERT INTO reset_requests (user_id, created_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET created_at = excluded.created_at').run(user.id, now);
+      const recent = db.prepare("SELECT 1 FROM password_resets WHERE user_id = ? AND created_by = 'mail' AND created_at > ?").get(user.id, now - MAIL_RESET_EVERY);
+      if (mail && !recent) {
+        const token = randomToken();
+        db.prepare("INSERT INTO password_resets (token_hash, user_id, created_at, expires_at, created_by) VALUES (?, ?, ?, ?, 'mail')").run(sha256(token), user.id, now, now + MAIL_RESET_TTL);
+        // Не ждём: время ответа не должно выдавать, есть ли такая почта.
+        s.mail.send(
+          user.email,
+          'Смена пароля на сайте LWL',
+          `Здравствуйте, ${user.nickname}!\n\nКто-то (надеемся, вы) попросил сменить пароль на сайте LWL. Новый пароль можно задать по ссылке — она действует час и сработает один раз:\n\n${s.siteLink('#/reset/' + token)}\n\nЕсли это были не вы — просто удалите письмо, пароль останется прежним.`
+        );
+      }
+    }
+    return { mail };
   });
 
   const resetByHash = db.prepare('SELECT * FROM password_resets WHERE token_hash = ? AND expires_at > ?');

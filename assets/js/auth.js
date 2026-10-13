@@ -42,7 +42,7 @@
       tabRegister.tabIndex = next === 'register' ? 0 : -1;
       panel.setAttribute('aria-labelledby', next === 'register' ? 'auth-tab-register' : 'auth-tab-login');
       title.textContent = { login: 'Вход', register: 'Регистрация', reset: 'Восстановление пароля' }[next];
-      lead.textContent = reason && isAuthTab ? reason : next === 'reset' ? 'Укажите почту аккаунта. Администраторы увидят запрос и пришлют вам ссылку для смены пароля.' : '';
+      lead.textContent = reason && isAuthTab ? reason : next === 'reset' ? 'Укажите почту аккаунта — пришлём ссылку для смены пароля.' : '';
       lead.hidden = !lead.textContent;
       UI.clear(body).append(next === 'login' ? loginForm() : next === 'register' ? registerForm() : resetForm());
       const first = body.querySelector('input');
@@ -123,11 +123,15 @@
         const btn = form.querySelector('[type=submit]');
         UI.setLoading(btn, true);
         try {
-          await Api.auth.requestPasswordReset({ email: form.email.value.trim() });
+          const res = await Api.auth.requestPasswordReset({ email: form.email.value.trim() });
           const ok = form.querySelector('.form-alert');
           ok.hidden = false;
           ok.classList.add('form-alert--info');
-          UI.clear(ok).append(icon('check'), h('span', { text: 'Запрос отправлен. Администратор пришлёт ссылку в Telegram или Discord, указанный в анкете (или ответит в поддержку, когда войдёте). Ссылка действует сутки.' }));
+          const text =
+            res && res.mail
+              ? 'Запрос отправлен. Если такая почта есть на сайте, на неё придёт письмо со ссылкой (действует час). Нет письма — загляните в «Спам»; администратор тоже видит запрос и может прислать ссылку сам.'
+              : 'Запрос отправлен. Администратор пришлёт ссылку в Telegram или Discord, указанный в анкете (или ответит в поддержку, когда войдёте). Ссылка действует сутки.';
+          UI.clear(ok).append(icon('check'), h('span', { text }));
         } catch (error) {
           UI.showFormError(form, error);
         } finally {

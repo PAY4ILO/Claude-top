@@ -13,7 +13,10 @@ import { newId } from '../lib/security.js';
 import { validate } from '../lib/validate.js';
 
 const str = (v) => (typeof v === 'string' ? v : '');
-const SYSTEM_GREETING = 'Спасибо за обращение! Администратор ответит здесь, как только освободится. Уведомлений на почту нет — загляните позже.';
+const greeting = (mail) =>
+  `Спасибо за обращение! Администратор ответит здесь, как только освободится. ${mail ? 'Когда ответят, придёт письмо на почту.' : 'Уведомлений на почту нет — загляните позже.'}`;
+const MAIL_EVERY = 30 * 60 * 1000; // письмо «вам ответили» — не чаще раза в полчаса на обращение
+const ONLINE_MS = 2 * 60 * 1000; // игрок был на сайте недавно — увидит и так
 
 export default function register(router, s) {
   const { db, need, views, config } = s;
@@ -50,6 +53,20 @@ export default function register(router, s) {
     clearInterval(keepalive);
     for (const set of streams.values()) for (const st of set) st.res.end();
   });
+
+  // Ответ поддержки — письмом игроку (если настроены письма). Текст ответа в письмо не кладём — только ссылку.
+  const mailedAt = new Map(); // id обращения → когда последний раз писали
+  function mailReply(c, now) {
+    if (!s.mail.enabled || now - (mailedAt.get(c.id) || 0) < MAIL_EVERY) return;
+    const player = s.getUser(c.player_id);
+    if (!player || now - (player.last_seen_at || 0) < ONLINE_MS) return;
+    mailedAt.set(c.id, now);
+    const link = s.siteLink('#/support');
+    // После транзакции: письмо — не часть сообщения.
+    setImmediate(() =>
+      s.mail.send(player.email, 'Ответ поддержки LWL', `Здравствуйте, ${player.nickname}!\n\nВ поддержке сайта LWL вам ответили. Прочитать и ответить — в личном кабинете${link ? ':\n' + link : '.'}`)
+    );
+  }
 
   function unreadFor(user, c) {
     const since = (readAt.get(c.id, user.id) || {}).read_at || 0;
@@ -143,8 +160,9 @@ export default function register(router, s) {
       db.prepare('INSERT INTO attachments (id, message_id, name, size, kind, mime, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(a.id, id, a.name, a.size, a.kind, a.mime, a.width, a.height, now);
     }
     if (isPlayer && c.player_messages === 0) {
-      db.prepare('INSERT INTO messages (id, conversation_id, author_id, system, text, created_at) VALUES (?, ?, NULL, 1, ?, ?)').run(newId('m'), c.id, SYSTEM_GREETING, now + 1);
+      db.prepare('INSERT INTO messages (id, conversation_id, author_id, system, text, created_at) VALUES (?, ?, NULL, 1, ?, ?)').run(newId('m'), c.id, greeting(s.mail.enabled), now + 1);
     }
+    if (!isPlayer) mailReply(c, now);
     db.prepare(`UPDATE conversations SET updated_at = ?, player_messages = player_messages + ? ${isPlayer ? ", status = 'open'" : ''} WHERE id = ?`).run(now, isPlayer ? 1 : 0, c.id);
     setRead.run(c.id, user.id, now + 1);
     db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(now, user.id);
