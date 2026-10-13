@@ -515,7 +515,8 @@
           return;
         }
         const s = skin.sync || {};
-        status.append(
+        // UI.append, а не status.append: тот вывел бы null/false текстом.
+        UI.append(status, [
           skin.nick && h('p', { class: 'skin-sync__text', text: `Скин как у лицензии ${skin.nick}.` }),
           h('p', { class: 'skin-sync__text skin-sync__text--' + (s.status || 'off'), text: s.status === 'error' ? `${SYNC_TEXT.error} ${s.message || ''}`.trim() : SYNC_TEXT[s.status] || SYNC_TEXT.off }),
           s.status === 'error' &&
@@ -534,7 +535,7 @@
                 }
               },
             })
-        );
+        ]);
       }
       drawStatus();
 

@@ -243,6 +243,9 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 
 `tools/figma-export.mjs` — выгрузка тех же данных напрямую через REST API Figma (`FIGMA_TOKEN` со скоупом **File content: Read-only**).
 
+Обратно, сайт → Figma: `npm run figma:cards` (`tools/figma-cards.mjs`) снимает карточки игроков, окно игрока и «Мою карточку»
+с настоящей вёрстки в SVG со слоями — `design/figma/cards/` (как открыть и вернуть правки — в README там же).
+
 ## Тесты
 
 ```bash
@@ -283,7 +286,7 @@ server/          index.js (запуск), app.js (сессии, права, ма
                  и файлы в чате, game.js — запросы мода lwl-stats, players.js — карточки и свой скин)
 deploy/          install.sh, update.sh, служба systemd, nginx, бэкапы — см. deploy/README.md
 design/figma/    оригиналы из Figma и рендеры фреймов макета
-tools/           figma-export.mjs, prepare-assets.py
+tools/           figma-export.mjs, figma-cards.mjs, prepare-assets.py
 tests/           api.test.mjs (API), e2e.mjs (браузер), fixtures/
 minecraft/       моды для сервера Fabric 26.3: скины (lwl-skins), авторизация (lwl-auth), статистика для сайта
                  (lwl-stats) — см. minecraft/README.md
