@@ -503,11 +503,20 @@
       function drawStatus() {
         clear(status);
         if (!skin) {
-          status.append(h('p', { class: 'skin-sync__text', text: 'Сейчас на карточке скин из игры (или стандартный). Загрузите свой PNG 64×64 — он появится и здесь, и на сервере.' }));
+          const standard = /skin-default/.test(p.skinUrl || '');
+          status.append(
+            h('p', {
+              class: 'skin-sync__text',
+              text: standard
+                ? 'Сейчас стандартный скин. Как только вы зайдёте на сервер, здесь сам появится ваш скин из игры. Или возьмите скин по нику или загрузите файл.'
+                : 'Сейчас — скин из игры. Он обновляется сам: поменяете скин в Minecraft — поменяется и здесь.',
+            })
+          );
           return;
         }
         const s = skin.sync || {};
         status.append(
+          skin.nick && h('p', { class: 'skin-sync__text', text: `Скин как у лицензии ${skin.nick}.` }),
           h('p', { class: 'skin-sync__text skin-sync__text--' + (s.status || 'off'), text: s.status === 'error' ? `${SYNC_TEXT.error} ${s.message || ''}`.trim() : SYNC_TEXT[s.status] || SYNC_TEXT.off }),
           s.status === 'error' &&
             h('button', {
@@ -571,19 +580,39 @@
         h('button', {
           class: 'btn btn--ghost',
           type: 'button',
-          text: 'Убрать свой скин',
+          text: 'Как в игре',
+          title: 'Убрать свой скин и брать скин из игры',
           onclick: async () => {
-            const ok = await UI.confirm({ title: 'Убрать свой скин?', text: 'На карточке и на сервере вернётся скин из игры (или стандартный).', confirmText: 'Убрать', danger: true });
+            const ok = await UI.confirm({ title: 'Брать скин из игры?', text: 'Свой скин с сайта уберётся — и здесь, и на сервере. Карточка будет сама показывать скин, который у вас в Minecraft.', confirmText: 'Да, как в игре' });
             if (!ok) return;
             try {
               data = await Api.players.removeSkin();
-              UI.toast('Скин убран');
+              UI.toast('Теперь скин — как в игре');
               draw();
             } catch (err) {
               UI.toast(err.message, { type: 'error' });
             }
           },
         });
+
+      // Скин по нику лицензии — как `/skin set <ник>` в игре.
+      const nickForm = h('form', { class: 'skin-nick', novalidate: true });
+      const nickField = UI.field({ label: 'Скин по нику', name: 'skin-nick', value: skin && skin.nick ? skin.nick : '', placeholder: 'Ник лицензии, например Notch', hint: 'Есть лицензия — впишите свой ник, скин будет как в лаунчере.', attrs: { autocomplete: 'off', spellcheck: 'false', maxlength: '16' } });
+      const nickBtn = h('button', { class: 'btn btn--secondary', type: 'submit', text: 'Взять скин' });
+      UI.append(nickForm, [h('div', { class: 'skin-nick__row' }, nickField, nickBtn)]);
+      nickForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        UI.clearErrors(nickForm);
+        UI.setLoading(nickBtn, true);
+        try {
+          data = await Api.players.skinByNick(nickForm.elements['skin-nick'].value);
+          UI.toast(`Скин как у ${data.skin.nick}`, { type: 'success' });
+          draw();
+        } catch (err) {
+          if (!UI.setFieldError(nickForm, 'skin-nick', (err.fields && err.fields.nickname) || err.message)) UI.toast(err.message, { type: 'error' });
+          UI.setLoading(nickBtn, false);
+        }
+      });
 
       const drop = h(
         'div',
@@ -593,6 +622,7 @@
           'div',
           { class: 'skin-drop__side' },
           h('p', { class: 'card-sub', text: 'Покрутите персонажа мышью или пальцем. Файл — PNG 64×64 (или старый 64×32), до 64 КБ: например, кнопка «Download» на NameMC.' }),
+          nickForm,
           h('div', { class: 'actions-row' }, input, uploadBtn, remove),
           slimBox,
           status

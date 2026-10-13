@@ -10,10 +10,14 @@
  * Свой скин: PUT /api/me/skin (PNG 64×64 сырым телом) → LWL_DATA_DIR/skins/<sha256>.png, публично по
  * /api/skins/<hash>.png, и сразу на Minecraft-сервер через RCON: `skin of <ник> url <LWL_PUBLIC_URL>/api/skins/<hash>.png [slim]`
  * (мод lwl-skins отдаёт ссылку MineSkin, тот подписывает скин). Нет RCON или адреса сайта — скин только на сайте.
+ * Скин по нику: POST /api/me/skin/nick — сайт спрашивает Mojang (lib/mojang.js), картинку берёт с textures.minecraft.net,
+ * на сервер уходит `skin of <ник> set <ник лицензии>` — MineSkin и публичный адрес сайта не нужны.
+ * Скин из игры (его присылает мод lwl-stats) сам заменяет свой, если поменялся позже, — карточка следует за игрой.
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { HANDLED, fail } from '../lib/http.js';
+import { MojangError } from '../lib/mojang.js';
 import { rconCommand, rconConfigured } from '../lib/rcon.js';
 import { SKIN_MAX_BYTES, isSkinHash, isSkinPng } from '../lib/skins.js';
 import { CARD_BACKGROUNDS, CARD_FIELDS, CARD_POSES, LIMITS, SOCIALS, clean, validate } from '../lib/validate.js';
@@ -210,7 +214,7 @@ export default function register(router, s) {
       // Свой скин из кабинета; sync — поставлен ли он на сервере.
       skin:
         c && isSkinHash(c.skin_hash)
-          ? { url: `/api/skins/${c.skin_hash}.png`, slim: c.skin_slim === 1, at: c.skin_at, sync: { status: c.skin_sync || 'off', message: c.skin_sync_note || '' } }
+          ? { url: `/api/skins/${c.skin_hash}.png`, slim: c.skin_slim === 1, at: c.skin_at, nick: c.skin_nick || null, sync: { status: c.skin_sync || 'off', message: c.skin_sync_note || '' } }
           : null,
       // Как карточку видят игроки (со статистикой, без скрытых полей) — даже если она скрыта.
       card: row ? view(row, true) : null,
@@ -260,27 +264,33 @@ export default function register(router, s) {
   const setSync = db.prepare('UPDATE player_cards SET skin_sync = ?, skin_sync_note = ? WHERE user_id = ?');
 
   /**
-   * Поставить скин на Minecraft-сервере (или сбросить: hash = null). Ничего не бросает —
+   * Поставить скин на Minecraft-сервере (или сбросить: hash = null). nick — скин взят по нику лицензии:
+   * тогда `set <ник>` (мод сам возьмёт подписанный скин у Mojang). Ничего не бросает —
    * результат пишется в player_cards.skin_sync: 'ok' | 'error' | 'off'.
    */
-  async function syncSkin(user, hash, slim) {
+  async function syncSkin(user, hash, slim, nick = null) {
     const base = publicBase(config.publicUrl);
-    if (!rconConfigured(config.rcon) || (hash && !base)) {
+    if (!rconConfigured(config.rcon) || (hash && !nick && !base)) {
       const why = !rconConfigured(config.rcon) ? 'Связь сайта с сервером (RCON) не настроена.' : 'У сайта нет публичного адреса (LWL_PUBLIC_URL) — серверу неоткуда скачать скин.';
       setSync.run('off', why, user.id);
       return;
     }
     // В консоль сервера уходит только то, что точно ник Minecraft.
-    if (!NICK.test(user.nickname)) {
+    if (!NICK.test(user.nickname) || (nick && !NICK.test(nick))) {
       setSync.run('error', 'Такой ник в Minecraft невозможен.', user.id);
       return;
     }
-    const command = hash ? `skin of ${user.nickname} url ${base}/api/skins/${hash}.png${slim ? ' slim' : ''}` : `skin of ${user.nickname} clear`;
+    const command = !hash
+      ? `skin of ${user.nickname} clear`
+      : nick
+        ? `skin of ${user.nickname} set ${nick}`
+        : `skin of ${user.nickname} url ${base}/api/skins/${hash}.png${slim ? ' slim' : ''}`;
     try {
       const reply = await rconCommand(config.rcon, command);
       // Мод сразу отвечает «Загружаю скин…», а сам скин готовит MineSkin за несколько секунд — дальше консоль не ждём.
       // При сбросе ответ приходит позже (или «не выбран свой скин» — сбрасывать нечего): оба случая — успех.
-      const ok = hash ? /Загружаю скин|обновлён/.test(reply) : !reply || /сброшен|не выбран свой скин/.test(reply);
+      // По нику мод так же сразу пишет «Ищу скин лицензии…», а Mojang спрашивает уже без нас.
+      const ok = hash ? /Загружаю скин|Ищу скин лицензии|обновлён|теперь как у/.test(reply) : !reply || /сброшен|не выбран свой скин/.test(reply);
       if (ok) setSync.run('ok', '', user.id);
       else if (/unknown or incomplete command|неизвестная или неполная команда/i.test(reply)) setSync.run('error', 'На сервере нет команды /skin — установлен ли мод LWL Skins?', user.id);
       else setSync.run('error', reply.slice(0, 300) || 'Сервер Minecraft ничего не ответил.', user.id);
@@ -313,12 +323,46 @@ export default function register(router, s) {
       await s.skins.store(hash, data);
       const slim = skinModel(ctx);
       ensureCard.run(user.id, Date.now());
-      db.prepare("UPDATE player_cards SET skin_hash = ?, skin_slim = ?, skin_at = ?, skin_sync = 'off', skin_sync_note = NULL WHERE user_id = ?").run(hash, slim ? 1 : 0, Date.now(), user.id);
+      db.prepare("UPDATE player_cards SET skin_hash = ?, skin_slim = ?, skin_at = ?, skin_nick = NULL, skin_sync = 'off', skin_sync_note = NULL WHERE user_id = ?").run(hash, slim ? 1 : 0, Date.now(), user.id);
       await syncSkin(user, hash, slim);
       return myCard(user);
     },
     { raw: true }
   );
+
+  // Скин как у лицензии с этим ником (свой ник тоже можно — «как в лаунчере»).
+  router.add('POST', '/api/me/skin/nick', async (ctx) => {
+    const user = need.player(ctx);
+    need.rate(ctx, 'skin', 20, 10 * 60_000, 'Слишком часто меняете скин. Подождите несколько минут.');
+    const nickname = String(ctx.body.nickname ?? '').trim();
+    if (!NICK.test(nickname)) throw fail.validation({ nickname: 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.' });
+    let found;
+    try {
+      found = await s.mojang.skinOf(nickname);
+    } catch (e) {
+      if (e instanceof MojangError) throw fail.validation({ nickname: e.message }, e.message);
+      throw e;
+    }
+    if (!found) {
+      const msg = `Лицензии с ником ${nickname} нет — скин взять неоткуда. Проверьте написание.`;
+      throw fail.validation({ nickname: msg }, msg);
+    }
+    if (!found.url) {
+      const msg = `У ${found.name} стандартный скин Minecraft — своего нет.`;
+      throw fail.validation({ nickname: msg }, msg);
+    }
+    let hash;
+    try {
+      hash = await s.skins.fetchNow(found.url);
+    } catch {
+      const msg = 'Не получилось скачать скин у Mojang. Попробуйте через минуту.';
+      throw fail.validation({ nickname: msg }, msg);
+    }
+    ensureCard.run(user.id, Date.now());
+    db.prepare("UPDATE player_cards SET skin_hash = ?, skin_slim = ?, skin_at = ?, skin_nick = ?, skin_sync = 'off', skin_sync_note = NULL WHERE user_id = ?").run(hash, found.slim ? 1 : 0, Date.now(), found.name, user.id);
+    await syncSkin(user, hash, found.slim, found.name);
+    return myCard(user);
+  });
 
   // Тонкие/обычные руки — тот же скин, на сервер уходит заново (у MineSkin это разные скины).
   router.add('PATCH', '/api/me/skin', async (ctx) => {
@@ -327,7 +371,8 @@ export default function register(router, s) {
     if (typeof ctx.body.slim !== 'boolean') throw fail.validation({ slim: 'Нужно «да» или «нет».' });
     const c = cardOf.get(user.id);
     if (!c || !isSkinHash(c.skin_hash)) throw fail.notFound('Сначала загрузите свой скин.');
-    db.prepare('UPDATE player_cards SET skin_slim = ?, skin_at = ? WHERE user_id = ?').run(ctx.body.slim ? 1 : 0, Date.now(), user.id);
+    // Руки поменяли — это уже не «как у лицензии», а своя картинка: на сервер уходит по ссылке.
+    db.prepare('UPDATE player_cards SET skin_slim = ?, skin_at = ?, skin_nick = NULL WHERE user_id = ?').run(ctx.body.slim ? 1 : 0, Date.now(), user.id);
     await syncSkin(user, c.skin_hash, ctx.body.slim);
     return myCard(user);
   });
@@ -337,7 +382,7 @@ export default function register(router, s) {
     need.rate(ctx, 'skin', 20, 10 * 60_000, 'Слишком часто. Подождите несколько минут.');
     const c = cardOf.get(user.id);
     if (!c || !isSkinHash(c.skin_hash)) throw fail.notFound('Своего скина нет — отправлять нечего.');
-    await syncSkin(user, c.skin_hash, c.skin_slim === 1);
+    await syncSkin(user, c.skin_hash, c.skin_slim === 1, c.skin_nick);
     return myCard(user);
   });
 
@@ -346,9 +391,10 @@ export default function register(router, s) {
     need.rate(ctx, 'skin', 20, 10 * 60_000, 'Слишком часто. Подождите несколько минут.');
     const c = cardOf.get(user.id);
     if (!c || !isSkinHash(c.skin_hash)) return myCard(user);
-    db.prepare('UPDATE player_cards SET skin_hash = NULL, skin_slim = 0, skin_at = NULL WHERE user_id = ?').run(user.id);
-    // Скин из игры — тот же, что сняли (MineSkin-копия); до следующего отчёта мода показываем стандартный.
-    db.prepare('UPDATE player_stats SET skin_url = NULL, skin_hash = NULL, skin_changed_at = NULL WHERE nick_key = ?').run(user.nickname.toLowerCase());
+    db.prepare('UPDATE player_cards SET skin_hash = NULL, skin_slim = 0, skin_at = NULL, skin_nick = NULL WHERE user_id = ?').run(user.id);
+    // Если скин стоял и на сервере, то скин из игры — его же копия: до следующего отчёта мода — стандартный.
+    // Не дошёл до сервера — в игре прежний скин, его и показываем сразу.
+    if (c.skin_sync === 'ok') db.prepare('UPDATE player_stats SET skin_url = NULL, skin_hash = NULL, skin_changed_at = NULL WHERE nick_key = ?').run(user.nickname.toLowerCase());
     await syncSkin(user, null, false);
     return myCard(user);
   });

@@ -29,13 +29,44 @@ const textures = http.createServer((req, res) => {
 });
 let texturesOrigin;
 
+// Поддельный Mojang: ник → UUID (api.mojang.com / api.minecraftservices.com) → профиль с текстурами (sessionserver).
+const NOTCH_ID = '069a79f444e94726a5befca90e38aaf5';
+const PLAIN_ID = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const FLAKY_ID = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const mojangHits = [];
+const mojang = http.createServer((req, res) => {
+  mojangHits.push(req.url);
+  const json = (code, body) => res.writeHead(code, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
+  const names = { notch: { id: NOTCH_ID, name: 'Notch' }, plainguy: { id: PLAIN_ID, name: 'PlainGuy' } };
+  let m = /^\/users\/profiles\/minecraft\/(\w+)$/.exec(req.url);
+  if (m) {
+    if (m[1] === 'flaky') return res.writeHead(503).end();
+    if (m[1] === 'busy') return res.writeHead(429).end();
+    return names[m[1]] ? json(200, names[m[1]]) : json(404, { errorMessage: 'not found' });
+  }
+  m = /^\/minecraft\/profile\/lookup\/name\/(\w+)$/.exec(req.url);
+  if (m) return m[1] === 'flaky' ? json(200, { id: FLAKY_ID, name: 'Flaky' }) : json(404, {});
+  m = /^\/session\/minecraft\/profile\/([0-9a-f]{32})$/.exec(req.url);
+  if (m) {
+    const skin = { [NOTCH_ID]: { url: `${texturesOrigin}/texture/a0a0a0a0a0a0a0a0`, metadata: { model: 'slim' } }, [FLAKY_ID]: { url: `${texturesOrigin}/texture/f1f1f1f1f1f1f1f1` } }[m[1]];
+    const textures = Buffer.from(JSON.stringify({ textures: skin ? { SKIN: skin } : {} })).toString('base64');
+    return json(200, { id: m[1], name: 'x', properties: [{ name: 'textures', value: textures }] });
+  }
+  res.writeHead(404).end();
+});
+let mojangConfig;
+
 before(async () => {
   await new Promise((r) => textures.listen(0, '127.0.0.1', r));
   texturesOrigin = `http://127.0.0.1:${textures.address().port}`;
+  await new Promise((r) => mojang.listen(0, '127.0.0.1', r));
+  const mojangOrigin = `http://127.0.0.1:${mojang.address().port}`;
+  mojangConfig = { api: mojangOrigin, servicesApi: mojangOrigin, session: mojangOrigin };
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-api-'));
   // LWL_TRUST_PROXY — чтобы тесты кодов входа подставляли разные IP (X-Real-IP) и не упирались в лимит по IP.
   const config = loadConfig({ LWL_DATA_DIR: dataDir, LWL_ADMINS: 'owner@example.com', LWL_FAST_HASH: '1', LWL_MAX_UPLOAD_MB: '1', LWL_CHAT_MAX_FILE_MB: '1', LWL_GAME_TOKEN: GAME_TOKEN, LWL_TRUST_PROXY: '1' });
   config.skinOrigin = texturesOrigin;
+  config.mojang = mojangConfig;
   app = createApp(config);
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
@@ -43,6 +74,7 @@ before(async () => {
 
 after(async () => {
   textures.close();
+  mojang.close();
   await app.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
@@ -1042,14 +1074,67 @@ test('свой скин: загрузка в кабинете, проверка 
   assert.equal((await bob.patch('/api/me/skin', { slim: true })).status, 403);
   assert.equal((await alice.post('/api/me/skin/sync')).data.skin.sync.status, 'off');
 
-  // Убрать: свой скин и скин из игры (это копия своего) — до следующего отчёта мода стандартный.
+  // «Как в игре»: свой скин убран — на карточке снова скин из игры. Без RCON на сервер ничего не ставилось,
+  // значит скин из игры — настоящий, его не трогаем.
   const removed = await alice.del('/api/me/skin');
   assert.equal(removed.status, 200);
   assert.equal(removed.data.skin, null);
-  assert.equal(removed.data.card.skinUrl, '/assets/img/skin-default.png');
+  assert.equal(removed.data.card.skinUrl, after.skinUrl);
   assert.equal((await alice.post('/api/me/skin/sync')).status, 404);
   // Файл никто не использует — sweep уберёт его через сутки, а пока он на диске.
   assert.ok(fs.existsSync(path.join(dataDir, 'skins', up.data.skin.url.split('/').pop())));
+});
+
+test('скин по нику лицензии: сайт спрашивает Mojang, картинку берёт с textures.minecraft.net', async () => {
+  // Лимит смен скина — по IP: у этого теста свой адрес, чтобы не делить его с тестом загрузки.
+  const ip = { 'X-Real-IP': '10.77.0.1' };
+  const byNick = (who, nickname) => who.post('/api/me/skin/nick', { nickname }, ip);
+  assert.equal((await client().post('/api/me/skin/nick', { nickname: 'Notch' })).status, 401);
+  assert.equal((await bob.post('/api/me/skin/nick', { nickname: 'Notch' }, ip)).status, 403, 'нужна одобренная заявка');
+
+  // Неверный ник — до Mojang дело не доходит.
+  const hitsBefore = mojangHits.length;
+  for (const bad of ['ab', 'a'.repeat(17), 'Not ch', '../../x', 'Нотч']) {
+    const r = await byNick(owner, bad);
+    assert.equal(r.status, 422, bad);
+    assert.ok(r.data.fields.nickname);
+  }
+  assert.equal(mojangHits.length, hitsBefore);
+
+  const none = await byNick(owner, 'NoSuchGuy');
+  assert.equal(none.status, 422);
+  assert.match(none.data.fields.nickname, /Лицензии с ником NoSuchGuy нет/);
+  assert.match((await byNick(owner, 'PlainGuy')).data.fields.nickname, /стандартный скин/);
+  assert.match((await byNick(owner, 'busy')).data.fields.nickname, /подождать/);
+
+  const got = await byNick(owner, 'notch');
+  assert.equal(got.status, 200);
+  assert.equal(got.data.skin.nick, 'Notch', 'ник — как у Mojang');
+  assert.equal(got.data.skin.slim, true);
+  assert.equal(got.data.skin.sync.status, 'off');
+  assert.equal(got.data.card.skinUrl, got.data.skin.url);
+  assert.ok((await client().get(got.data.skin.url)).data.equals(SKIN_PNG));
+  assert.ok(textureHits.includes('/texture/a0a0a0a0a0a0a0a0'));
+
+  // Ответ Mojang кешируется: второй раз — без запросов.
+  const hits = mojangHits.length;
+  assert.equal((await byNick(owner, 'Notch')).status, 200);
+  assert.equal(mojangHits.length, hits);
+
+  // Старый адрес Mojang сломался — спрашиваем новый.
+  const flaky = await byNick(owner, 'flaky');
+  assert.equal(flaky.status, 200);
+  assert.equal(flaky.data.skin.nick, 'Flaky');
+  assert.equal(flaky.data.skin.slim, false);
+  assert.ok(mojangHits.includes('/minecraft/profile/lookup/name/flaky'));
+
+  // Руки поменяли вручную — это уже свой скин, а не «как у лицензии».
+  const hands = await owner.raw('PATCH', '/api/me/skin', { slim: true }, ip);
+  assert.equal(hands.status, 200);
+  assert.equal(hands.data.skin.nick, null);
+
+  const removed = await owner.raw('DELETE', '/api/me/skin', undefined, ip);
+  assert.equal(removed.data.skin, null);
 });
 
 test('сборки: загрузка, проверка файла, публикация, скачивание с докачкой', async () => {
@@ -1133,6 +1218,7 @@ function fakeRcon(password) {
           commands.push(text);
           const m = /^wl add (\w+)/.exec(text);
           if (/^skin of \w+ url /.test(text)) send(id, 0, 'Загружаю скин по ссылке, это займёт несколько секунд…');
+          else if (/^skin of \w+ set (\w+)$/.test(text)) send(id, 0, `Ищу скин лицензии ${text.split(' ').pop()}…`);
           else if (/^skin of \w+ clear$/.test(text)) send(id, 0, '');
           else send(id, 0, m ? `${m[1]} добавлен в вайтлист.` : 'Вайтлист выключен, в нём пока никого нет.');
         }
@@ -1197,9 +1283,10 @@ test('свой скин: сайт сам ставит его на сервер �
   await new Promise((r) => rcon.server.listen(0, '127.0.0.1', r));
   const rconPort = rcon.server.address().port;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lwl-skin-'));
-  const app2 = createApp(
-    loadConfig({ LWL_DATA_DIR: dir, LWL_ADMINS: 'boss@example.com', LWL_FAST_HASH: '1', LWL_RCON_PASSWORD: 'rcon-secret', LWL_RCON_PORT: String(rconPort), LWL_RCON_TIMEOUT_MS: '2000', LWL_PUBLIC_URL: 'https://lwl.example' })
-  );
+  const config2 = loadConfig({ LWL_DATA_DIR: dir, LWL_ADMINS: 'boss@example.com', LWL_FAST_HASH: '1', LWL_RCON_PASSWORD: 'rcon-secret', LWL_RCON_PORT: String(rconPort), LWL_RCON_TIMEOUT_MS: '2000', LWL_PUBLIC_URL: 'https://lwl.example' });
+  config2.skinOrigin = texturesOrigin;
+  config2.mojang = mojangConfig;
+  const app2 = createApp(config2);
   await new Promise((r) => app2.server.listen(0, '127.0.0.1', r));
   const saved = base;
   base = `http://127.0.0.1:${app2.server.address().port}`;
@@ -1226,6 +1313,14 @@ test('свой скин: сайт сам ставит его на сервер �
     await boss.del('/api/me/skin');
     assert.equal(rcon.commands.at(-1), 'skin of Boss_1 clear');
     assert.equal(rcon.commands.length, 4);
+
+    // По нику — мод сам спросит Mojang: ссылка на сайт не нужна.
+    const nick = await boss.post('/api/me/skin/nick', { nickname: 'notch' });
+    assert.equal(nick.status, 200);
+    assert.deepEqual(nick.data.skin.sync, { status: 'ok', message: '' });
+    assert.equal(rcon.commands.at(-1), 'skin of Boss_1 set Notch');
+    assert.equal((await boss.post('/api/me/skin/sync')).data.skin.sync.status, 'ok');
+    assert.equal(rcon.commands.at(-1), 'skin of Boss_1 set Notch', '«Повторить» — та же команда');
   } finally {
     base = saved;
     await app2.close();

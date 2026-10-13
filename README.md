@@ -126,7 +126,8 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 | GET | `/api/online` | все | → `{count}` — сколько сейчас на сервере (60 запросов в минуту с IP) |
 | GET / PATCH | `/api/me/card` | игрок | → `{bio, hidden, hideFields, pose, background, socials, skin, card}` / любое из `{bio, hidden, hideFields, pose, background, socials}` (`socials` — только меняемые ключи, `""` — удалить) |
 | PUT | `/api/me/skin` | игрок | сырое тело PNG 64×64 или 64×32 до 64 КБ, заголовок `X-Skin-Model: classic\|slim` → как `GET /api/me/card`; сайт ставит скин на сервер через RCON |
-| PATCH / POST / DELETE | `/api/me/skin`, `/api/me/skin/sync` | игрок | `{slim}` — сменить руки / повторить отправку на сервер / убрать свой скин (20 действий за 10 минут) |
+| POST | `/api/me/skin/nick` | игрок | `{nickname}` — скин как у лицензии с этим ником (сайт спрашивает Mojang) → как `GET /api/me/card` |
+| PATCH / POST / DELETE | `/api/me/skin`, `/api/me/skin/sync` | игрок | `{slim}` — сменить руки / повторить отправку на сервер / убрать свой скин, «как в игре» (20 действий за 10 минут с IP) |
 | GET | `/api/skins/:sha256.png` | все | PNG скина (кешируется навсегда: имя — хеш содержимого) |
 | POST | `/api/game/presence` | Minecraft-сервер | `{players: [ник \| {nickname, uuid}]}` — полный список тех, кто в игре → 204 |
 | POST | `/api/game/stats` | Minecraft-сервер | `{players: [{nickname, uuid, playTimeSec, deaths, mobKills, playerKills, blocksMined, distanceM, advancements, skin?: {url, slim}}]}` → 204 |
@@ -197,7 +198,14 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 сайт выполняет на сервере `skin of <ник> url <адрес сайта>/api/skins/<хеш>.png [slim]` (мод `lwl-skins`
 скачивает картинку через MineSkin, поэтому адрес должен открываться из интернета). Иначе кабинет честно
 пишет, что скин на сервер поставит администрация. Показывается более новый из двух скинов: свой с сайта
-или тот, что игрок потом поставил в игре.
+или тот, что игрок потом поставил в игре, — так карточка сама следует за скином в Minecraft.
+Кнопка «Как в игре» убирает свой скин с сайта.
+
+**Скин по нику.** В кабинете можно вписать ник лицензии: сайт узнаёт скин у Mojang (`api.mojang.com`,
+запасной — `api.minecraftservices.com`, профиль — `sessionserver.mojang.com`; ответы кешируются на 10 минут),
+картинку всё так же качает только с `textures.minecraft.net`, а на сервер через RCON уходит
+`skin of <ник> set <ник лицензии>` — мод сам спросит Mojang, публичный адрес сайта для этого не нужен.
+Это единственные внешние адреса, к которым ходит сервер сайта, кроме `textures.minecraft.net`.
 
 **Приватность.** В «Моей карточке» игрок может скрыть всю карточку (её не увидит никто, в том числе
 в «Топах»; в «Сейчас на сервере: N» игрок учитывается только числом, без ника) или отдельные поля: время в игре, смерти, мобов, убийства игроков, блоки,

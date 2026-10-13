@@ -235,6 +235,12 @@ const MIGRATIONS = [
   -- Когда игровой сервер прислал другой скин: показывается тот, что новее — из игры или из кабинета.
   ALTER TABLE player_stats ADD COLUMN skin_changed_at INTEGER;
   `,
+
+  /* 7: свой скин можно взять по нику лицензии — тогда на сервер уходит `skin of <ник> set <ник лицензии>` (без MineSkin) */
+  `
+  -- skin_nick — ник лицензии (как у Mojang), если скин взят по нику; NULL — загружен файлом.
+  ALTER TABLE player_cards ADD COLUMN skin_nick TEXT;
+  `,
 ];
 
 export function openDb(file) {

@@ -586,6 +586,26 @@
   display: grid;
   gap: 16px;
 }
+.skin-nick__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 10px;
+}
+.skin-nick__row .field {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+/* Кнопка — на уровне поля, а не подсказки под ним */
+.skin-nick__row > .btn {
+  margin-top: 26px;
+}
+@media (max-width: 480px) {
+  .skin-nick__row > .btn {
+    margin-top: 0;
+    width: 100%;
+  }
+}
 .skin-drop__side .btn svg {
   width: 18px;
   height: 18px;

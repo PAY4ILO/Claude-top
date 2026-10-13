@@ -502,6 +502,12 @@
       /** Ещё раз поставить скин на сервере (если в прошлый раз не вышло). */
       syncSkin: () => http('POST', '/me/skin/sync').then((d) => (emit('players'), d)),
       removeSkin: () => http('DELETE', '/me/skin').then((d) => (emit('players'), d)),
+      /** Скин как у лицензии с этим ником (сайт спрашивает Mojang). */
+      skinByNick: (nickname) => {
+        const nick = String(nickname || '').trim();
+        if (!/^[A-Za-z0-9_]{3,16}$/.test(nick)) return Promise.reject(new ApiError('VALIDATION', 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.', { fields: { nickname: 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.' } }));
+        return http('POST', '/me/skin/nick', { nickname: nick }).then((d) => (emit('players'), d));
+      },
       onChange: (cb) => on('players', cb),
     },
 

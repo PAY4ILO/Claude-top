@@ -359,7 +359,11 @@ const saved = await (await B.request.get(BASE + '/api/me/card')).json();
 ok('карточка сохранена: поза, фон, «о себе», ник из ссылки Telegram', saved.pose === 'wave' && saved.background === 'nether' && saved.bio === 'Строю мосты над лавой' && saved.socials.telegram === 'hawker_tg', JSON.stringify({ pose: saved.pose, background: saved.background, socials: saved.socials }));
 await B.setInputFiles('#skin-file', path.join(HERE, '../assets/img/skin-default.png'));
 await B.waitForSelector('.toast:has-text("Скин загружен")'); await settle(B, 300);
-ok('свой скин загружен; без RCON — честно «поставит администрация»', (await B.locator('.skin-sync__text').innerText()).includes('администрация') && (await B.locator('button:has-text("Убрать свой скин")').count()) === 1);
+ok('свой скин загружен; без RCON — честно «поставит администрация»', (await B.locator('.skin-sync__text').innerText()).includes('администрация') && (await B.locator('button:has-text("Как в игре")').count()) === 1);
+// Скин по нику: неверный ник ловится ещё в браузере — ошибка под полем, к Mojang не ходим.
+await B.fill('input[name="skin-nick"]', 'ab'); await B.click('button:has-text("Взять скин")');
+await B.waitForSelector('.skin-nick .field__error:not(:empty)', { timeout: 3000 }).catch(() => {});
+ok('скин по нику: неверный ник — ошибка под полем', /латиница/.test(await B.locator('.skin-nick').innerText()), await B.locator('.skin-nick').innerText());
 
 // Гость: публичная страница — ник, скин, «о себе», соцсети, без статистики.
 const G = await person('G');

@@ -19,6 +19,7 @@ import registerConnect from './routes/connect.js';
 import registerAttachments from './routes/attachments.js';
 import registerGame from './routes/game.js';
 import registerPlayers from './routes/players.js';
+import { createMojang } from './lib/mojang.js';
 import { createSkins } from './lib/skins.js';
 
 const SESSION_COOKIE = 'lwl_session';
@@ -197,6 +198,7 @@ export function createApp(config) {
   const s = { db, config, limiter, views, getUser, startSession, endSession, need, settings, isOwner, permsOf, can, ROLE_LABELS };
   // Скины для карточек игроков: LWL_DATA_DIR/skins/<sha256>.png, качаются только с config.skinOrigin.
   s.skins = createSkins({ db, dir: path.join(config.dataDir, 'skins'), origin: config.skinOrigin || 'https://textures.minecraft.net' });
+  s.mojang = createMojang(config.mojang);
 
   /* ------------------------------------------------------------ маршруты */
 

@@ -138,9 +138,17 @@ export function createSkins({ db, dir, origin, timeoutMs = 10_000 }) {
     await fs.promises.rename(tmp, file);
   }
 
+  /** Скачать текстуру сейчас (скин по нику из кабинета): только textures.minecraft.net, иначе ошибка. → sha256. */
+  async function fetchNow(raw) {
+    const url = normalize(raw);
+    if (!url) throw new Error('ссылка не на textures.minecraft.net');
+    return download(url);
+  }
+
   return {
     normalize,
     want,
+    fetchNow,
     store,
     fileOf,
     /** Для тестов: дождаться, пока очередь скачается. */
