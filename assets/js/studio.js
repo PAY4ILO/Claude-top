@@ -37,6 +37,8 @@
   const SLOT_TO = { rightHand: 'в правую руку', leftHand: 'в левую руку', head: 'на голову' };
   const TABS = { pose: 'Поза', items: 'Предметы', blocks: 'Блоки', textures: 'Свои картинки' };
   const TOOLS = { select: 'Выбрать', place: 'Ставить', break: 'Ломать' };
+  // Ручки на сцене, как в Blockbench: [подпись, клавиша, значок].
+  const MODES = { move: ['Двигать', 'V', 'move'], rotate: ['Вращать', 'R', 'retry'], scale: ['Растянуть', 'S', 'scale'] };
   const PART_LABEL = Object.fromEntries(Skin3D.PARTS.map((p) => [p.key, p.label]));
   const PART_KEYS = new Set(Object.keys(PART_LABEL));
 
@@ -67,6 +69,12 @@
         if (m && m.some((x) => round(x, 10))) move[part] = m.map((x) => round(x, 10));
       }
       if (Object.keys(move).length) out.angles.move = move;
+      const stretch = {};
+      for (const part of LOOK.parts) {
+        const k = a.stretch && a.stretch[part];
+        if (k && k.some((x) => round(x, 100) !== 1)) stretch[part] = k.map((x) => round(x, 100));
+      }
+      if (Object.keys(stretch).length) out.angles.stretch = stretch;
     }
     const offset = v.offset ? v.offset.map((x) => round(x, 10)) : null;
     if (offset && offset.some((x) => x)) out.offset = offset;
@@ -288,6 +296,7 @@
       part: 'rightArm',
       tab: 'pose',
       tool: 'select',
+      mode: 'rotate',
       slot: 'rightHand',
       brush: null,
       brushSize: 1,
@@ -310,6 +319,7 @@
     let previewEls = [];
     let selectionEl = null;
     let toolBadge = null;
+    let modesEl = null;
     let resize = null;
     // Ползунки и кнопки, которые надо подвинуть, когда меняют на сцене или отменяют.
     let sync = [];
@@ -483,6 +493,14 @@
       if (!fromScene) poser.set({ part: key });
       renderTools();
       syncSelection();
+    }
+
+    /** Двигать / вращать / растянуть — какие ручки у выбранного на сцене. */
+    function setMode(mode) {
+      S.mode = mode;
+      if (S.tool !== 'select') setTool('select');
+      if (poser) poser.set({ mode });
+      if (modesEl) modesEl.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
     }
 
     function setTool(tool) {
@@ -743,8 +761,8 @@
           h('button', { type: 'button', 'aria-pressed': String(v === S.view), dataset: { view: v }, onclick: () => setView(v) }, LOOK.views[v], h('span', { class: 'studio__dot', title: 'Есть несохранённые изменения', hidden: true }))
         )
       );
-      const undoBtn = h('button', { class: 'btn btn--sm btn--ghost studio__undo', type: 'button', title: 'Отменить (Ctrl+Z)', onclick: undo }, icon('back'), 'Отменить');
-      const redoBtn = h('button', { class: 'btn btn--sm btn--ghost studio__redo', type: 'button', title: 'Вернуть (Ctrl+Y)', onclick: redo }, 'Вернуть', icon('arrowRight'));
+      const undoBtn = h('button', { class: 'btn btn--sm btn--ghost studio__undo', type: 'button', title: 'Отменить (Ctrl+Z)', onclick: undo }, icon('back'), h('span', { class: 'studio__btn-text', text: 'Отменить' }));
+      const redoBtn = h('button', { class: 'btn btn--sm btn--ghost studio__redo', type: 'button', title: 'Вернуть (Ctrl+Y)', onclick: redo }, h('span', { class: 'studio__btn-text', text: 'Вернуть' }), icon('arrowRight'));
       const copyBtn = h('button', { class: 'btn btn--sm btn--ghost studio__copy', type: 'button', onclick: copyToOther }, icon('copy'), h('span', { class: 'studio__copy-text' }));
       const status = h('p', { class: 'studio__status', 'aria-live': 'polite' });
       const saveBtn = h('button', { class: 'btn btn--sm studio__save', type: 'button', title: 'Сохранить открытый вид', text: 'Сохранить', onclick: () => save([S.view]) });
@@ -764,6 +782,7 @@
         look: cur(),
         part: S.sel,
         scene: true,
+        mode: S.mode,
         yaw: CAMERA[S.view].yaw,
         pitch: CAMERA[S.view].pitch,
         zoom: SCENE_ZOOM,
@@ -784,10 +803,18 @@
       });
       const zoomBtn = (name, label, k) => h('button', { class: 'icon-btn studio__zoom-btn', type: 'button', 'aria-label': label, title: label, onclick: () => poser.zoomBy(k) }, icon(name));
       toolBadge = h('p', { class: 'studio__tool-badge', hidden: true });
+      modesEl = h(
+        'div',
+        { class: 'studio__modes', role: 'group', 'aria-label': 'Ручки на сцене' },
+        Object.entries(MODES).map(([key, [label, k, ic]]) =>
+          h('button', { class: 'studio__mode', type: 'button', 'aria-pressed': String(key === S.mode), dataset: { mode: key }, title: `${label} (${k})`, onclick: () => setMode(key) }, icon(ic), h('span', { class: 'studio__mode-text', text: label }), h('kbd', { class: 'studio__mode-key', text: k }))
+        )
+      );
       const stage = h(
         'div',
         { class: 'studio__stage' },
         poser.el,
+        modesEl,
         h(
           'div',
           { class: 'studio__zoom' },
@@ -805,7 +832,7 @@
         stage,
         h('p', {
           class: 'studio__hint',
-          text: 'Пустое место — повернуть камеру, колёсико — приблизить, правая кнопка — сдвинуть кадр. Нажмите на часть тела, предмет или блок и тяните кольца; блок можно тащить по полу. Shift — шаг 15°. Delete — убрать выбранный предмет или блок.',
+          text: 'Нажмите на часть тела, предмет или блок и тяните ручки: V — стрелки (двигать), R — кольца (вращать), S — кубики (растянуть; квадрат в середине — всё сразу). Shift — крупный шаг. Пустое место — повернуть камеру, колёсико — приблизить, правая кнопка — сдвинуть кадр. Delete — убрать предмет или блок.',
         })
       );
       resize = new ResizeObserver(() => poser && poser.set({}));
@@ -860,6 +887,8 @@
         h(
           'div',
           { class: 'card studio__bar' },
+          h('a', { class: 'btn btn--sm btn--ghost studio__exit', href: '#/profile', title: 'К профилю' }, icon('back'), h('span', { text: 'К профилю' })),
+          h('h1', { class: 'studio__title', text: 'Студия' }),
           viewSwitch,
           h('div', { class: 'studio__history' }, undoBtn, redoBtn, copyBtn),
           h('div', { class: 'studio__save-row' }, status, saveBtn, saveAllBtn)
@@ -885,7 +914,9 @@
       }
       bar.undoBtn.disabled = !undoStack.length;
       bar.redoBtn.disabled = !redoStack.length;
-      bar.copyBtn.querySelector('.studio__copy-text').textContent = `Скопировать в «${LOOK.views[other()]}»`;
+      const copyText = `Скопировать в «${LOOK.views[other()]}»`;
+      bar.copyBtn.querySelector('.studio__copy-text').textContent = copyText;
+      bar.copyBtn.title = copyText;
       const dirty = VIEWS.filter(isDirty);
       bar.status.textContent = S.saving ? 'Сохраняю…' : dirty.length ? 'Изменения не сохранены' : 'Всё сохранено';
       bar.status.classList.toggle('is-dirty', dirty.length > 0 && !S.saving);
@@ -1009,6 +1040,7 @@
         { class: 'look__custom' },
         h('p', { class: 'field__label', text: 'Что двигаем' }),
         parts,
+        h('p', { class: 'studio__sub', text: 'Поворот' }),
         AXES[part].map(([label, sign], i) => {
           const read = () => sign * angles()[part][i] || 0;
           return slider({
@@ -1026,7 +1058,8 @@
             },
           });
         }),
-        ['Сдвиг вбок', 'Сдвиг вверх', 'Сдвиг вперёд'].map((label, i) => {
+        h('p', { class: 'studio__sub', text: 'Сдвиг' }),
+        ['Вбок', 'Вверх', 'Вперёд'].map((label, i) => {
           const read = () => {
             const m = angles().move && angles().move[part];
             return m ? m[i] : 0;
@@ -1049,6 +1082,50 @@
             },
           });
         }),
+        h('p', { class: 'studio__sub', text: 'Размер' }),
+        ['Ширина', 'Высота', 'Толщина'].map((label, i) => {
+          const read = () => {
+            const k = angles().stretch && angles().stretch[part];
+            return Math.round((k ? k[i] : 1) * 100);
+          };
+          return slider({
+            label,
+            read,
+            min: Math.round(LOOK.stretch[0] * 100),
+            max: Math.round(LOOK.stretch[1] * 100),
+            step: 5,
+            value: read(),
+            unit: '%',
+            group: `stretch:${part}:${i}`,
+            onInput: (v) => {
+              ensureCustom();
+              const a = cur().angles;
+              a.stretch = a.stretch || {};
+              const k = (a.stretch[part] || [1, 1, 1]).slice();
+              k[i] = v / 100;
+              a.stretch[part] = k;
+            },
+          });
+        }),
+        h(
+          'div',
+          { class: 'actions-row' },
+          h('button', {
+            class: 'btn btn--sm btn--ghost studio__reset-part',
+            type: 'button',
+            text: `Сбросить: ${PART_LABEL[part].toLowerCase()}`,
+            onclick: () => {
+              begin(null);
+              ensureCustom();
+              const a = cur().angles;
+              a[part] = [0, 0, 0];
+              if (a.move) delete a.move[part];
+              if (a.stretch) delete a.stretch[part];
+              changed();
+              renderTools();
+            },
+          })
+        ),
         slider({
           label: 'Присесть',
           read: () => -angles().lift || 0,
@@ -1061,7 +1138,7 @@
             cur().angles.lift = -v || 0;
           },
         }),
-        h('p', { class: 'field__hint', text: 'Готовая поза станет своей, как только повернёте или сдвинете часть тела. На сцене: кольца — повернуть, а выбранную часть можно просто тянуть — она сдвинется.' })
+        h('p', { class: 'field__hint', text: 'Готовая поза станет своей, как только повернёте, сдвинете или растянете часть тела. На сцене то же делают ручки: V — двигать, R — вращать, S — растянуть.' })
       );
 
       const offset = (i) => (cur().offset ? cur().offset[i] : 0);
@@ -1533,6 +1610,12 @@
         return;
       }
       if (typing) return;
+      const mode = !e.altKey && { KeyV: 'move', KeyR: 'rotate', KeyS: 'scale' }[e.code];
+      if (mode) {
+        e.preventDefault();
+        setMode(mode);
+        return;
+      }
       if (e.key === 'Escape' && S.tool !== 'select') {
         setTool('select');
         e.preventDefault();
@@ -1547,6 +1630,8 @@
     };
     document.addEventListener('keydown', onKey);
     window.addEventListener('beforeunload', onUnload);
+    // На широком экране студия — во весь экран (lk.css, .is-studio).
+    document.documentElement.classList.add('is-studio');
 
     function destroy() {
       if (!alive) return;
@@ -1555,6 +1640,7 @@
         UI.toast('Изменения в студии не сохранены', { timeout: 8000, action: { label: 'Вернуться', onClick: () => (location.hash = '#/studio') } });
       }
       alive = false;
+      document.documentElement.classList.remove('is-studio');
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('beforeunload', onUnload);
       if (pending) cancelAnimationFrame(pending);

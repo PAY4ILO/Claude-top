@@ -350,6 +350,7 @@ await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card a[hr
 await B.click('.my-card a[href="#/studio"]'); await B.waitForSelector('.studio .poser__canvas'); await settle(B, 500);
 ok('студия: сцена, превью карточки и окна игрока, 4 вкладки инструментов',
   (await B.locator('.studio__work .poser__canvas').count()) === 1 && (await B.locator('.studio__previews .pcard').count()) === 1 && (await B.locator('.studio__previews .pdetail__stage canvas').count()) === 1 && (await B.locator('.studio__tools [role=tab]').count()) === 4);
+ok('студия во весь экран, «К профилю» — в полосе', await B.evaluate(() => getComputedStyle(document.querySelector('.page--studio')).position === 'fixed' && document.documentElement.scrollHeight <= innerHeight + 1) && (await B.locator('.studio__bar .studio__exit').isVisible()));
 await B.click('.studio__tools [role=tab]:has-text("Предметы")');
 await B.waitForSelector('.studio__palette .studio__tile', { timeout: 15000 }).catch(() => {});
 ok('каталог Minecraft подключён: в «Предметах» — палитра, без пояснения «не загружен»', (await B.locator('.studio__palette .studio__tile').count()) > 0 && (await B.locator('.studio__notice').count()) === 0);
@@ -433,6 +434,15 @@ pts = await poserPoints();
 await dragBy(pts.arrow, 0, 70);
 await studioSave();
 ok('стрелка «присесть» у тела', (await detailOf()).angles.lift <= -3, JSON.stringify((await detailOf()).angles.lift));
+// Ручки как в Blockbench: V — двигать, R — вращать, S — растянуть; растянуть можно и ползунком.
+await B.keyboard.press('s');
+ok('клавиша S — ручки «Растянуть»', (await B.locator('.studio__mode[data-mode="scale"][aria-pressed="true"]').count()) === 1);
+await B.click('.look__custom .chip[data-part="leftArm"]');
+await B.locator('.look__custom .look__slider:has-text("Высота") input').fill('150');
+await studioSave();
+ok('растянуть руку — сохраняется', JSON.stringify((await detailOf()).angles.stretch) === JSON.stringify({ leftArm: [1, 1.5, 1] }), JSON.stringify((await detailOf()).angles.stretch));
+await B.keyboard.press('r');
+ok('клавиша R — снова кольца', (await B.locator('.studio__mode[data-mode="rotate"][aria-pressed="true"]').count()) === 1);
 // Своя картинка 16×16: загрузить → выбрать квадрат → сохранить.
 await B.click('.studio__tools [role=tab]:has-text("Свои картинки")');
 await B.setInputFiles('#studio-tex-file', path.join(HERE, '../assets/img/skin-default.png'));

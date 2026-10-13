@@ -81,6 +81,7 @@
     turn: 180,
     offset: 200,
     move: 32,
+    stretch: [0.25, 3],
     held: { rot: 180, size: [0.5, 2], at: 16 },
     blocks: { max: 32, side: 96, y: [-48, 96], size: [0.25, 2] },
     textures: { max: 3, chars: 4096, side: 16 },
@@ -199,6 +200,13 @@
         for (const [part, m] of Object.entries(a.move)) {
           if (!LOOK.parts.includes(part)) return 'Неверный сдвиг частей тела.';
           if (!vec(m, 3, (x) => inRange(x, -LOOK.move, LOOK.move))) return `Сдвиг части тела — от −${LOOK.move} до ${LOOK.move}.`;
+        }
+      }
+      if (a.stretch !== undefined) {
+        if (!isObj(a.stretch)) return 'Неверный размер частей тела.';
+        for (const [part, k] of Object.entries(a.stretch)) {
+          if (!LOOK.parts.includes(part)) return 'Неверный размер частей тела.';
+          if (!vec(k, 3, (x) => inRange(x, ...LOOK.stretch))) return `Размер части тела — от ${LOOK.stretch[0]} до ${LOOK.stretch[1]}.`;
         }
       }
     }

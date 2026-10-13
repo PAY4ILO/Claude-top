@@ -1123,6 +1123,10 @@ test('карточки: своя поза для маленькой карточ
     { card: { pose: 'custom', angles: { ...custom, move: { tail: [1, 0, 0] } } } },
     { card: { pose: 'custom', angles: { ...custom, move: { head: [1, 0] } } } },
     { card: { pose: 'custom', angles: { ...custom, move: [1, 2, 3] } } },
+    { card: { pose: 'custom', angles: { ...custom, stretch: { head: [0.2, 1, 1] } } } },
+    { card: { pose: 'custom', angles: { ...custom, stretch: { body: [1, 3.5, 1] } } } },
+    { card: { pose: 'custom', angles: { ...custom, stretch: { tail: [1, 1, 1] } } } },
+    { card: { pose: 'custom', angles: { ...custom, stretch: [1, 1, 1] } } },
   ]) {
     const r = await patch({ looks });
     assert.equal(r.status, 422, JSON.stringify(looks));
@@ -1152,6 +1156,12 @@ test('карточки: своя поза для маленькой карточ
   assert.deepEqual(moved.data.looks.detail.angles.move, { head: [0, 32, -1.2], leftArm: [-32, 0, 0] });
   const still = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, move: { body: [0, 0, 0] } } } } });
   assert.equal(still.data.looks.detail.angles.move, undefined, 'одни нули — сдвига нет');
+  // Растяжение частей тела: от 0,25 до 3 по каждой оси, «как есть» (1, 1, 1) не хранится.
+  const stretched = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, stretch: { body: [1.5, 0.25, 3], leftLeg: [1.004, 2, 1], head: [1, 1, 1] } } } } });
+  assert.equal(stretched.status, 200);
+  assert.deepEqual(stretched.data.looks.detail.angles.stretch, { body: [1.5, 0.25, 3], leftLeg: [1, 2, 1] });
+  const plain = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, stretch: { head: [1, 1, 1] } } } } });
+  assert.equal(plain.data.looks.detail.angles.stretch, undefined, 'одни единицы — растяжения нет');
   await patch({ looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } });
 });
 

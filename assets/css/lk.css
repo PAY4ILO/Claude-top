@@ -2815,6 +2815,15 @@ a.att-file:hover .att-file__icon {
 .studio__error {
   margin: 0 0 16px;
 }
+/* «К профилю» и заголовок — в полосе, только когда студия во весь экран (шапка страницы тогда спрятана). */
+.studio__exit,
+.studio__title {
+  display: none;
+}
+.studio__title {
+  font-size: 18px;
+  font-weight: 800;
+}
 .studio__error[hidden] {
   display: none;
 }
@@ -2862,6 +2871,7 @@ a.att-file:hover .att-file__icon {
 .studio__stage {
   position: relative;
   display: grid;
+  container-type: inline-size;
   height: clamp(360px, calc(100dvh - var(--top) - 260px), 760px);
   border-radius: var(--r-md);
   background: radial-gradient(120% 90% at 50% 30%, var(--c-surface-3), var(--c-field));
@@ -2884,6 +2894,65 @@ a.att-file:hover .att-file__icon {
 .studio__zoom .icon-btn,
 .studio__zoom .btn {
   background: rgba(0, 0, 0, 0.45);
+}
+/* Ручки на сцене (как в Blockbench): двигать, вращать, растянуть. Узкая сцена — одни значки. */
+@container (max-width: 620px) {
+  .studio__mode-text,
+  .studio__mode-key {
+    display: none;
+  }
+}
+.studio__modes {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--r-md);
+  background: rgba(0, 0, 0, 0.5);
+}
+.studio__mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.studio__mode:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.studio__mode[aria-pressed='true'] {
+  background: var(--c-blue-2);
+}
+.studio__mode svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+.studio__mode-key {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.16);
+  font: 600 11px/18px ui-monospace, monospace;
+}
+.studio__sub {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-text-3);
 }
 .studio__tool-badge {
   position: absolute;
@@ -3246,7 +3315,126 @@ a.att-file:hover .att-file__icon {
     top: calc(var(--top) + 16px);
   }
 }
+/* Широкий экран: студия во весь экран — превью слева, сцена в середине, инструменты справа; колонки листаются сами. */
+@media (min-width: 1024px) {
+  html.is-studio {
+    overflow: hidden;
+  }
+  .is-studio .page--studio {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    max-width: none;
+    margin: 0;
+    padding: 10px;
+    background: var(--c-bg);
+  }
+  .is-studio .page--studio > .page-head {
+    display: none;
+  }
+  .is-studio .page--studio > .page-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: 10px;
+    min-height: 0;
+  }
+  .is-studio .studio__bar,
+  .is-studio .studio__error {
+    margin: 0;
+  }
+  .is-studio .studio__exit,
+  .is-studio .studio__title {
+    display: inline-flex;
+  }
+  .is-studio .studio__bar {
+    flex-wrap: nowrap;
+    padding: 8px 10px;
+  }
+  .is-studio .studio__exit,
+  .is-studio .studio__title,
+  .is-studio .studio__views,
+  .is-studio .studio__undo,
+  .is-studio .studio__redo {
+    flex: none;
+  }
+  .is-studio .studio__views button {
+    white-space: nowrap;
+  }
+  .is-studio .studio__history {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  .is-studio .studio__save-row {
+    flex: none;
+    flex-wrap: nowrap;
+  }
+  .is-studio .studio__copy {
+    min-width: 0;
+  }
+  .is-studio .studio__status {
+    white-space: nowrap;
+  }
+  .is-studio .studio__copy-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .is-studio .studio {
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: minmax(250px, 300px) minmax(0, 1fr) minmax(340px, 400px);
+    grid-template-areas: 'previews work tools';
+    gap: 10px;
+    align-items: stretch;
+  }
+  .is-studio .studio__previews,
+  .is-studio .studio__tools {
+    align-content: start;
+    min-height: 0;
+    overflow: hidden auto;
+    overscroll-behavior: contain;
+  }
+  .is-studio .studio__previews {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .is-studio .studio__work {
+    position: static;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    min-height: 0;
+  }
+  .is-studio .studio__stage {
+    height: auto;
+    min-height: 0;
+  }
+  .is-studio .studio__detail-stage,
+  .is-studio .studio__detail-stage .skin3d,
+  .is-studio .studio__detail-stage .skin3d__canvas {
+    min-height: 260px;
+  }
+}
+/* Средний экран: колонки уже, у кнопок полосы — только значки (подпись — во всплывающей подсказке), без пояснения под сценой. */
+@media (min-width: 1024px) and (max-width: 1399px) {
+  .is-studio .studio {
+    grid-template-columns: minmax(200px, 230px) minmax(0, 1fr) minmax(300px, 340px);
+  }
+  .is-studio .studio__title,
+  .is-studio .studio__btn-text,
+  .is-studio .studio__copy-text,
+  .is-studio .studio__hint {
+    display: none;
+  }
+  .is-studio .studio__preview-head {
+    flex-wrap: wrap;
+  }
+}
 @media (max-width: 640px) {
+  .studio__mode-text {
+    display: none;
+  }
   .studio__bar {
     padding: 8px;
   }

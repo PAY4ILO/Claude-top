@@ -146,6 +146,11 @@
       p.move = {};
       for (const { key } of PARTS) if (Array.isArray(angles.move[key]) && angles.move[key].length === 3) p.move[key] = angles.move[key].map((x) => Number(x) || 0);
     }
+    // Растяжение частей тела [x, y, z] вдоль своих осей (1 — как есть).
+    if (angles.stretch && typeof angles.stretch === 'object') {
+      p.stretch = {};
+      for (const { key } of PARTS) if (Array.isArray(angles.stretch[key]) && angles.stretch[key].length === 3) p.stretch[key] = angles.stretch[key].map((x) => Number(x) || 1);
+    }
     return p;
   }
 
@@ -342,12 +347,19 @@
     }
     const local = (p) => place(inDisplay(p));
     local.fromUser = (v) => place(fromUser(v));
+    // Для стрелок сдвига at в студии: точка системы display → часть тела, и где в ней центр предмета.
+    local.place = place;
+    local.base = add(t, at);
+    // Точка части тела, за которую держится предмет: растянули руку или голову — предмет едет за ней, не растягиваясь.
+    local.anchor = slot === 'head' ? [0, 32, 0] : [left ? 5 : -5, 12, 0];
     return local;
   }
 
   /* ------------------------------------------------------------ рисование */
 
   const ATTACHED = new Set(['head', 'rightArm', 'leftArm']);
+  // Где голова и руки крепятся к телу: тело растянули — они остаются на его краях.
+  const ATTACH_AT = { head: [0, 24, 0], rightArm: [-4, 22, 0], leftArm: [4, 22, 0] };
   const CENTER_Y = 17; // середина модели по высоте (с поднятыми руками)
   const HEIGHT = 40; // сколько единиц модели помещается по высоте холста
   const WIDTH = 26;
@@ -416,15 +428,39 @@
     const bodyTurned = angles.body.some((x) => x);
     const parts = model(opts.slim);
     const byKey = Object.fromEntries(parts.map((p) => [p.key, p]));
-    const toWorld = (part, p) => {
-      let local = add(rotate(sub(p, part.pivot), angles[part.key]), part.pivot);
+    // Растяжение части вдоль её осей: в длину — от сустава (рука остаётся у плеча), вширь и вглубь — от середины коробки.
+    // Ноги длиннее или короче — вся фигура выше или ниже, ступни на полу. d — точка относительно сустава.
+    const stretchOf = (key) => (angles.stretch && angles.stretch[key]) || null;
+    const scaled = (key, d) => {
+      const k = stretchOf(key);
+      if (!k) return d;
+      const { at, size, pivot } = byKey[key];
+      const o = [at[0] + size[0] / 2 - pivot[0], 0, at[2] + size[2] / 2 - pivot[2]];
+      return [o[0] + (d[0] - o[0]) * k[0], d[1] * k[1], o[2] + (d[2] - o[2]) * k[2]];
+    };
+    const legs = Math.max((stretchOf('rightLeg') || [1, 1, 1])[1], (stretchOf('leftLeg') || [1, 1, 1])[1]);
+    const ground = 12 * (legs - 1);
+    /** anchor — точка части, за которую держится предмет: он не растягивается, а едет вместе с ней. */
+    const toWorld = (part, p, anchor) => {
+      let d = sub(p, part.pivot);
+      if (stretchOf(part.key)) {
+        if (anchor) {
+          const a = sub(anchor, part.pivot);
+          d = add(d, sub(scaled(part.key, a), a));
+        } else d = scaled(part.key, d);
+      }
+      let local = add(rotate(d, angles[part.key]), part.pivot);
+      if (ATTACHED.has(part.key) && stretchOf('body')) {
+        const a = sub(ATTACH_AT[part.key], BODY_PIVOT);
+        local = add(local, sub(scaled('body', a), a));
+      }
       if (bodyTurned && ATTACHED.has(part.key)) local = add(rotate(sub(local, BODY_PIVOT), angles.body), BODY_PIVOT);
       if (angles.move) {
         // Свой сдвиг части; голова и руки едут и вместе с телом.
         if (angles.move[part.key]) local = add(local, angles.move[part.key]);
         if (ATTACHED.has(part.key) && angles.move.body) local = add(local, angles.move.body);
       }
-      local[1] += angles.lift;
+      local[1] += angles.lift + ground;
       return local;
     };
     const camera = (d) => rotate(rotate(d, [0, yaw, 0]), [pitch, 0, 0]);
@@ -485,7 +521,7 @@
         if (!m) continue;
         const local = heldTransform(slot, m, entry, opts.slim);
         const part = byKey[slot === 'head' ? 'head' : slot === 'leftHand' ? 'leftArm' : 'rightArm'];
-        const xf = (p) => view(toWorld(part, local(p)));
+        const xf = (p) => view(toWorld(part, local(p), local.anchor));
         heldXf[slot] = { xf, part, local };
         const d = modelDrawable(m, xf, toScreen);
         queue.push({ depth: d.depth + 0.01, paint: () => d.paint(g, opts.hits, 'held:' + slot) });
@@ -540,6 +576,17 @@
         const part = byKey[key];
         return toView(part, part.pivot);
       },
+      /** Середина коробки части (вид) — там ручки сдвига и растяжения. */
+      center: (key) => {
+        const part = byKey[key];
+        const [w, h, d] = part.size;
+        const [x0, y0, z0] = part.at;
+        return toView(part, [x0 + w / 2, y0 + h / 2, z0 + d / 2]);
+      },
+      /** Свои оси части после поворота (вид): вдоль них растягивается часть. */
+      partAxes: (key) => [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((d) => norm(fromParent(key, rotate(d, angles[key])))),
+      /** Оси фигуры (вид): вдоль них сдвиг частей (angles.move) и блоков. */
+      worldAxes: () => [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((d) => camera(d)),
       /**
        * Оси, вокруг которых поворачивают углы [rx, ry, rz] этой части (как «гимбал» в Blockbench):
        * поворот считается rz → rx → ry, поэтому ось ry — вертикаль родителя, rx — после ry, rz — после rx и ry.
@@ -556,13 +603,17 @@
       held: (slot, rot = [0, 0, 0]) => {
         const h = heldXf[slot];
         if (!h) return null;
-        const P = (v) => view(toWorld(h.part, h.local.fromUser(v)));
+        const P = (v) => view(toWorld(h.part, h.local.fromUser(v), h.local.anchor));
+        // Сдвиг at на единицу вдоль x, y, z — куда и насколько едет предмет (вид).
+        const Q = (q) => view(toWorld(h.part, h.local.place(q), h.local.anchor));
+        const base = Q(h.local.base);
+        const moveDirs = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((e) => sub(Q(add(h.local.base, e)), base));
         const c = P([0, 0, 0]);
         const L = (d) => sub(P(mul(d, 4)), c);
         // Цепочка — повороты и одинаковый масштаб, но если в модели есть отражение, кольца крутили бы наоборот.
         const flip = det3(L([1, 0, 0]), L([0, 1, 0]), L([0, 0, 1])) < 0 ? -1 : 1;
         const [rx, ry] = rot;
-        return { center: c, axes: [rotate([1, 0, 0], [0, ry, 0]), [0, 1, 0], rotate([0, 0, 1], [rx, ry, 0])].map((d) => norm(mul(L(d), flip))) };
+        return { center: c, moveDirs, axes: [rotate([1, 0, 0], [0, ry, 0]), [0, 1, 0], rotate([0, 0, 1], [rx, ry, 0])].map((d) => norm(mul(L(d), flip))) };
       },
       /** Точка на холсте → точка мира на высоте y (пол — 0) или null (луч вдоль пола). */
       unproject: (sx, sy, y = 0) => {
@@ -854,7 +905,7 @@
     let basePitch = opts.pitch === undefined ? 10 : opts.pitch;
     // Приближение кадра в начале (сцена студии: чуть дальше — видно блоки вокруг).
     const baseZoom = Math.max(0.25, Math.min(4, Number(opts.zoom) || 1));
-    const state = { url: opts.url, slim: !!opts.slim, look: opts.look, part: opts.part || null, yaw: 0, pitch: basePitch, zoom: baseZoom, pan: [0, 0], tool: 'select', skin: null, turn: 0 };
+    const state = { url: opts.url, slim: !!opts.slim, look: opts.look, part: opts.part || null, yaw: 0, pitch: basePitch, zoom: baseZoom, pan: [0, 0], tool: 'select', mode: opts.mode || 'rotate', skin: null, turn: 0 };
     const canvas = document.createElement('canvas');
     canvas.className = 'skin3d__canvas poser__canvas';
     canvas.tabIndex = 0;
@@ -885,6 +936,8 @@
       return (m && Array.isArray(m[key]) && m[key]) || [0, 0, 0];
     };
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const LOOK = () => (window.Api && window.Api.LOOK) || {};
+    const r2 = (v) => Math.round(v * 100) / 100;
     const kindOf = (key) => (!key ? null : PART_KEYS.has(key) ? 'part' : key.startsWith('held:') ? 'held' : key.startsWith('block:') ? 'block' : null);
     const heldOf = (key) => (state.look && state.look.held && state.look.held[key.slice(5)]) || null;
     const blockOf = (key) => (state.look && Array.isArray(state.look.blocks) && state.look.blocks[Number(key.slice(6))]) || null;
@@ -910,9 +963,18 @@
       redraw();
     }
 
+    /**
+     * Ручки выбранного на сцене. Режимы (как в Blockbench): 'rotate' — кольца поворота, 'move' — стрелки сдвига
+     * по осям и кружок в середине (тянуть в плоскости экрана), 'scale' — кубики растяжения по осям части тела
+     * и квадрат в середине (всё сразу; у предметов и блоков — только он: размер у них один).
+     * Ручка: { id, kind: 'axis' | 'stretch' | 'uniform' | 'free', value(), set(v, free) } + где она на холсте.
+     */
     function buildGizmo() {
       if (!info || !state.part || state.tool !== 'select') return null;
       const kind = kindOf(state.part);
+      const mode = scene ? state.mode : 'rotate';
+      if (mode === 'move') return moveGizmo(kind);
+      if (mode === 'scale') return scaleGizmo(kind);
       const look = state.look || {};
       const dpr = dprOf();
       // Кольца — пятая часть кадра; в отдалённой сцене меньше, чтобы не закрывали соседние части тела.
@@ -973,7 +1035,141 @@
           label: 'выше',
         };
       }
-      return { kind, c, cs, R, px, dpr, rings, arrow };
+      const arrows = arrow ? [{ ...arrow, id: 'lift', kind: 'axis', color: AXIS_COLORS[1], tip: 'arrow', value: arrowValue, set: setArrow }] : [];
+      return { kind, mode: 'rotate', c, cs, R, px, dpr, rings, arrows, center: null };
+    }
+
+    /** Длина стрелок и кубиков на холсте: заметная на большой сцене, не меньше 72 точек. */
+    const handleLen = (k) => k * Math.max(72 * dprOf(), Math.min(canvas.width, canvas.height) * 0.17 * (scene ? Math.min(1, Math.sqrt(state.zoom)) : 1));
+
+    /** Ручки вдоль направлений dirs (вид) из точки cs; ось, что смотрит на нас (короткая), не рисуется. */
+    function axisHandles(cs, dirs, len, make) {
+      const dpr = dprOf();
+      const out = [];
+      dirs.forEach((v, i) => {
+        const sv = [v[0] * info.scale, -v[1] * info.scale];
+        const l = Math.hypot(sv[0], sv[1]);
+        if (l < 1e-6 || l < 0.2 * Math.hypot(v[0], v[1], v[2]) * info.scale) return;
+        const u = [sv[0] / l, sv[1] / l];
+        out.push({ i, color: AXIS_COLORS[i], from: [cs[0] + u[0] * 12 * dpr, cs[1] + u[1] * 12 * dpr], to: [cs[0] + u[0] * len, cs[1] + u[1] * len], u, perUnit: sv, ...make(i) });
+      });
+      return out;
+    }
+
+    /** Середина выбранного (вид) или null. */
+    function centerOf(kind) {
+      if (kind === 'part') return info.center(state.part);
+      if (kind === 'held') {
+        const e = heldOf(state.part);
+        const held = e && info.held(state.part.slice(5), e.rot || [0, 0, 0]);
+        return held ? held.center : null;
+      }
+      if (kind === 'block') {
+        const b = blockOf(state.part);
+        return b ? info.view(add(b.at, [0, 8 * (b.size || 1) * (BLOCK / 16), 0])) : null;
+      }
+      return null;
+    }
+
+    function moveGizmo(kind) {
+      const c = centerOf(kind);
+      if (!c) return null;
+      const dpr = dprOf();
+      const cs = info.toScreen(c);
+      let dirs = info.worldAxes();
+      if (kind === 'held') {
+        const held = info.held(state.part.slice(5), heldOf(state.part).rot || [0, 0, 0]);
+        if (!held) return null;
+        dirs = held.moveDirs;
+      }
+      const len = handleLen(1);
+      const arrows = axisHandles(cs, dirs, len, (i) => ({
+        id: 'm' + i,
+        kind: 'axis',
+        tip: 'arrow',
+        value: () => moveGet()[i],
+        set: (x, free) => {
+          const m = moveGet();
+          m[i] = x;
+          moveSet(m, free, i);
+        },
+      }));
+      // Блок и так тянется по полу, если взять его самого.
+      const center = kind === 'part' ? { id: 'free', kind: 'free', at: cs, value: moveGet, set: (m, free) => moveSet(m, free) } : null;
+      return { kind, mode: 'move', c, cs, px: len, dpr, rings: [], arrows, center };
+    }
+
+    function scaleGizmo(kind) {
+      const c = centerOf(kind);
+      if (!c) return null;
+      const dpr = dprOf();
+      const cs = info.toScreen(c);
+      const len = handleLen(0.85);
+      const arrows =
+        kind === 'part'
+          ? axisHandles(cs, info.partAxes(state.part), len, (i) => ({
+              id: 's' + i,
+              kind: 'stretch',
+              tip: 'cube',
+              len,
+              value: () => stretchGet()[i],
+              set: (x, free) => {
+                const k = stretchGet();
+                k[i] = x;
+                stretchSet(k, free);
+              },
+            }))
+          : [];
+      const center = { id: 'uniform', kind: 'uniform', at: cs, value: kind === 'part' ? stretchGet : sizeGet, set: kind === 'part' ? stretchSet : sizeSet };
+      return { kind, mode: 'scale', c, cs, px: len, dpr, rings: [], arrows, center };
+    }
+
+    // Сдвиг: части тела — angles.move, предмета и блока — at (блока — по сетке). only — какую ось округлять.
+    function moveGet() {
+      const kind = kindOf(state.part);
+      if (kind === 'part') return shiftOf(state.part).slice();
+      if (kind === 'held') return (heldOf(state.part).at || [0, 0, 0]).slice();
+      return blockOf(state.part).at.slice();
+    }
+    function moveSet(v, free, only) {
+      const kind = kindOf(state.part);
+      const snap = (x, i, step, lo, hi) => (only === undefined || only === i ? clamp(Math.round(x / step) * step, lo, hi) : x);
+      if (kind === 'part') {
+        const M = moveLimit();
+        const a = state.look.angles;
+        a.move = a.move || {};
+        a.move[state.part] = v.map((x, i) => snap(x, i, free ? 1 : 0.5, -M, M));
+      } else if (kind === 'held') {
+        const M = (LOOK().held && LOOK().held.at) || 16;
+        heldOf(state.part).at = v.map((x, i) => snap(x, i, free ? 1 : 0.5, -M, M));
+      } else {
+        const L = limits();
+        const step = snapStep(state.part, free);
+        blockOf(state.part).at = v.map((x, i) => (i === 1 ? snap(x, i, step, L.y[0], L.y[1]) : snap(x, i, step, -L.side, L.side)));
+      }
+    }
+    // Растяжение части тела: angles.stretch[часть] = [x, y, z]; у предмета и блока — один размер.
+    function stretchGet() {
+      const k = state.look.angles && state.look.angles.stretch && state.look.angles.stretch[state.part];
+      return k ? k.slice() : [1, 1, 1];
+    }
+    function stretchSet(v, free) {
+      const [lo, hi] = LOOK().stretch || [0.25, 3];
+      const step = free ? 0.25 : 0.05;
+      const a = state.look.angles;
+      a.stretch = a.stretch || {};
+      a.stretch[state.part] = v.map((x) => r2(clamp(Math.round(x / step) * step, lo, hi)));
+    }
+    function sizeGet() {
+      return (kindOf(state.part) === 'held' ? heldOf(state.part).size : blockOf(state.part).size) || 1;
+    }
+    function sizeSet(v, free) {
+      const held = kindOf(state.part) === 'held';
+      const [lo, hi] = held ? (LOOK().held && LOOK().held.size) || [0.5, 2] : (LOOK().blocks && LOOK().blocks.size) || [0.25, 2];
+      const step = free ? 0.25 : 0.05;
+      const x = r2(clamp(Math.round(v / step) * step, lo, hi));
+      if (held) heldOf(state.part).size = x;
+      else blockOf(state.part).size = x;
     }
 
     // Значения, которые крутят кольца и тянет стрелка, — у части тела, предмета или блока.
@@ -1084,35 +1280,56 @@
         }
       }
       g.globalAlpha = 1;
-      if (z.arrow) {
-        const { from, to } = z.arrow;
-        const w = (active('lift') ? 4 : 2.5) * z.dpr;
+      for (const a of z.arrows) {
+        const { from, to } = a;
         const ang = Math.atan2(to[1] - from[1], to[0] - from[0]);
         const head = 9 * z.dpr;
-        g.strokeStyle = g.fillStyle = AXIS_COLORS[1];
-        g.lineWidth = w;
+        g.strokeStyle = g.fillStyle = a.color;
+        g.lineWidth = (active(a.id) ? 4.5 : 3) * z.dpr;
         g.beginPath();
         g.moveTo(from[0], from[1]);
-        g.lineTo(to[0] - Math.cos(ang) * head * 0.6, to[1] - Math.sin(ang) * head * 0.6);
+        const back = a.tip === 'arrow' ? head * 0.6 : 0;
+        g.lineTo(to[0] - Math.cos(ang) * back, to[1] - Math.sin(ang) * back);
         g.stroke();
-        g.beginPath();
-        g.moveTo(to[0], to[1]);
-        g.lineTo(to[0] - Math.cos(ang - 0.45) * head, to[1] - Math.sin(ang - 0.45) * head);
-        g.lineTo(to[0] - Math.cos(ang + 0.45) * head, to[1] - Math.sin(ang + 0.45) * head);
-        g.closePath();
-        g.fill();
-        // Подпись — за остриём: у стрелки вниз под ним, у стрелки вверх над ним.
-        const down = to[1] >= from[1];
-        g.font = `600 ${11 * z.dpr}px system-ui, sans-serif`;
-        g.textAlign = 'center';
-        g.textBaseline = down ? 'top' : 'bottom';
-        g.fillText(z.arrow.label, to[0], to[1] + (down ? 5 : -5) * z.dpr);
+        if (a.tip === 'arrow') {
+          g.beginPath();
+          g.moveTo(to[0], to[1]);
+          g.lineTo(to[0] - Math.cos(ang - 0.45) * head, to[1] - Math.sin(ang - 0.45) * head);
+          g.lineTo(to[0] - Math.cos(ang + 0.45) * head, to[1] - Math.sin(ang + 0.45) * head);
+          g.closePath();
+          g.fill();
+        } else {
+          const r = (active(a.id) ? 7 : 5.5) * z.dpr;
+          g.fillRect(to[0] - r, to[1] - r, 2 * r, 2 * r);
+        }
+        if (a.label) {
+          // Подпись — за остриём: у стрелки вниз под ним, у стрелки вверх над ним.
+          const down = to[1] >= from[1];
+          g.font = `600 ${11 * z.dpr}px system-ui, sans-serif`;
+          g.textAlign = 'center';
+          g.textBaseline = down ? 'top' : 'bottom';
+          g.fillText(a.label, to[0], to[1] + (down ? 5 : -5) * z.dpr);
+        }
       }
-      // Центр поворота.
-      g.fillStyle = '#fff';
-      g.beginPath();
-      g.arc(z.cs[0], z.cs[1], 3 * z.dpr, 0, Math.PI * 2);
-      g.fill();
+      if (z.center) {
+        // Середина: кружок — тянуть в плоскости экрана, квадрат — растянуть всё сразу (вправо-вверх — больше).
+        const r = (active(z.center.id) ? 9 : 7) * z.dpr;
+        const [x, y] = z.center.at;
+        g.lineWidth = 2 * z.dpr;
+        g.strokeStyle = '#fff';
+        g.fillStyle = 'rgba(255, 255, 255, 0.3)';
+        g.beginPath();
+        if (z.center.kind === 'free') g.arc(x, y, r, 0, Math.PI * 2);
+        else g.rect(x - r, y - r, 2 * r, 2 * r);
+        g.fill();
+        g.stroke();
+      } else {
+        // Центр поворота.
+        g.fillStyle = '#fff';
+        g.beginPath();
+        g.arc(z.cs[0], z.cs[1], 3 * z.dpr, 0, Math.PI * 2);
+        g.fill();
+      }
     }
 
     const render = () => {
@@ -1143,7 +1360,7 @@
       if (!frame) frame = requestAnimationFrame(render);
     };
 
-    /** Что под точкой холста: кольцо (0, 1, 2), стрелка 'lift', часть тела (в сцене — и предмет, блок) { part } или null. */
+    /** Что под точкой холста: кольцо (0, 1, 2), ручка { target, handle }, часть тела (в сцене — и предмет, блок) { part } или null. */
     function pick(x, y) {
       if (gizmo) {
         const near = 9 * gizmo.dpr;
@@ -1155,9 +1372,13 @@
             if (d < near && (!best || d < best.d)) best = { d, target: ring.i, ring, at: a };
           }
         }
-        if (gizmo.arrow) {
-          const d = segDist([x, y], gizmo.arrow.from, gizmo.arrow.to);
-          if (d < near && (!best || d < best.d)) best = { d, target: 'lift' };
+        for (const a of gizmo.arrows) {
+          const d = segDist([x, y], a.from, a.to);
+          if (d < near && (!best || d < best.d)) best = { d, target: a.id, handle: a };
+        }
+        if (gizmo.center) {
+          const d = Math.hypot(x - gizmo.center.at[0], y - gizmo.center.at[1]) - 3 * gizmo.dpr;
+          if (d < near && (!best || d < best.d)) best = { d, target: gizmo.center.id, handle: gizmo.center };
         }
         if (best) return best;
       }
@@ -1232,8 +1453,8 @@
       }
       const angles = state.look && state.look.angles;
       // Кольцо и стрелка: изменение (и шаг отмены) — с первого движения; просто нажатие — выбрать то, что под ними.
-      if (hit && hit.target === 'lift' && (angles || scene)) {
-        drag = { target: 'lift', x, y, from: 0, started: false };
+      if (hit && hit.handle && (angles || scene)) {
+        drag = { target: hit.target, handle: hit.handle, x, y, from: null, started: false };
       } else if (hit && hit.target !== undefined && (angles || scene)) {
         const { A } = hit.ring;
         const r = sub(hit.at.p, gizmo.c);
@@ -1251,9 +1472,9 @@
           tangent: [t3[0] * info.scale, -t3[1] * info.scale],
           px: gizmo.px,
         };
-      } else if (hit && hit.part && hit.part === state.part && kindOf(hit.part) === 'part' && info) {
-        // Уже выбранную часть тела тянем — она сдвигается (в плоскости экрана).
-        drag = { target: 'shift', x, y, from: [0, 0, 0], started: false };
+      } else if (scene && state.mode === 'move' && hit && hit.part && hit.part === state.part && kindOf(hit.part) === 'part' && info) {
+        // «Двигать»: уже выбранную часть тела тянем — она сдвигается в плоскости экрана.
+        drag = { target: 'free', handle: { kind: 'free', value: moveGet, set: (m, free) => moveSet(m, free) }, x, y, from: null, started: false };
       } else if (scene && hit && kindOf(hit.part) === 'block' && info) {
         // Блок: выбрать и сразу тянуть по полу (на его высоте).
         const b = blockOf(hit.part);
@@ -1283,7 +1504,7 @@
         }
         const hit = pick(x, y);
         const next = hit ? (hit.target !== undefined ? hit.target : 'part') : null;
-        canvas.style.cursor = next === null ? '' : next === 'part' ? (hit.part === state.part && kindOf(hit.part) === 'part' ? 'move' : 'pointer') : 'grab';
+        canvas.style.cursor = next === null ? '' : next === 'part' ? (scene && state.mode === 'move' && hit.part === state.part && kindOf(hit.part) === 'part' ? 'move' : 'pointer') : 'grab';
         if (next !== hover) {
           hover = next;
           redraw();
@@ -1324,21 +1545,28 @@
         if (Math.hypot(x - drag.x, y - drag.y) < 3 * dpr) return;
         drag.started = true;
         begin();
-        drag.from = drag.target === 'lift' ? arrowValue() : drag.target === 'shift' ? shiftOf(state.part).slice() : ringValue(drag.target);
+        if (drag.handle) {
+          const v = drag.handle.value();
+          drag.from = Array.isArray(v) ? v.slice() : v;
+        } else drag.from = ringValue(drag.target);
       }
-      if (drag.target === 'shift') {
-        const d = info.toWorldDir([(x - drag.x) / info.scale, -(y - drag.y) / info.scale, 0]);
-        const M = moveLimit();
-        const step = e.shiftKey ? 1 : 0.5;
-        const next = drag.from.map((v, i) => clamp(Math.round((v + d[i]) / step) * step, -M, M));
-        const a = state.look.angles;
-        a.move = a.move || {};
-        a.move[state.part] = next;
-      } else if (drag.target === 'lift') {
-        const u = gizmo ? gizmo.arrow.perUnit : null;
-        if (!u) return;
-        const k = ((x - drag.x) * u[0] + (y - drag.y) * u[1]) / (u[0] * u[0] + u[1] * u[1] || 1);
-        setArrow(drag.from + k * (gizmo.arrow.sign || -1), e.shiftKey);
+      if (drag.handle) {
+        const hd = drag.handle;
+        const dx = x - drag.x;
+        const dy = y - drag.y;
+        if (hd.kind === 'axis') {
+          const u = hd.perUnit;
+          hd.set(drag.from + ((dx * u[0] + dy * u[1]) / (u[0] * u[0] + u[1] * u[1] || 1)) * (hd.sign || 1), e.shiftKey);
+        } else if (hd.kind === 'stretch') {
+          hd.set(drag.from * Math.max(0.05, (hd.len + dx * hd.u[0] + dy * hd.u[1]) / hd.len), e.shiftKey);
+        } else if (hd.kind === 'uniform') {
+          const f = Math.exp((dx - dy) / (150 * dpr));
+          hd.set(Array.isArray(drag.from) ? drag.from.map((v) => v * f) : drag.from * f, e.shiftKey);
+        } else if (hd.kind === 'free') {
+          if (!info) return;
+          const d = info.toWorldDir([dx / info.scale, -dy / info.scale, 0]);
+          hd.set(drag.from.map((v, i) => v + d[i]), e.shiftKey);
+        }
       } else {
         if (!gizmo) return;
         let delta;
@@ -1435,6 +1663,10 @@
       if (next.look) state.look = next.look;
       if (next.part !== undefined) state.part = next.part;
       if (next.slim !== undefined) state.slim = !!next.slim;
+      if (next.mode && next.mode !== state.mode) {
+        state.mode = next.mode;
+        hover = null;
+      }
       if (next.tool && next.tool !== state.tool) {
         state.tool = next.tool;
         aim = null;

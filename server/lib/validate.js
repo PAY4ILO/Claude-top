@@ -33,8 +33,8 @@ export const CARD_BACKGROUNDS = ['meadow', 'night', 'sunset', 'ocean', 'cave', '
 
 /**
  * Как стоит персонаж — отдельно на маленькой карточке (card) и в окне игрока (detail).
- * { pose: ключ позы | 'custom', angles: { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift, move? } (только у custom;
- *   move — сдвиг частей { часть: [x, y, z] }),
+ * { pose: ключ позы | 'custom', angles: { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift, move?, stretch? } (только у custom;
+ *   move — сдвиг частей { часть: [x, y, z] }, stretch — растяжение частей { часть: [x, y, z] }, 1 — как есть),
  *   scale — размер фигуры, turn — поворот всей фигуры в градусах,
  *   offset — сдвиг фигуры в кадре [x, y],
  *   held — что в руках и на голове: { rightHand, leftHand, head: { id, rot: [x, y, z], size, at: [x, y, z] } },
@@ -53,6 +53,7 @@ export const LOOK = {
   turn: 180,
   offset: 200,
   move: 32, // сдвиг части тела (angles.move), единицы модели
+  stretch: [0.25, 3], // растяжение части тела (angles.stretch) по каждой оси
   held: { rot: 180, size: [0.5, 2], at: 16 },
   blocks: { max: 32, side: 96, y: [-48, 96], size: [0.25, 2] },
   textures: { max: 3, chars: 4096, side: 16 },
@@ -107,6 +108,13 @@ function lookError(v) {
         if (!Array.isArray(m) || m.length !== 3 || m.some((x) => !inRange(x, -LOOK.move, LOOK.move))) return `Сдвиг части тела — от −${LOOK.move} до ${LOOK.move}.`;
       }
     }
+    if (a.stretch !== undefined) {
+      if (!a.stretch || typeof a.stretch !== 'object' || Array.isArray(a.stretch)) return 'Неверный размер частей тела.';
+      for (const [part, k] of Object.entries(a.stretch)) {
+        if (!LOOK_PARTS.includes(part)) return 'Неверный размер частей тела.';
+        if (!Array.isArray(k) || k.length !== 3 || k.some((x) => !inRange(x, ...LOOK.stretch))) return `Размер части тела — от ${LOOK.stretch[0]} до ${LOOK.stretch[1]}.`;
+      }
+    }
   }
   const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
   const vec = (x, n, check) => Array.isArray(x) && x.length === n && x.every((k, i) => check(k, i));
@@ -158,6 +166,12 @@ export function normalizeLook(v) {
       if (m && m.some((x) => round(x, 10))) move[part] = m.map((x) => round(x, 10));
     }
     if (Object.keys(move).length) out.angles.move = move;
+    const stretch = {};
+    for (const part of LOOK_PARTS) {
+      const k = v.angles.stretch && v.angles.stretch[part];
+      if (k && k.some((x) => round(x, 100) !== 1)) stretch[part] = k.map((x) => round(x, 100));
+    }
+    if (Object.keys(stretch).length) out.angles.stretch = stretch;
   }
   const offset = v.offset ? v.offset.map((x) => round(x, 10)) : null;
   if (offset && offset.some((x) => x)) out.offset = offset;
