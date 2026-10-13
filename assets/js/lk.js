@@ -41,6 +41,8 @@
 
   async function boot() {
     showLoading();
+    // В окне игрока админ с правом «Люди» может убрать картинку фона.
+    if (window.Players) Players.allowModeration(() => can('users'));
     Api.settings.public().then((l) => (links = l));
     // Ссылка для нового пароля открывается и без входа.
     const { parts } = parseHash();

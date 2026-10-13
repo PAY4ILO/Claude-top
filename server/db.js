@@ -241,6 +241,14 @@ const MIGRATIONS = [
   -- skin_nick — ник лицензии (как у Mojang), если скин взят по нику; NULL — загружен файлом.
   ALTER TABLE player_cards ADD COLUMN skin_nick TEXT;
   `,
+
+  /* 8: своя поза для маленькой карточки и для окна игрока; свой фон (картинка) */
+  `
+  -- looks — JSON {card: {...}, detail: {...}}: поза (или свои углы рук/ног/головы), размер, поворот. NULL — из старого pose.
+  ALTER TABLE player_cards ADD COLUMN looks TEXT;
+  -- bg_file — своя картинка фона: LWL_DATA_DIR/backgrounds/<sha256>.webp|jpg|png; включена, когда background = 'custom'.
+  ALTER TABLE player_cards ADD COLUMN bg_file TEXT;
+  `,
 ];
 
 export function openDb(file) {

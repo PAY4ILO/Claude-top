@@ -33,7 +33,7 @@ export function isSkinPng(b) {
  * origin — откуда разрешено качать: на проде всегда https://textures.minecraft.net (config.skinOrigin).
  * Тесты подставляют свой локальный адрес, чтобы не ходить в интернет.
  */
-export function createSkins({ db, dir, origin, timeoutMs = 10_000 }) {
+export function createSkins({ db, dir, origin, defaultTexture = null, timeoutMs = 10_000 }) {
   const allowed = new URL(origin);
   const failedAt = new Map(); // url → когда не получилось
   const queue = [];
@@ -64,6 +64,28 @@ export function createSkins({ db, dir, origin, timeoutMs = 10_000 }) {
   }
 
   const fileOf = (hash) => path.join(dir, `${hash}.png`);
+
+  // Стив для тех, у кого скина нет. Имя текстуры Mojang и есть sha256 картинки — после первого скачивания
+  // файл уже лежит под этим именем, и в сеть больше не ходим. Не скачался — карточки берут запасной из assets.
+  let defaultHash = defaultTexture && isSkinHash(defaultTexture) && fs.existsSync(fileOf(defaultTexture)) ? defaultTexture : null;
+  let defaultJob = null;
+  let defaultFailedAt = 0;
+  function loadDefault() {
+    if (defaultHash || !defaultTexture) return Promise.resolve(defaultHash);
+    if (defaultJob) return defaultJob;
+    if (Date.now() - defaultFailedAt < RETRY_FAILED_MS) return Promise.resolve(null);
+    defaultJob = download(`${allowed.origin}/texture/${defaultTexture}`)
+      .then((hash) => (defaultHash = hash))
+      .catch((e) => {
+        defaultFailedAt = Date.now();
+        log(`стандартный скин — ${e.message}`);
+        return null;
+      })
+      .finally(() => {
+        defaultJob = null;
+      });
+    return defaultJob;
+  }
   const hashOfUrl = db.prepare('SELECT skin_hash FROM player_stats WHERE skin_url = ? AND skin_hash IS NOT NULL LIMIT 1');
   const setHash = db.prepare('UPDATE player_stats SET skin_hash = ? WHERE skin_url = ?');
 
@@ -151,6 +173,13 @@ export function createSkins({ db, dir, origin, timeoutMs = 10_000 }) {
     fetchNow,
     store,
     fileOf,
+    /** sha256 стандартного скина или null (ещё не скачан — тогда запускает скачивание в фоне). */
+    defaultSkin() {
+      if (!defaultHash) loadDefault();
+      return defaultHash;
+    },
+    /** Дождаться стандартного скина (тесты, инструменты). */
+    loadDefault,
     /** Для тестов: дождаться, пока очередь скачается. */
     async idle() {
       while (running.size || queue.length) await Promise.allSettled([...running.values()]);
@@ -169,6 +198,7 @@ export function createSkins({ db, dir, origin, timeoutMs = 10_000 }) {
           .all()
           .map((r) => r.skin_hash)
       );
+      if (defaultHash) used.add(defaultHash);
       const old = Date.now() - 24 * 3600 * 1000;
       for (const name of names) {
         const hash = name.replace(/\.png$/, '');

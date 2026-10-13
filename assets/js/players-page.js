@@ -7,6 +7,18 @@
 (function () {
   'use strict';
 
+  // Админ с правом «Люди» может убрать чужую картинку фона прямо из окна игрока (как в кабинете).
+  let canModerate = false;
+  if (document.querySelector('[data-players], [data-players-showcase]')) {
+    Players.allowModeration(() => canModerate);
+    Api.auth
+      .me()
+      .then((user) => {
+        canModerate = !!(user && Array.isArray(user.permissions) && user.permissions.includes('users'));
+      })
+      .catch(() => null);
+  }
+
   const list = document.querySelector('[data-players]');
   if (list) {
     const note = document.querySelector('[data-players-note]');

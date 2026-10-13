@@ -16,7 +16,7 @@ find "$DIR" -name 'lwl-*.db' -mtime +"$KEEP_DAYS" -delete
 echo "Бэкап базы: $FILE"
 
 # Папки с файлами, которые никогда не меняются (имя на диске — id или sha256 содержимого):
-#   attachments — фото и файлы из чата, skins — скины игроков.
+#   attachments — фото и файлы из чата, skins — скины игроков, backgrounds — свои фоны карточек.
 # Снимок — папка <имя>-ДАТА за тот же день, что и база; всё, что было во вчерашнем снимке,
 # берётся жёсткой ссылкой: место на диске тратится только на новые файлы.
 snapshot() {
@@ -50,3 +50,4 @@ snapshot() {
 
 snapshot attachments
 snapshot skins
+snapshot backgrounds

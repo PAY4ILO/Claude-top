@@ -13,14 +13,20 @@
  * Скин по нику: POST /api/me/skin/nick — сайт спрашивает Mojang (lib/mojang.js), картинку берёт с textures.minecraft.net,
  * на сервер уходит `skin of <ник> set <ник лицензии>` — MineSkin и публичный адрес сайта не нужны.
  * Скин из игры (его присылает мод lwl-stats) сам заменяет свой, если поменялся позже, — карточка следует за игрой.
+ * Скина нет нигде — классический Стив (s.skins.defaultSkin(), пока не скачан — запасной из assets).
+ *
+ * Поза — отдельно для маленькой карточки и окна игрока (looks.card / looks.detail, см. LOOK в lib/validate.js);
+ * старое поле pose повторяет позу маленькой карточки. Свой фон — PUT /api/me/background (картинку сжимает кабинет),
+ * включается background = 'custom'; админ с правом «Люди» может его убрать (DELETE /api/players/<ник>/background).
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { HANDLED, fail } from '../lib/http.js';
 import { MojangError } from '../lib/mojang.js';
 import { rconCommand, rconConfigured } from '../lib/rcon.js';
+import { BG_MAX_BYTES, backgroundMime, checkBackground, isBackgroundName } from '../lib/backgrounds.js';
 import { SKIN_MAX_BYTES, isSkinHash, isSkinPng } from '../lib/skins.js';
-import { CARD_BACKGROUNDS, CARD_FIELDS, CARD_POSES, LIMITS, SOCIALS, clean, validate } from '../lib/validate.js';
+import { CARD_BACKGROUNDS, CARD_FIELDS, CARD_POSES, LIMITS, LOOK_VIEWS, SOCIALS, clean, normalizeLook, validate } from '../lib/validate.js';
 
 export const ONLINE_WINDOW_MS = 150 * 1000; // мод шлёт список раз в минуту; две пропущенные отправки — уже не в сети
 export const DEFAULT_SKIN = '/assets/img/skin-default.png';
@@ -46,6 +52,18 @@ function parseFields(json) {
   } catch {
     return [];
   }
+}
+
+/** Поза для каждого вида; в базе её ещё нет — из старого поля pose (одна на обе). */
+function parseLooks(json, pose) {
+  const base = { pose: CARD_POSES.includes(pose) ? pose : 'stand', scale: 1, turn: 0 };
+  let saved = {};
+  try {
+    saved = JSON.parse(json || '{}') || {};
+  } catch {
+    /* испорчено — как будто не настраивали */
+  }
+  return Object.fromEntries(LOOK_VIEWS.map((v) => [v, normalizeLook(saved[v]) || { ...base }]));
 }
 
 function parseSocials(json) {
@@ -77,7 +95,7 @@ export default function register(router, s) {
 
   // Все карточки: игроки из мода (+ аккаунт сайта, если есть) и «Игроки»/админы сайта, которые в игру ещё не заходили.
   const CARD_COLUMNS = `u.id AS user_id, u.role AS user_role, u.email AS user_email, u.nickname AS user_nickname, u.avatar_at,
-      c.bio, c.hidden, c.hide_fields, c.pose, c.background, c.socials, c.skin_hash AS site_skin_hash, c.skin_slim AS site_skin_slim, c.skin_at`;
+      c.bio, c.hidden, c.hide_fields, c.pose, c.looks, c.background, c.bg_file, c.socials, c.skin_hash AS site_skin_hash, c.skin_slim AS site_skin_slim, c.skin_at`;
   const ALL = `
     SELECT p.nick_key, p.nickname, 1 AS has_stats, p.first_seen, p.last_seen, p.online, p.presence_at, p.playtime_sec, p.deaths,
       p.mob_kills, p.player_kills, p.blocks_mined, p.advancements, p.distance_m, p.skin_hash AS game_skin_hash,
@@ -98,7 +116,15 @@ export default function register(router, s) {
     const site = isSkinHash(row.site_skin_hash) ? { hash: row.site_skin_hash, slim: row.site_skin_slim === 1, at: row.skin_at || 0 } : null;
     const game = isSkinHash(row.game_skin_hash) ? { hash: row.game_skin_hash, slim: row.game_skin_slim === 1, at: row.skin_changed_at || 0 } : null;
     const pick = site && game ? (game.at > site.at ? game : site) : site || game;
-    return pick ? { skinUrl: `/api/skins/${pick.hash}.png`, skinSlim: pick.slim } : { skinUrl: DEFAULT_SKIN, skinSlim: false };
+    if (pick) return { skinUrl: `/api/skins/${pick.hash}.png`, skinSlim: pick.slim, skinDefault: false };
+    const steve = s.skins.defaultSkin();
+    return { skinUrl: steve ? `/api/skins/${steve}.png` : DEFAULT_SKIN, skinSlim: false, skinDefault: true };
+  }
+
+  /** Фон: заготовка или своя картинка (если файл есть). */
+  function backgroundOf(c) {
+    if (c && c.background === 'custom' && isBackgroundName(c.bg_file)) return { background: 'custom', backgroundUrl: `/api/backgrounds/${c.bg_file}` };
+    return { background: c && CARD_BACKGROUNDS.includes(c.background) ? c.background : 'meadow', backgroundUrl: null };
   }
 
   /**
@@ -114,7 +140,8 @@ export default function register(router, s) {
       avatar: account && row.avatar_at ? `/api/avatars/${encodeURIComponent(account.id)}?v=${row.avatar_at}` : null,
       ...skinOf(row),
       pose: CARD_POSES.includes(row.pose) ? row.pose : 'stand',
-      background: CARD_BACKGROUNDS.includes(row.background) ? row.background : 'meadow',
+      looks: parseLooks(row.looks, row.pose),
+      ...backgroundOf(row),
       bio: row.bio || '',
       socials: parseSocials(row.socials),
     };
@@ -209,7 +236,10 @@ export default function register(router, s) {
       hidden: c ? c.hidden === 1 : false,
       hideFields: c ? parseFields(c.hide_fields) : [],
       pose: c && CARD_POSES.includes(c.pose) ? c.pose : 'stand',
-      background: c && CARD_BACKGROUNDS.includes(c.background) ? c.background : 'meadow',
+      looks: parseLooks(c?.looks, c?.pose),
+      ...backgroundOf(c),
+      // Своя картинка загружена (даже если сейчас выбран другой фон) — её можно вернуть одним нажатием.
+      customBackground: c && isBackgroundName(c.bg_file) ? `/api/backgrounds/${c.bg_file}` : null,
       socials: c ? parseSocials(c.socials) : {},
       // Свой скин из кабинета; sync — поставлен ли он на сервере.
       skin:
@@ -229,10 +259,16 @@ export default function register(router, s) {
   router.add('PATCH', '/api/me/card', (ctx) => {
     const user = need.player(ctx);
     need.rate(ctx, 'card', 60, 60_000);
-    const { bio, hidden, hideFields, pose, background, socials } = ctx.body;
-    const f = clean(validate.card({ bio, hidden, hideFields, pose, background, socials }));
+    const { bio, hidden, hideFields, pose, background, socials, looks } = ctx.body;
+    const f = clean(validate.card({ bio, hidden, hideFields, pose, background, socials, looks }));
     if (Object.keys(f).length) throw fail.validation(f);
     const cur = myCard(user);
+    if (background === 'custom' && !cur.customBackground) throw fail.validation({ background: 'Сначала загрузите свою картинку.' });
+    // Поза по видам; старое поле pose — поза маленькой карточки.
+    const nextLooks = { ...cur.looks };
+    for (const view of LOOK_VIEWS) if (looks && looks[view]) nextLooks[view] = normalizeLook(looks[view]);
+    if (pose !== undefined && !(looks && looks.card)) nextLooks.card = { pose, scale: nextLooks.card.scale, turn: nextLooks.card.turn };
+    const nextPose = nextLooks.card.pose === 'custom' ? cur.pose : nextLooks.card.pose;
     // Переводы строк и прочие управляющие символы — в пробелы: «о себе» — одна строка.
     const nextBio = bio === undefined ? cur.bio : bio.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, LIMITS.cardBio.max);
     const nextHidden = hidden === undefined ? cur.hidden : hidden;
@@ -246,11 +282,12 @@ export default function register(router, s) {
       }
     }
     ensureCard.run(user.id, Date.now());
-    db.prepare('UPDATE player_cards SET bio = ?, hidden = ?, hide_fields = ?, pose = ?, background = ?, socials = ?, updated_at = ? WHERE user_id = ?').run(
+    db.prepare('UPDATE player_cards SET bio = ?, hidden = ?, hide_fields = ?, pose = ?, looks = ?, background = ?, socials = ?, updated_at = ? WHERE user_id = ?').run(
       nextBio,
       nextHidden ? 1 : 0,
       JSON.stringify(nextFields),
-      pose === undefined ? cur.pose : pose,
+      nextPose,
+      JSON.stringify(nextLooks),
       background === undefined ? cur.background : background,
       JSON.stringify(nextSocials),
       Date.now(),
@@ -420,6 +457,81 @@ export default function register(router, s) {
       return HANDLED;
     }
     ctx.res.writeHead(200, { ...headers, 'Content-Type': 'image/png', 'Content-Length': data.length });
+    ctx.res.end(ctx.req.method === 'HEAD' ? undefined : data);
+    return HANDLED;
+  });
+
+  /* ------------------------------------------------------------ свой фон */
+
+  const setBackground = db.prepare('UPDATE player_cards SET bg_file = ?, background = ?, updated_at = ? WHERE user_id = ?');
+
+  // Сырое тело — картинка, уже уменьшенная и сжатая кабинетом (WebP). Старый файл удаляется сразу.
+  router.add(
+    'PUT',
+    '/api/me/background',
+    async (ctx) => {
+      const user = need.player(ctx);
+      need.rate(ctx, 'background', 10, 10 * 60_000, 'Слишком часто меняете фон. Подождите несколько минут.');
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of ctx.req) {
+        size += chunk.length;
+        if (size > BG_MAX_BYTES) throw fail.tooLarge(`Картинка больше ${BG_MAX_BYTES / 1024} КБ даже после сжатия. Выберите другую.`);
+        chunks.push(chunk);
+      }
+      const data = Buffer.concat(chunks);
+      const checked = checkBackground(data);
+      if (checked.error) throw fail.validation({ background: checked.error }, checked.error);
+      const name = await s.backgrounds.store(data, checked.ext);
+      ensureCard.run(user.id, Date.now());
+      const old = cardOf.get(user.id).bg_file;
+      setBackground.run(name, 'custom', Date.now(), user.id);
+      if (old !== name) s.backgrounds.release(old);
+      return myCard(user);
+    },
+    { raw: true }
+  );
+
+  router.add('DELETE', '/api/me/background', (ctx) => {
+    const user = need.player(ctx);
+    const c = cardOf.get(user.id);
+    if (!c || !c.bg_file) return myCard(user);
+    setBackground.run(null, c.background === 'custom' ? 'meadow' : c.background, Date.now(), user.id);
+    s.backgrounds.release(c.bg_file);
+    return myCard(user);
+  });
+
+  // Модерация: картинку видят все, даже гости, — админ с правом «Люди» может её убрать.
+  router.add('DELETE', '/api/players/:nick/background', (ctx) => {
+    need.perm(ctx, 'users');
+    const row = byKey.get(String(ctx.params.nick).trim().toLowerCase().slice(0, 32));
+    if (!row || !row.user_id) throw fail.notFound('Нет такого игрока.');
+    const c = cardOf.get(row.user_id);
+    if (c && c.bg_file) {
+      setBackground.run(null, c.background === 'custom' ? 'meadow' : c.background, Date.now(), row.user_id);
+      s.backgrounds.release(c.bg_file);
+    }
+    return { player: view(byKey.get(row.nick_key), true) };
+  });
+
+  // Публично, как скины: имя — sha256 содержимого, по адресу всегда одна и та же картинка.
+  router.add('GET', '/api/backgrounds/:name', (ctx) => {
+    const name = String(ctx.params.name);
+    if (!isBackgroundName(name)) throw fail.notFound();
+    let data;
+    try {
+      data = fs.readFileSync(s.backgrounds.fileOf(name));
+    } catch {
+      throw fail.notFound();
+    }
+    const etag = `"${name}"`;
+    const headers = { 'Cache-Control': 'public, max-age=31536000, immutable', ETag: etag, 'X-Content-Type-Options': 'nosniff' };
+    if (ctx.req.headers['if-none-match'] === etag) {
+      ctx.res.writeHead(304, headers);
+      ctx.res.end();
+      return HANDLED;
+    }
+    ctx.res.writeHead(200, { ...headers, 'Content-Type': backgroundMime(name), 'Content-Length': data.length });
     ctx.res.end(ctx.req.method === 'HEAD' ? undefined : data);
     return HANDLED;
   });

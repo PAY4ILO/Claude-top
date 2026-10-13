@@ -4,8 +4,11 @@
  * (imageSmoothingEnabled = false). Позы — повороты рук, ног и головы вокруг суставов.
  *
  *   Skin3D.load(url)                     → Promise<canvas 64×64> (старые скины 64×32 достраиваются)
- *   Skin3D.draw(canvas, skin, opts)      — один кадр: { slim, pose, yaw, pitch, time }
- *   Skin3D.viewer({ url, slim, pose, label }) → { el, set({url, slim, pose}), destroy() } — крутится мышью/пальцем/стрелками
+ *   Skin3D.draw(canvas, skin, opts)      — один кадр: { slim, pose, angles, zoom, yaw, pitch, time }
+ *   Skin3D.viewer({ url, slim, pose, look, label }) → { el, set({url, slim, pose, look}), destroy() } — крутится мышью/пальцем/стрелками
+ *   Skin3D.figure({ url, slim, pose, look }) → <canvas> с методом update(look) — неподвижная картинка для карточки
+ *   Skin3D.poseAngles(key)               — углы позы без анимации (с них начинается «Своя поза»)
+ *   look — как стоит персонаж на карточке: { pose: ключ | 'custom', angles (у custom), scale, turn } (см. Api.LOOK)
  *   Skin3D.guessSlim(skin)               — тонкие ли руки (по пустым пикселям, как это определяет сама игра — никак, поэтому «угадать»)
  *   Skin3D.POSES                         — [{ key, label }]
  */
@@ -23,6 +26,14 @@
     { key: 'sit', label: 'Сидит' },
   ];
   const POSE_KEYS = POSES.map((p) => p.key);
+  const PARTS = [
+    { key: 'head', label: 'Голова' },
+    { key: 'body', label: 'Тело' },
+    { key: 'rightArm', label: 'Правая рука' },
+    { key: 'leftArm', label: 'Левая рука' },
+    { key: 'rightLeg', label: 'Правая нога' },
+    { key: 'leftLeg', label: 'Левая нога' },
+  ];
 
   /* ------------------------------------------------------------ модель */
 
@@ -111,6 +122,33 @@
     return p;
   }
 
+  /** Углы позы без анимации — копия, её можно менять. */
+  function poseAngles(key) {
+    const p = pose(POSE_KEYS.includes(key) ? key : 'stand', null);
+    const out = { lift: p.lift };
+    for (const { key: part } of PARTS) out[part] = p[part].map((x) => Math.round(x));
+    return out;
+  }
+
+  /** Своя поза (углы из look.angles), недостающее — как «Стоит». */
+  function customPose(angles) {
+    const p = pose('stand', null);
+    for (const { key } of PARTS) if (Array.isArray(angles[key]) && angles[key].length === 3) p[key] = angles[key].map(Number);
+    p.lift = Number(angles.lift) || 0;
+    return p;
+  }
+
+  /** look → настройки draw(): поза, свои углы, размер, поворот (yaw — поворот камеры по умолчанию для этого вида). */
+  function lookOpts(look, yaw) {
+    const l = look || {};
+    return {
+      pose: l.pose === 'custom' && l.angles ? 'custom' : l.pose,
+      angles: l.pose === 'custom' ? l.angles : null,
+      zoom: typeof l.scale === 'number' ? l.scale : 1,
+      yaw: yaw + (Number(l.turn) || 0),
+    };
+  }
+
   /* ------------------------------------------------------------ математика */
 
   function rotate(v, [rx, ry, rz]) {
@@ -138,13 +176,15 @@
 
   /* ------------------------------------------------------------ рисование */
 
+  const ATTACHED = new Set(['head', 'rightArm', 'leftArm']);
   const CENTER_Y = 17; // середина модели по высоте (с поднятыми руками)
   const HEIGHT = 40; // сколько единиц модели помещается по высоте холста
   const WIDTH = 26;
 
   /**
    * Один кадр. canvas — уже нужного размера (в пикселях устройства), skin — 64×64 из load().
-   * yaw/pitch — поворот камеры в градусах, pose — ключ позы, time — секунды анимации (null — без анимации).
+   * yaw/pitch — поворот камеры в градусах, pose — ключ позы ('custom' — углы из angles), time — секунды анимации (null — без анимации).
+   * zoom — размер фигуры: растёт вверх от ног, ноги остаются на месте.
    */
   function draw(canvas, skin, opts = {}) {
     const g = canvas.getContext('2d');
@@ -154,16 +194,22 @@
     g.clearRect(0, 0, W, H);
     if (!skin) return;
     g.imageSmoothingEnabled = false;
-    const scale = Math.min(W / WIDTH, H / HEIGHT) * (opts.zoom || 1);
+    const fitScale = Math.min(W / WIDTH, H / HEIGHT);
+    const zoom = opts.zoom || 1;
+    const scale = fitScale * zoom;
     const cx = W / 2;
-    const cy = H / 2 + (opts.shiftY || 0) * scale;
+    const cy = H / 2 + (opts.shiftY || 0) * scale + CENTER_Y * fitScale * (1 - zoom);
     const yaw = opts.yaw === undefined ? 25 : opts.yaw;
     const pitch = opts.pitch === undefined ? 10 : opts.pitch;
-    const angles = pose(POSE_KEYS.includes(opts.pose) ? opts.pose : 'stand', opts.time);
+    const angles = opts.pose === 'custom' && opts.angles ? customPose(opts.angles) : pose(POSE_KEYS.includes(opts.pose) ? opts.pose : 'stand', opts.time);
 
     // Модель → вид: поворот части вокруг сустава, подъём (сидит), центр, камера.
+    // Голова и руки крепятся к телу: наклонили тело — они наклоняются вместе с ним (ноги — нет).
+    const BODY_PIVOT = [0, 12, 0];
+    const bodyTurned = angles.body.some((x) => x);
     const toView = (part, p) => {
-      const local = add(rotate(sub(p, part.pivot), angles[part.key]), part.pivot);
+      let local = add(rotate(sub(p, part.pivot), angles[part.key]), part.pivot);
+      if (bodyTurned && ATTACHED.has(part.key)) local = add(rotate(sub(local, BODY_PIVOT), angles.body), BODY_PIVOT);
       local[1] += angles.lift - CENTER_Y;
       return rotate(rotate(local, [0, yaw, 0]), [pitch, 0, 0]);
     };
@@ -292,7 +338,9 @@
    * Остановится сам, когда элемент уберут со страницы.
    */
   function viewer(opts = {}) {
-    const state = { url: opts.url, slim: !!opts.slim, pose: opts.pose || 'stand', yaw: 25, pitch: 10, skin: null, playing: !reducedMotion() && opts.animate !== false };
+    const BASE_YAW = 25;
+    const state = { url: opts.url, slim: !!opts.slim, look: opts.look || { pose: opts.pose || 'stand' }, yaw: BASE_YAW, pitch: 10, skin: null, playing: !reducedMotion() && opts.animate !== false };
+    state.yaw = lookOpts(state.look, BASE_YAW).yaw;
     const canvas = document.createElement('canvas');
     canvas.className = 'skin3d__canvas';
     canvas.tabIndex = 0;
@@ -327,7 +375,8 @@
       }
       el.dataset.mounted = '1';
       fit(canvas);
-      draw(canvas, state.skin, { slim: state.slim, pose: state.pose, yaw: state.yaw, pitch: state.pitch, time: state.playing ? (now - started) / 1000 : null });
+      const look = lookOpts(state.look, 0);
+      draw(canvas, state.skin, { slim: state.slim, pose: look.pose, angles: look.angles, zoom: look.zoom, yaw: state.yaw, pitch: state.pitch, time: state.playing ? (now - started) / 1000 : null });
       if (state.playing) frame = requestAnimationFrame(render);
     };
     const redraw = () => {
@@ -368,7 +417,12 @@
 
     function set(next = {}) {
       if (next.slim !== undefined) state.slim = !!next.slim;
-      if (next.pose) state.pose = next.pose;
+      if (next.pose) state.look = { ...state.look, pose: next.pose, angles: undefined };
+      if (next.look) {
+        // Поворот поменяли в настройках — камера встаёт, как задано; иначе остаётся, куда её повернули.
+        if ((Number(next.look.turn) || 0) !== (Number(state.look.turn) || 0)) state.yaw = lookOpts(next.look, BASE_YAW).yaw;
+        state.look = next.look;
+      }
       if (next.label) {
         opts.label = next.label;
         canvas.setAttribute('aria-label', label());
@@ -400,24 +454,35 @@
 
     if (state.url) loadInto(state.url);
     redraw();
-    return { el, canvas, set, destroy, get state() { return { ...state, skin: undefined }; } };
+    return { el, canvas, set, destroy, get state() { return { ...state, pose: state.look.pose, skin: undefined }; } };
   }
 
   /**
    * Неподвижная картинка для карточки в сетке: персонаж в позе, вполоборота.
    * Возвращает <canvas>; скин догружается сам.
    */
-  function figure({ url, slim, pose: poseKey, width = 150, height = 190, label }) {
+  function figure({ url, slim, pose: poseKey, look, width = 150, height = 190, label }) {
     const canvas = document.createElement('canvas');
     canvas.className = 'skin3d__figure';
     canvas.setAttribute('role', 'img');
     canvas.setAttribute('aria-label', label || 'Скин игрока');
     fit(canvas, width, height);
+    let current = look || { pose: poseKey };
+    let skin = null;
+    const paint = () => skin && draw(canvas, skin, { slim, pitch: 8, ...lookOpts(current, 28) });
+    /** Другая поза/размер/поворот без перезагрузки скина (предпросмотр в редакторе). */
+    canvas.update = (next) => {
+      current = next || current;
+      paint();
+    };
     load(url)
-      .then((skin) => draw(canvas, skin, { slim, pose: poseKey, yaw: 28, pitch: 8 }))
+      .then((s) => {
+        skin = s;
+        paint();
+      })
       .catch(() => {});
     return canvas;
   }
 
-  window.Skin3D = { POSES, load, draw, viewer, figure, guessSlim, fit };
+  window.Skin3D = { POSES, PARTS, load, draw, viewer, figure, poseAngles, guessSlim, fit };
 })();

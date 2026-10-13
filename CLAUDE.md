@@ -98,6 +98,20 @@
   это скин по ссылке. `DELETE` («Как в игре») стирает скин из игры только если свой был поставлен на сервер (`skin_sync = 'ok'`).
   Кроме textures.minecraft.net сервер сайта ходит **только** к этим трём адресам Mojang (разрешено владельцем).
   На карточке — более новый из двух скинов (`skinOf`). `sweep()` не удаляет хеши из обеих таблиц; бэкап копирует `skins/`.
+  Нет скина нигде — Стив: `config.defaultSkinTexture` (`31f477eb…`), `skins.defaultSkin()` качает его с textures.minecraft.net
+  при первом обращении (асинхронно, повтор через час при ошибке), в API `skinDefault: true`; пока не скачан — `/assets/img/skin-default.png`.
+  **Поза по видам** (миграция 8, `player_cards.looks` JSON): `looks.card` — маленькая карточка, `looks.detail` — окно игрока,
+  каждый `{pose: ключ | 'custom', angles (у custom: head/body/руки/ноги [x,y,z] ±180°, lift), scale 0.6–1.3, turn ±180}`.
+  Пределы `LOOK` — и в `api.js`, и в `server/lib/validate.js` (`normalizeLook`). Старая колонка `pose` = поза карточки
+  (если она не custom); старое поле `pose` в PATCH меняет `looks.card.pose`. Рисует `Skin3D.draw` (`zoom` растёт от ног,
+  голова и руки поворачиваются вместе с телом); `scale` — размер фигуры, не пропорции тела.
+  **Свой фон** (`lib/backgrounds.js`, `player_cards.bg_file`): браузер сжимает (`compressBackground` в `api.js`: WebP,
+  запасной JPEG, ≤1280 точек), сервер принимает `PUT /api/me/background` сырым телом WebP/JPEG/PNG ≤400 КБ и ≤1600 точек,
+  без анимированного WebP (проверка по первым байтам `sniffImage`), хранит `LWL_DATA_DIR/backgrounds/<sha256>.<ext>`,
+  отдаёт `GET /api/backgrounds/<имя>` (immutable, `nosniff`). При замене старый файл удаляется (`release`, если на него
+  больше никто не ссылается), остальное подчищает `sweep()` раз в час; бэкап копирует `backgrounds/`.
+  Один фон на оба вида. Убрать чужую картинку — `DELETE /api/players/:nick/background` (право «Люди»; кнопка в окне
+  игрока, `Players.allowModeration` — из кабинета и с `players-page.js`).
   `GET /api/online` → `{count}` без входа, 60/мин с IP; «в сети» = `online = 1` и вести не старше `ONLINE_WINDOW_MS` (150 с).
   В e2e статистику шлёт сам тест с `LWL_GAME_TOKEN` (как мод).
 - Ник «Игрока» сам не меняется (он в вайтлисте Minecraft-сервера) — только через поддержку.
@@ -133,7 +147,7 @@ Docker → находит Caddyfile на машине по `docker inspect` (Mou
 его нужно выставлять (`header_up X-Real-IP {remote_host}`), иначе лимиты сработают на всех сразу.
 Загрузка сборок и файлов в чат идёт потоком (`proxy_request_buffering off` на `…/packs/<id>/file` и
 `…/conversations/<id>/attachments`), скачивание сборок — без буфера nginx, с `Range`. Бэкап (`deploy/backup.sh`) —
-база и папки-снимки `attachments-ДАТА`, `skins-ДАТА` (неизменившиеся файлы — жёсткими ссылками на вчерашний снимок).
+база и папки-снимки `attachments-ДАТА`, `skins-ДАТА`, `backgrounds-ДАТА` (неизменившиеся файлы — жёсткими ссылками на вчерашний снимок).
 Если добавляешь зависимость, переменную окружения или системный пакет — обнови `deploy/install.sh`, `deploy/lwl.env.example` и `deploy/README.md`.
 `LWL_GAME_TOKEN` (токен игрового сервера для входа по коду и статистики) `install.sh` и `update.sh` генерируют сами, если его нет в `lwl.env`,
 и печатают, куда вписать на сервере: `config/lwl/connect.json` → `siteToken` (и `siteUrl`); тот же токен — в `config/lwl-stats.json`.

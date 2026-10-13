@@ -20,6 +20,7 @@ import registerAttachments from './routes/attachments.js';
 import registerGame from './routes/game.js';
 import registerPlayers from './routes/players.js';
 import { createMojang } from './lib/mojang.js';
+import { createBackgrounds } from './lib/backgrounds.js';
 import { createSkins } from './lib/skins.js';
 
 const SESSION_COOKIE = 'lwl_session';
@@ -33,6 +34,7 @@ export function createApp(config) {
   fs.mkdirSync(path.join(config.dataDir, 'packs'), { recursive: true });
   fs.mkdirSync(path.join(config.dataDir, 'attachments'), { recursive: true });
   fs.mkdirSync(path.join(config.dataDir, 'skins'), { recursive: true });
+  fs.mkdirSync(path.join(config.dataDir, 'backgrounds'), { recursive: true });
   useFastHashing(config.fastHash);
   const db = openDb(path.join(config.dataDir, 'lwl.db'));
   const limiter = new RateLimiter();
@@ -134,6 +136,7 @@ export function createApp(config) {
     db.prepare('DELETE FROM login_failures WHERE updated_at < ?').run(now - DAY);
     s.attachments.sweep();
     s.skins.sweep();
+    s.backgrounds.sweep();
   }, 3600 * 1000);
   cleanupTimer.unref();
 
@@ -197,7 +200,9 @@ export function createApp(config) {
 
   const s = { db, config, limiter, views, getUser, startSession, endSession, need, settings, isOwner, permsOf, can, ROLE_LABELS };
   // Скины для карточек игроков: LWL_DATA_DIR/skins/<sha256>.png, качаются только с config.skinOrigin.
-  s.skins = createSkins({ db, dir: path.join(config.dataDir, 'skins'), origin: config.skinOrigin || 'https://textures.minecraft.net' });
+  s.skins = createSkins({ db, dir: path.join(config.dataDir, 'skins'), origin: config.skinOrigin || 'https://textures.minecraft.net', defaultTexture: config.defaultSkinTexture });
+  // Свои фоны карточек: LWL_DATA_DIR/backgrounds/<sha256>.<webp|jpg|png>.
+  s.backgrounds = createBackgrounds({ db, dir: path.join(config.dataDir, 'backgrounds') });
   s.mojang = createMojang(config.mojang);
 
   /* ------------------------------------------------------------ маршруты */
@@ -282,6 +287,7 @@ export function createApp(config) {
     server,
     db,
     skins: s.skins,
+    backgrounds: s.backgrounds,
     close() {
       clearInterval(cleanupTimer);
       limiter.stop();

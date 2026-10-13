@@ -3,6 +3,7 @@
  * Каждый запуск — чистая временная база.
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -68,6 +69,9 @@ before(async () => {
   config.skinOrigin = texturesOrigin;
   config.mojang = mojangConfig;
   app = createApp(config);
+  // Стандартный скин (Стив) сайт качает сам при первой карточке без скина; здесь — сразу, чтобы счётчики запросов не плавали.
+  assert.ok(await app.skins.loadDefault());
+  assert.ok(textureHits.includes('/texture/31f477eb1a7beee631c2ca64d06f8f68fa93a3386d04452ab27f43acdf1b60cb'));
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${app.server.address().port}`;
 });
@@ -866,7 +870,8 @@ test('карточки: статистика сохраняется и отда�
   assert.equal(p.nickname, 'Alice_07');
   assert.equal(p.role, 'player', 'есть аккаунт на сайте');
   assert.equal(p.firstSeen, Date.UTC(2026, 0, 2), 'первый вход — из игры, если раньше');
-  assert.equal(p.skinUrl, '/assets/img/skin-default.png');
+  assert.equal(p.skinUrl, `/api/skins/${createHash('sha256').update(SKIN_PNG).digest('hex')}.png`, 'своего скина нет — Стив, скачанный с textures.minecraft.net');
+  assert.equal(p.skinDefault, true);
   assert.equal(p.skinSlim, false);
   const json = JSON.stringify(p);
   for (const word of ['1.2.3.4', 'cracked', 'license', 'diamond', 'uuid', 'email', 'example.com']) assert.ok(!json.includes(word), word);
@@ -904,7 +909,7 @@ test('карточки: видны всем; гостю и «Пользоват�
       'по нику, сортировка из запроса не действует'
     );
     const p = (await who.get('/api/players/Alice_07')).data.player;
-    assert.deepEqual(Object.keys(p).sort(), ['avatar', 'background', 'bio', 'creator', 'nickname', 'pose', 'role', 'skinSlim', 'skinUrl', 'socials']);
+    assert.deepEqual(Object.keys(p).sort(), ['avatar', 'background', 'backgroundUrl', 'bio', 'creator', 'looks', 'nickname', 'pose', 'role', 'skinDefault', 'skinSlim', 'skinUrl', 'socials']);
   }
   assert.equal((await client().get('/api/players/nobody_here')).status, 404);
   // Своя карточка — только «Игрокам» и админам.
@@ -923,7 +928,19 @@ test('карточки: «о себе», скрыть поля и всю кар�
   const empty = (await alice.get('/api/me/card')).data;
   assert.deepEqual(
     { ...empty, card: empty.card.nickname },
-    { bio: '', hidden: false, hideFields: [], pose: 'stand', background: 'meadow', socials: {}, skin: null, card: 'Alice_07' }
+    {
+      bio: '',
+      hidden: false,
+      hideFields: [],
+      pose: 'stand',
+      looks: { card: { pose: 'stand', scale: 1, turn: 0 }, detail: { pose: 'stand', scale: 1, turn: 0 } },
+      background: 'meadow',
+      backgroundUrl: null,
+      customBackground: null,
+      socials: {},
+      skin: null,
+      card: 'Alice_07',
+    }
   );
 
   for (const [body, field] of [
@@ -1083,6 +1100,126 @@ test('свой скин: загрузка в кабинете, проверка 
   assert.equal((await alice.post('/api/me/skin/sync')).status, 404);
   // Файл никто не использует — sweep уберёт его через сутки, а пока он на диске.
   assert.ok(fs.existsSync(path.join(dataDir, 'skins', up.data.skin.url.split('/').pop())));
+});
+
+test('карточки: своя поза для маленькой карточки и для окна игрока', async () => {
+  const ip = { 'X-Real-IP': '10.88.0.1' };
+  const patch = (body) => alice.raw('PATCH', '/api/me/card', body, ip);
+  const custom = { head: [10, -20, 0], body: [0, 5, 0], rightArm: [-90, 0, 0], leftArm: [0, 0, 40], rightLeg: [20, 0, 0], leftLeg: [-20, 0, 0], lift: -2 };
+  for (const looks of [
+    'stand',
+    { side: { pose: 'stand' } },
+    { card: { pose: 'dab' } },
+    { card: { pose: 'custom' } },
+    { card: { pose: 'stand', scale: 5 } },
+    { detail: { pose: 'stand', turn: 999 } },
+    { detail: { pose: 'stand', turn: '45' } },
+    { card: { pose: 'custom', angles: { ...custom, head: [999, 0, 0] } } },
+    { card: { pose: 'custom', angles: { ...custom, body: [0, 0] } } },
+    { card: { pose: 'custom', angles: { ...custom, lift: 30 } } },
+  ]) {
+    const r = await patch({ looks });
+    assert.equal(r.status, 422, JSON.stringify(looks));
+    assert.ok(r.data.fields.looks);
+  }
+
+  const r = await patch({ looks: { card: { pose: 'cheer', scale: 1.2, turn: -30.4 }, detail: { pose: 'custom', angles: { ...custom, extra: [1, 2, 3] }, scale: 0.9, turn: 45 } } });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.looks.card, { pose: 'cheer', scale: 1.2, turn: -30 });
+  assert.deepEqual(r.data.looks.detail, { pose: 'custom', scale: 0.9, turn: 45, angles: custom }, 'лишнее выброшено');
+  assert.equal(r.data.pose, 'cheer', 'старое поле — поза маленькой карточки');
+  assert.deepEqual((await client().get('/api/players/Alice_07')).data.player.looks, r.data.looks, 'видно всем');
+
+  // Меняем одну — вторая остаётся.
+  const one = await patch({ looks: { card: { pose: 'sit' } } });
+  assert.deepEqual(one.data.looks.card, { pose: 'sit', scale: 1, turn: 0 });
+  assert.equal(one.data.looks.detail.pose, 'custom');
+  // Своя поза на карточке — старое поле pose остаётся прежним.
+  assert.equal((await patch({ looks: { card: { pose: 'custom', angles: custom } } })).data.pose, 'sit');
+  // Старые клиенты шлют pose — это поза маленькой карточки.
+  const old = await patch({ pose: 'walk' });
+  assert.deepEqual(old.data.looks.card, { pose: 'walk', scale: 1, turn: 0 });
+  assert.equal(old.data.looks.detail.pose, 'custom');
+  await patch({ looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } });
+});
+
+test('карточки: свой фон — проверка, хранение, замена, модерация', async () => {
+  const ip = { 'X-Real-IP': '10.88.0.2' };
+  const octet = { 'Content-Type': 'application/octet-stream', ...ip };
+  const put = (who, body) => who.put('/api/me/background', body, octet);
+  const patch = (body) => alice.raw('PATCH', '/api/me/card', body, ip);
+  // Заголовок WebP (VP8X): сайт смотрит только на него, картинку сжимает браузер.
+  const webp = (w, h, flags = 0) => {
+    const b = Buffer.alloc(30);
+    b.write('RIFF', 0, 'latin1');
+    b.writeUInt32LE(22, 4);
+    b.write('WEBPVP8X', 8, 'latin1');
+    b.writeUInt32LE(10, 16);
+    b[20] = flags;
+    b.writeUIntLE(w - 1, 24, 3);
+    b.writeUIntLE(h - 1, 27, 3);
+    return b;
+  };
+  const fileOf = (url) => path.join(dataDir, 'backgrounds', url.split('/').pop());
+
+  assert.equal((await patch({ background: 'custom' })).status, 422, 'своей картинки ещё нет');
+  assert.equal((await put(bob, webp(800, 450))).status, 403, 'только игроки');
+  assert.equal((await put(client(), webp(800, 450))).status, 401);
+  for (const [body, why] of [
+    [Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'svg'],
+    [Buffer.from('GIF89a\x10\x00\x10\x00', 'latin1'), 'gif'],
+    [webp(2000, 100), 'больше 1600 точек'],
+    [webp(800, 450, 0x02), 'анимация'],
+  ]) {
+    const r = await put(alice, body);
+    assert.equal(r.status, 422, why);
+    assert.ok(r.data.fields.background, why);
+  }
+  assert.equal((await put(alice, Buffer.alloc(400 * 1024 + 1))).status, 413);
+
+  const up = await put(alice, webp(800, 450));
+  assert.equal(up.status, 200);
+  assert.equal(up.data.background, 'custom');
+  assert.match(up.data.backgroundUrl, /^\/api\/backgrounds\/[0-9a-f]{64}\.webp$/);
+  assert.equal(up.data.customBackground, up.data.backgroundUrl);
+  const file = await client().get(up.data.backgroundUrl);
+  assert.equal(file.status, 200);
+  assert.equal(file.headers.get('content-type'), 'image/webp');
+  assert.equal(file.headers.get('x-content-type-options'), 'nosniff');
+  assert.ok(file.data.equals(webp(800, 450)));
+  const guest = (await client().get('/api/players/Alice_07')).data.player;
+  assert.equal(guest.backgroundUrl, up.data.backgroundUrl);
+  for (const bad of ['..%2Flwl.db', 'abc.webp', `${'a'.repeat(64)}.svg`]) assert.equal((await client().get(`/api/backgrounds/${bad}`)).status, 404, bad);
+
+  // Поставили другую — старая картинка сразу удаляется с диска.
+  const up2 = await put(alice, SKIN_PNG);
+  assert.match(up2.data.backgroundUrl, /\.png$/);
+  assert.ok(fs.existsSync(fileOf(up2.data.backgroundUrl)));
+  assert.ok(!fs.existsSync(fileOf(up.data.backgroundUrl)), 'старая удалена');
+
+  // Заготовка — картинка остаётся, её можно вернуть.
+  const preset = await patch({ background: 'snow' });
+  assert.equal(preset.data.background, 'snow');
+  assert.equal(preset.data.backgroundUrl, null);
+  assert.equal(preset.data.customBackground, up2.data.backgroundUrl);
+  assert.equal((await client().get('/api/players/Alice_07')).data.player.backgroundUrl, null);
+  assert.equal((await patch({ background: 'custom' })).data.backgroundUrl, up2.data.backgroundUrl);
+
+  // Модерация: картинку видят все — админ с правом «Люди» её убирает.
+  assert.equal((await alice.del('/api/players/Alice_07/background')).status, 403);
+  const mod = await owner.del('/api/players/Alice_07/background');
+  assert.equal(mod.status, 200);
+  assert.equal(mod.data.player.background, 'meadow');
+  assert.equal(mod.data.player.backgroundUrl, null);
+  assert.ok(!fs.existsSync(fileOf(up2.data.backgroundUrl)));
+  assert.equal((await owner.del('/api/players/nobody_here/background')).status, 404);
+
+  // Убрать свою.
+  const again = await put(alice, webp(640, 360));
+  const removed = await alice.del('/api/me/background');
+  assert.equal(removed.data.background, 'meadow');
+  assert.equal(removed.data.customBackground, null);
+  assert.ok(!fs.existsSync(fileOf(again.data.backgroundUrl)));
 });
 
 test('скин по нику лицензии: сайт спрашивает Mojang, картинку берёт с textures.minecraft.net', async () => {

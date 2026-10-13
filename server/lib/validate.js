@@ -28,6 +28,48 @@ export const CARD_FIELDS = ['playtime', 'deaths', 'mobKills', 'playerKills', 'bl
 // Поза персонажа и фон карточки (рисует assets/js/skin3d.js и assets/css/players.css).
 export const CARD_POSES = ['stand', 'wave', 'walk', 'cheer', 'point', 'sit'];
 export const CARD_BACKGROUNDS = ['meadow', 'night', 'sunset', 'ocean', 'cave', 'snow', 'nether', 'end'];
+
+/**
+ * Как стоит персонаж — отдельно на маленькой карточке (card) и в окне игрока (detail).
+ * { pose: ключ позы | 'custom', angles: { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift } (только у custom),
+ *   scale — размер фигуры, turn — поворот всей фигуры в градусах }.
+ * Те же правила — в assets/js/api.js (LOOK).
+ */
+export const LOOK_VIEWS = ['card', 'detail'];
+export const LOOK_PARTS = ['head', 'body', 'rightArm', 'leftArm', 'rightLeg', 'leftLeg'];
+export const LOOK = { angle: 180, lift: [-12, 0], scale: [0.6, 1.3], turn: 180 };
+
+const inRange = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+
+/** Ошибка в одном виде (look) или ''. */
+function lookError(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return 'Нужны настройки позы.';
+  if (v.pose !== 'custom' && !CARD_POSES.includes(v.pose)) return 'Такой позы нет.';
+  if (v.scale !== undefined && !inRange(v.scale, ...LOOK.scale)) return `Размер — от ${LOOK.scale[0]} до ${LOOK.scale[1]}.`;
+  if (v.turn !== undefined && !inRange(v.turn, -LOOK.turn, LOOK.turn)) return `Поворот — от −${LOOK.turn}° до ${LOOK.turn}°.`;
+  if (v.pose === 'custom') {
+    const a = v.angles;
+    if (!a || typeof a !== 'object' || Array.isArray(a)) return 'Для своей позы нужны углы.';
+    for (const part of LOOK_PARTS) {
+      const r = a[part];
+      if (!Array.isArray(r) || r.length !== 3 || r.some((x) => !inRange(x, -LOOK.angle, LOOK.angle))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
+    }
+    if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
+  }
+  return '';
+}
+
+/** Привести вид к хранимому: округлить, лишнее выбросить. Неверный → null. */
+export function normalizeLook(v) {
+  if (lookError(v)) return null;
+  const round = (x, k = 1) => Math.round(x * k) / k;
+  const out = { pose: v.pose, scale: v.scale === undefined ? 1 : round(v.scale, 100), turn: v.turn === undefined ? 0 : round(v.turn) };
+  if (v.pose === 'custom') {
+    out.angles = { lift: v.angles.lift === undefined ? 0 : round(v.angles.lift) };
+    for (const part of LOOK_PARTS) out.angles[part] = v.angles[part].map((x) => round(x));
+  }
+  return out;
+}
 // Соцсети на карточке: хранится только ник, ссылку собирает страница — чужой адрес в карточку не попадёт.
 export const SOCIALS = {
   telegram: /^[A-Za-z][A-Za-z0-9_]{4,31}$/,
@@ -99,7 +141,19 @@ export const validate = {
       if (!Array.isArray(d.hideFields) || d.hideFields.length > CARD_FIELDS.length || d.hideFields.some((k) => !CARD_FIELDS.includes(k))) f.hideFields = 'Неизвестное поле карточки.';
     }
     if (d.pose !== undefined && !CARD_POSES.includes(d.pose)) f.pose = 'Такой позы нет.';
-    if (d.background !== undefined && !CARD_BACKGROUNDS.includes(d.background)) f.background = 'Такого фона нет.';
+    if (d.background !== undefined && d.background !== 'custom' && !CARD_BACKGROUNDS.includes(d.background)) f.background = 'Такого фона нет.';
+    if (d.looks !== undefined) {
+      if (!d.looks || typeof d.looks !== 'object' || Array.isArray(d.looks)) f.looks = 'Нужны настройки позы.';
+      else {
+        for (const [view, look] of Object.entries(d.looks)) {
+          const err = LOOK_VIEWS.includes(view) ? lookError(look) : 'Нет такого вида карточки.';
+          if (err) {
+            f.looks = err;
+            break;
+          }
+        }
+      }
+    }
     if (d.socials !== undefined) {
       if (!d.socials || typeof d.socials !== 'object' || Array.isArray(d.socials)) f.socials = { _: 'Нужен список соцсетей.' };
       else {

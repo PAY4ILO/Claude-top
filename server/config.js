@@ -43,6 +43,8 @@ export function loadConfig(env = process.env) {
     // Откуда сайт качает скины для карточек игроков. Не настраивается: другой адрес = дыра (SSRF).
     // Только тесты подменяют его в объекте настроек на локальный сервер.
     skinOrigin: 'https://textures.minecraft.net',
+    // Скин тех, у кого своего нет, — классический Стив (текстура Mojang, качается с skinOrigin один раз).
+    defaultSkinTexture: '31f477eb1a7beee631c2ca64d06f8f68fa93a3386d04452ab27f43acdf1b60cb',
     // Скин лицензии по нику (кабинет → «Скин по нику»): только эти адреса Mojang. Тоже не настраиваются, тесты подменяют.
     mojang: { api: 'https://api.mojang.com', servicesApi: 'https://api.minecraftservices.com', session: 'https://sessionserver.mojang.com' },
     staticRoot: ROOT,

@@ -50,6 +50,21 @@
 
   const backgroundOf = (p) => (Object.hasOwn(Api.CARD_BACKGROUNDS, p.background) ? p.background : 'meadow');
 
+  /** Как стоит персонаж: view — 'card' (маленькая карточка) или 'detail' (окно игрока). */
+  const lookOf = (p, view) => (p.looks && p.looks[view]) || { pose: p.pose || 'stand', scale: 1, turn: 0 };
+
+  /** Фон сцены: класс заготовки или своя картинка (через CSSOM: CSP не пускает style="…"). */
+  function paintBackground(el, p) {
+    for (const c of [...el.classList]) if (c.startsWith('bg--')) el.classList.remove(c);
+    const custom = p.background === 'custom' && p.backgroundUrl;
+    el.classList.add('bg--' + (custom ? 'custom' : backgroundOf(p)));
+    el.style.backgroundImage = custom ? `url("${p.backgroundUrl}")` : '';
+    return el;
+  }
+
+  // Убрать чужую картинку фона может админ с правом «Люди» — кабинет сообщает это через allowModeration.
+  let canModerate = () => false;
+
   function lastSeenText(p) {
     if (p.online) return 'в сети';
     return p.lastSeen ? 'был(а) ' + UI.relative(p.lastSeen) : '';
@@ -97,13 +112,13 @@
   /* ------------------------------------------------------------ карточка */
 
   function card(p, { onOpen } = {}) {
-    const figure = Skin3D.figure({ url: p.skinUrl, slim: p.skinSlim, pose: p.pose, label: `Скин игрока ${p.nickname}` });
+    const figure = Skin3D.figure({ url: p.skinUrl, slim: p.skinSlim, look: lookOf(p, 'card'), label: `Скин игрока ${p.nickname}` });
     const ranks = ranksOf(p).slice(0, 2);
     const main = p.stats ? STAT_ROWS.filter((r) => r.main && typeof p.stats[r.key] === 'number') : [];
     const el = h(
       'article',
       { class: 'pcard card', dataset: { nick: p.nickname } },
-      h('div', { class: 'pcard__scene bg--' + backgroundOf(p) }, h('div', { class: 'pcard__figure' }, figure)),
+      paintBackground(h('div', { class: 'pcard__scene' }, h('div', { class: 'pcard__figure' }, figure)), p),
       h(
         'div',
         { class: 'pcard__body' },
@@ -136,24 +151,53 @@
   /* ------------------------------------------------------------ подробности */
 
   function openDetails(p) {
-    const viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, pose: p.pose, label: `Скин игрока ${p.nickname}` });
+    const look = lookOf(p, 'detail');
+    const viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look, label: `Скин игрока ${p.nickname}` });
+    // Своя поза игрока — первой кнопкой, чтобы к ней можно было вернуться.
+    const options = [...(look.pose === 'custom' ? [['custom', 'Как у игрока']] : []), ...Object.entries(Api.CARD_POSES)];
     const poses = h(
       'div',
       { class: 'chips', role: 'radiogroup', 'aria-label': 'Поза' },
-      Object.entries(Api.CARD_POSES).map(([key, label]) =>
+      options.map(([key, label]) =>
         h('button', {
           class: 'chip',
           type: 'button',
           role: 'radio',
-          'aria-checked': String(key === (p.pose || 'stand')),
+          'aria-checked': String(key === look.pose),
           text: label,
           onclick: (e) => {
             poses.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-checked', String(c === e.currentTarget)));
-            viewer.set({ pose: key });
+            viewer.set({ look: key === 'custom' ? look : { pose: key, scale: look.scale, turn: look.turn } });
           },
         })
       )
     );
+    const stage = paintBackground(
+      h('div', { class: 'pdetail__stage' }, viewer.el, h('a', { class: 'pdetail__download link', href: p.skinUrl, download: `${p.nickname}.png`, text: 'Скачать скин' })),
+      p
+    );
+    // Модерация: картинку фона видят все, даже гости.
+    const moderate =
+      p.background === 'custom' &&
+      canModerate() &&
+      h('button', {
+        class: 'btn btn--sm btn--ghost pdetail__moderate',
+        type: 'button',
+        text: 'Убрать картинку фона',
+        onclick: async (e) => {
+          const btn = e.currentTarget;
+          const ok = await UI.confirm({ title: 'Убрать картинку?', text: `Фон ${p.nickname} станет обычным «Лугом», файл удалится с сервера. Игрок сможет загрузить другую.`, confirmText: 'Убрать' });
+          if (!ok) return;
+          try {
+            const next = await Api.players.removePlayerBackground(p.nickname);
+            paintBackground(stage, next);
+            btn.remove();
+            UI.toast('Картинка фона убрана');
+          } catch (err) {
+            UI.toast(err.message, { type: 'error' });
+          }
+        },
+      });
     const stats = p.stats ? STAT_ROWS.filter((r) => typeof p.stats[r.key] === 'number') : [];
     const ranks = ranksOf(p);
     const dates = [
@@ -163,12 +207,7 @@
     const content = h(
       'div',
       { class: 'pdetail' },
-      h(
-        'div',
-        { class: 'pdetail__stage bg--' + backgroundOf(p) },
-        viewer.el,
-        h('a', { class: 'pdetail__download link', href: p.skinUrl, download: `${p.nickname}.png`, text: 'Скачать скин' })
-      ),
+      stage,
       h(
         'div',
         { class: 'pdetail__info' },
@@ -180,7 +219,8 @@
           h('dl', { class: 'pdetail__stats' }, stats.map((r) => h('div', { class: 'pdetail__stat' }, h('dt', { text: r.label }), h('dd', { text: r.format(p.stats[r.key]) })))),
         dates.length > 0 && h('dl', { class: 'pdetail__dates' }, dates.map(([k, v]) => h('div', null, h('dt', { text: k }), h('dd', { text: v })))),
         p.full === false && h('p', { class: 'pdetail__note', text: 'Статистика из игры видна игрокам сервера после входа на сайт.' }),
-        p.statsAt && h('p', { class: 'pdetail__note', text: 'Статистика обновлена ' + UI.relative(p.statsAt) + '.' })
+        p.statsAt && h('p', { class: 'pdetail__note', text: 'Статистика обновлена ' + UI.relative(p.statsAt) + '.' }),
+        moderate
       )
     );
     UI.modal({ title: p.nickname, content, size: 'wide', onClose: () => viewer.destroy() });
@@ -387,41 +427,260 @@
 
     let preview;
     let viewer;
+    // Как стоит персонаж — рабочая копия: предпросмотр меняется сразу, на сервер уходит чуть позже.
+    let looks;
+    let lookView = 'card';
+    let previewFigure = null;
+    let previewViewer = null;
+
     function draw() {
       if (viewer) viewer.destroy();
+      looks = JSON.parse(JSON.stringify(data.looks));
       const p = { ...data.card, full: true };
-      preview = h('div', { class: 'my-card__preview' }, card(p));
+      preview = h('div', { class: 'my-card__preview' });
+      refreshPreview();
       clear(root).append(cardSection(p), skinSection(p));
     }
 
+    /** Слева — то, что сейчас настраивают: маленькая карточка или окно игрока. */
     function refreshPreview() {
-      const p = { ...data.card, full: true };
-      preview.replaceChildren(card(p));
+      if (previewViewer) previewViewer.destroy();
+      previewViewer = null;
+      previewFigure = null;
+      const p = { ...data.card, looks, full: true };
+      if (lookView === 'detail') {
+        previewViewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look: looks.detail, label: 'Окно игрока — предпросмотр', animate: false });
+        preview.replaceChildren(
+          paintBackground(h('div', { class: 'pdetail__stage my-card__stage' }, previewViewer.el), p),
+          h('p', { class: 'my-card__caption', text: 'Так персонаж стоит в окне, которое открывается по нажатию на карточку.' })
+        );
+      } else {
+        const el = card(p);
+        previewFigure = el.querySelector('.skin3d__figure');
+        preview.replaceChildren(el);
+      }
     }
 
-    function cardSection(p) {
-      // Поза и фон — сразу, с предпросмотром.
-      const poseGroup = radioChips('Поза', Api.CARD_POSES, p.pose, (pose) => save({ pose }, 'Поза сохранена'));
-      const bgGroup = h(
+    function livePreview() {
+      if (lookView === 'card' && previewFigure) previewFigure.update(looks.card);
+      if (lookView === 'detail' && previewViewer) previewViewer.set({ look: looks.detail });
+    }
+
+    /* Персонаж: поза (или своя — ползунками), размер и поворот; отдельно для карточки и для окна. */
+
+    // Подписи осей для каждой части; знак — чтобы «вправо» на ползунке значило «вперёд» / «в сторону от тела».
+    const AXES = {
+      head: [['Кивок', 1], ['Поворот', 1], ['Наклон к плечу', 1]],
+      body: [['Наклон вперёд', 1], ['Поворот', 1], ['Наклон вбок', 1]],
+      rightArm: [['Вперёд — назад', -1], ['Вращение', 1], ['В сторону', -1]],
+      leftArm: [['Вперёд — назад', -1], ['Вращение', 1], ['В сторону', 1]],
+      rightLeg: [['Вперёд — назад', -1], ['Вращение', 1], ['В сторону', -1]],
+      leftLeg: [['Вперёд — назад', -1], ['Вращение', 1], ['В сторону', 1]],
+    };
+
+    function slider({ label, min, max, value, unit = '', onInput }) {
+      const out = h('output', { class: 'look__value', text: value + unit });
+      const input = h('input', { class: 'look__range', type: 'range', min: String(min), max: String(max), step: '1', value: String(value), 'aria-label': label });
+      input.addEventListener('input', () => {
+        out.textContent = input.value + unit;
+        onInput(Number(input.value));
+      });
+      return h('label', { class: 'look__slider' }, h('span', { class: 'look__name', text: label }), input, out);
+    }
+
+    function lookSection() {
+      const status = h('p', { class: 'look__status', 'aria-live': 'polite' });
+      const persist = UI.debounce(async () => {
+        status.textContent = 'Сохраняю…';
+        try {
+          data = await Api.players.updateMyCard({ looks });
+          status.textContent = 'Сохранено';
+        } catch (err) {
+          status.textContent = '';
+          UI.toast(err.fields ? Object.values(err.fields)[0] : err.message, { type: 'error' });
+        }
+      }, 600);
+      const change = () => {
+        livePreview();
+        persist();
+      };
+      let part = 'rightArm';
+      const controls = h('div', { class: 'look__controls' });
+      const tabs = h(
         'div',
-        { class: 'swatches', role: 'radiogroup', 'aria-label': 'Фон' },
-        Object.entries(Api.CARD_BACKGROUNDS).map(([key, label]) =>
+        { class: 'tabs look__tabs', role: 'tablist', 'aria-label': 'Что настраиваем' },
+        Object.entries(Api.LOOK.views).map(([key, label]) =>
           h('button', {
-            class: 'swatch bg--' + key,
+            class: 'tabs__tab',
             type: 'button',
-            role: 'radio',
-            'aria-checked': String(key === backgroundOf(p)),
-            'aria-label': label,
-            title: label,
-            onclick: (e) => {
-              bgGroup.querySelectorAll('.swatch').forEach((b) => b.setAttribute('aria-checked', String(b === e.currentTarget)));
-              data.card.background = key;
+            role: 'tab',
+            'aria-selected': String(key === lookView),
+            dataset: { key },
+            text: label,
+            onclick: () => {
+              lookView = key;
+              tabs.querySelectorAll('.tabs__tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.key === key)));
               refreshPreview();
-              save({ background: key }, 'Фон сохранён');
+              render();
             },
           })
         )
       );
+
+      /** Перерисовать настройки; focus — селектор кнопки, на которую вернуть фокус. */
+      function render(focus) {
+        const look = looks[lookView];
+        const pick = (key) => {
+          if (key === look.pose) return;
+          looks[lookView] =
+            key === 'custom'
+              ? { pose: 'custom', angles: Skin3D.poseAngles(look.pose), scale: look.scale, turn: look.turn }
+              : { pose: key, scale: look.scale, turn: look.turn };
+          render(`[data-pose="${key}"]`);
+          change();
+        };
+        const poseChips = h(
+          'div',
+          { class: 'chips', role: 'radiogroup', 'aria-label': 'Поза' },
+          [...Object.entries(Api.CARD_POSES), ['custom', 'Своя поза']].map(([key, label]) =>
+            h('button', { class: 'chip', type: 'button', role: 'radio', 'aria-checked': String(key === look.pose), dataset: { pose: key }, text: label, onclick: () => pick(key) })
+          )
+        );
+        const other = lookView === 'card' ? 'detail' : 'card';
+        UI.append(clear(controls), [
+          h('div', { class: 'my-card__group' }, h('p', { class: 'field__label', text: 'Поза' }), poseChips),
+          look.pose === 'custom' && custom(look),
+          slider({ label: 'Размер', min: Math.round(Api.LOOK.scale[0] * 100), max: Math.round(Api.LOOK.scale[1] * 100), value: Math.round(look.scale * 100), unit: '%', onInput: (v) => ((look.scale = v / 100), change()) }),
+          slider({ label: 'Поворот фигуры', min: -Api.LOOK.turn, max: Api.LOOK.turn, value: look.turn, unit: '°', onInput: (v) => ((look.turn = v), change()) }),
+          h(
+            'div',
+            { class: 'actions-row' },
+            h('button', {
+              class: 'btn btn--sm btn--secondary',
+              type: 'button',
+              text: other === 'detail' ? 'Как в окне игрока' : 'Как на карточке',
+              title: 'Взять позу, размер и поворот с другого вида',
+              onclick: () => {
+                looks[lookView] = JSON.parse(JSON.stringify(looks[other]));
+                render();
+                change();
+              },
+            }),
+            h('button', {
+              class: 'btn btn--sm btn--ghost',
+              type: 'button',
+              text: 'Сбросить',
+              onclick: () => {
+                looks[lookView] = { pose: 'stand', scale: 1, turn: 0 };
+                render();
+                change();
+              },
+            })
+          ),
+        ]);
+        if (focus) controls.querySelector(focus)?.focus();
+      }
+
+      function custom(look) {
+        const parts = h(
+          'div',
+          { class: 'chips chips--sm', role: 'radiogroup', 'aria-label': 'Часть тела' },
+          Skin3D.PARTS.map(({ key, label }) =>
+            h('button', {
+              class: 'chip',
+              type: 'button',
+              role: 'radio',
+              'aria-checked': String(key === part),
+              dataset: { part: key },
+              text: label,
+              onclick: () => {
+                part = key;
+                render(`[data-part="${key}"]`);
+              },
+            })
+          )
+        );
+        return h(
+          'div',
+          { class: 'look__custom' },
+          h('p', { class: 'field__label', text: 'Что двигаем' }),
+          parts,
+          AXES[part].map(([label, sign], i) =>
+            slider({ label, min: -Api.LOOK.angle, max: Api.LOOK.angle, value: sign * look.angles[part][i] || 0, unit: '°', onInput: (v) => ((look.angles[part][i] = sign * v), change()) })
+          ),
+          slider({ label: 'Присесть', min: 0, max: -Api.LOOK.lift[0], value: -look.angles.lift || 0, onInput: (v) => ((look.angles.lift = -v || 0), change()) })
+        );
+      }
+
+      render();
+      return h(
+        'div',
+        { class: 'my-card__group look' },
+        h('p', { class: 'field__label', text: 'Персонаж' }),
+        h('p', { class: 'card-sub', text: 'На маленькой карточке и в окне игрока персонаж может стоять по-разному. Выберите позу или соберите свою.' }),
+        tabs,
+        controls,
+        status
+      );
+    }
+
+    function cardSection(p) {
+      // Фон — сразу, с предпросмотром. Своя картинка сжимается в браузере и хранится на сайте.
+      const pickBackground = (key) => {
+        data.card.background = key;
+        data.card.backgroundUrl = key === 'custom' ? data.customBackground : null;
+        refreshPreview();
+        save({ background: key }, 'Фон сохранён');
+      };
+      const swatch = (key, label, extra) =>
+        h('button', {
+          class: 'swatch ' + (extra ? 'swatch--custom' : 'bg--' + key),
+          type: 'button',
+          role: 'radio',
+          'aria-checked': String(key === (p.background === 'custom' ? 'custom' : backgroundOf(p))),
+          'aria-label': label,
+          title: label,
+          onclick: (e) => {
+            bgGroup.querySelectorAll('.swatch').forEach((b) => b.setAttribute('aria-checked', String(b === e.currentTarget)));
+            pickBackground(key);
+          },
+        });
+      const customSwatch = data.customBackground && swatch('custom', 'Своя картинка', true);
+      if (customSwatch) customSwatch.style.backgroundImage = `url("${data.customBackground}")`;
+      const bgGroup = h('div', { class: 'swatches', role: 'radiogroup', 'aria-label': 'Фон' }, customSwatch, Object.entries(Api.CARD_BACKGROUNDS).map(([key, label]) => swatch(key, label)));
+
+      const bgInput = h('input', { class: 'visually-hidden', type: 'file', accept: 'image/jpeg,image/png,image/webp,image/avif,image/gif', id: 'bg-file' });
+      const bgUpload = h('label', { class: 'btn btn--sm btn--secondary', for: 'bg-file' }, icon('upload'), data.customBackground ? 'Другая картинка' : 'Своя картинка');
+      bgInput.addEventListener('change', async () => {
+        const file = bgInput.files[0];
+        bgInput.value = '';
+        if (!file) return;
+        UI.setLoading(bgUpload, true);
+        try {
+          data = await Api.players.uploadBackground(file);
+          UI.toast('Фон загружен', { type: 'success' });
+          draw();
+        } catch (err) {
+          UI.toast(err.message, { type: 'error' });
+          UI.setLoading(bgUpload, false);
+        }
+      });
+      const bgRemove =
+        data.customBackground &&
+        h('button', {
+          class: 'btn btn--sm btn--ghost',
+          type: 'button',
+          text: 'Удалить картинку',
+          onclick: async () => {
+            try {
+              data = await Api.players.removeBackground();
+              UI.toast('Картинка удалена');
+              draw();
+            } catch (err) {
+              UI.toast(err.message, { type: 'error' });
+            }
+          },
+        });
 
       // «О себе» и соцсети — по кнопке «Сохранить».
       const form = h('form', { class: 'my-card__form', novalidate: true });
@@ -482,8 +741,15 @@
           h(
             'div',
             { class: 'my-card__controls' },
-            h('div', { class: 'my-card__group' }, h('p', { class: 'field__label', text: 'Поза' }), poseGroup),
-            h('div', { class: 'my-card__group' }, h('p', { class: 'field__label', text: 'Фон' }), bgGroup),
+            lookSection(),
+            h(
+              'div',
+              { class: 'my-card__group' },
+              h('p', { class: 'field__label', text: 'Фон' }),
+              bgGroup,
+              h('div', { class: 'actions-row' }, bgInput, bgUpload, bgRemove),
+              h('p', { class: 'field__hint', text: 'Своя картинка: JPEG, PNG или WebP. Сайт сам уменьшит её и сожмёт — обычно до 100–300 КБ.' })
+            ),
             form,
             h('div', { class: 'my-card__group' }, hiddenToggle, fieldsToggle, fieldsBox)
           )
@@ -492,7 +758,7 @@
     }
 
     function skinSection(p) {
-      viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, pose: p.pose, label: 'Ваш скин' });
+      viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look: looks.detail, label: 'Ваш скин' });
       const skin = data.skin;
       const input = h('input', { class: 'visually-hidden', type: 'file', accept: 'image/png', id: 'skin-file' });
       const uploadBtn = h('label', { class: 'btn', for: 'skin-file' }, icon('upload'), skin ? 'Загрузить другой' : 'Загрузить скин');
@@ -503,7 +769,7 @@
       function drawStatus() {
         clear(status);
         if (!skin) {
-          const standard = /skin-default/.test(p.skinUrl || '');
+          const standard = p.skinDefault;
           status.append(
             h('p', {
               class: 'skin-sync__text',
@@ -618,7 +884,7 @@
       const drop = h(
         'div',
         { class: 'skin-drop' },
-        h('div', { class: 'pdetail__stage skin-drop__stage bg--' + backgroundOf(p) }, viewer.el),
+        paintBackground(h('div', { class: 'pdetail__stage skin-drop__stage' }, viewer.el), p),
         h(
           'div',
           { class: 'skin-drop__side' },
@@ -644,29 +910,6 @@
       return h('section', { class: 'card card--pad' }, h('h2', { class: 'card-title', text: 'Мой скин' }), h('div', { class: 'card-content' }, drop));
     }
 
-    function radioChips(label, options, current, onPick) {
-      const group = h(
-        'div',
-        { class: 'chips', role: 'radiogroup', 'aria-label': label },
-        Object.entries(options).map(([key, text]) =>
-          h('button', {
-            class: 'chip',
-            type: 'button',
-            role: 'radio',
-            'aria-checked': String(key === (current || 'stand')),
-            text,
-            onclick: (e) => {
-              group.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-checked', String(c === e.currentTarget)));
-              data.card.pose = key;
-              refreshPreview();
-              onPick(key);
-            },
-          })
-        )
-      );
-      return group;
-    }
-
     function checkbox(label, hint, checked, onChange) {
       const input = h('input', { type: 'checkbox', checked, onchange: (e) => onChange(e.target.checked) });
       return h('label', { class: 'checkbox checkbox--hint' }, input, h('span', null, h('span', { class: 'checkbox__label', text: label }), h('span', { class: 'checkbox__hint', text: hint })));
@@ -676,5 +919,16 @@
     return root;
   }
 
-  window.Players = { card, openDetails, mount, showcase, editor, format: { hours, distance, num } };
+  window.Players = {
+    card,
+    openDetails,
+    mount,
+    showcase,
+    editor,
+    /** fn() → может ли текущий человек убирать чужие картинки фона (кабинет: право «Люди»). */
+    allowModeration: (fn) => {
+      canModerate = fn;
+    },
+    format: { hours, distance, num },
+  };
 })();

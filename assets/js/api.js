@@ -61,6 +61,14 @@
   const CARD_POSES = { stand: 'Стоит', wave: 'Машет', walk: 'Идёт', cheer: 'Ура!', point: 'Указывает', sit: 'Сидит' };
   const CARD_BACKGROUNDS = { meadow: 'Луг', night: 'Ночь', sunset: 'Закат', ocean: 'Океан', cave: 'Пещера', snow: 'Снег', nether: 'Незер', end: 'Энд' };
   /**
+   * Как стоит персонаж: отдельно на маленькой карточке (card) и в окне игрока (detail).
+   * { pose: ключ | 'custom', angles (у custom): { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift }, scale, turn }.
+   * Пределы — как в server/lib/validate.js → LOOK.
+   */
+  const LOOK = { views: { card: 'Карточка', detail: 'Окно игрока' }, parts: ['head', 'body', 'rightArm', 'leftArm', 'rightLeg', 'leftLeg'], angle: 180, lift: [-12, 0], scale: [0.6, 1.3], turn: 180 };
+  /** Свой фон: кабинет уменьшает картинку до side точек и сжимает в WebP, чтобы файл был не больше bytes. */
+  const BACKGROUND = { side: 1280, bytes: 400 * 1024, sourceBytes: 25 * 1024 * 1024 };
+  /**
    * Соцсети на карточке. Хранится только ник (pattern — как в server/lib/validate.js → SOCIALS),
    * ссылку собирает страница: url + ник. Без url (Discord) — ник копируется.
    * hosts — с каких адресов можно вставить ссылку целиком: ник из неё достанет parseSocial.
@@ -184,7 +192,26 @@
         if (!Array.isArray(d.hideFields) || d.hideFields.length > keys.length || d.hideFields.some((k) => !keys.includes(k))) f.hideFields = 'Неизвестное поле карточки.';
       }
       if (d.pose !== undefined && !Object.hasOwn(CARD_POSES, d.pose)) f.pose = 'Такой позы нет.';
-      if (d.background !== undefined && !Object.hasOwn(CARD_BACKGROUNDS, d.background)) f.background = 'Такого фона нет.';
+      if (d.background !== undefined && d.background !== 'custom' && !Object.hasOwn(CARD_BACKGROUNDS, d.background)) f.background = 'Такого фона нет.';
+      if (d.looks !== undefined) {
+        const inRange = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+        const lookError = (v) => {
+          if (!v || typeof v !== 'object') return 'Нужны настройки позы.';
+          if (v.pose !== 'custom' && !Object.hasOwn(CARD_POSES, v.pose)) return 'Такой позы нет.';
+          if (v.scale !== undefined && !inRange(v.scale, ...LOOK.scale)) return `Размер — от ${LOOK.scale[0]} до ${LOOK.scale[1]}.`;
+          if (v.turn !== undefined && !inRange(v.turn, -LOOK.turn, LOOK.turn)) return `Поворот — от −${LOOK.turn}° до ${LOOK.turn}°.`;
+          if (v.pose === 'custom') {
+            const a = v.angles;
+            if (!a || typeof a !== 'object') return 'Для своей позы нужны углы.';
+            if (LOOK.parts.some((p) => !Array.isArray(a[p]) || a[p].length !== 3 || a[p].some((x) => !inRange(x, -LOOK.angle, LOOK.angle)))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
+            if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
+          }
+          return '';
+        };
+        if (!d.looks || typeof d.looks !== 'object' || Array.isArray(d.looks)) f.looks = 'Нужны настройки позы.';
+        else for (const [view, look] of Object.entries(d.looks)) f.looks = f.looks || (Object.hasOwn(LOOK.views, view) ? lookError(look) : 'Нет такого вида карточки.');
+        if (!f.looks) delete f.looks;
+      }
       if (d.socials !== undefined) {
         if (!d.socials || typeof d.socials !== 'object' || Array.isArray(d.socials)) f.socials = { _: 'Нужен список соцсетей.' };
         else {
@@ -272,6 +299,38 @@
   };
 
   /** Загрузка файла с прогрессом (fetch не умеет показывать прогресс отправки). headers — дополнительные заголовки. */
+  /** Картинка → Blob WebP (или JPEG) не больше BACKGROUND.side точек по стороне и BACKGROUND.bytes. */
+  async function compressBackground(file) {
+    if (!file) throw new ApiError('VALIDATION', 'Выберите картинку.');
+    if (file.type && !file.type.startsWith('image/')) throw new ApiError('VALIDATION', 'Нужна картинка: JPEG, PNG, WebP.');
+    if (file.size > BACKGROUND.sourceBytes) throw new ApiError('VALIDATION', 'Картинка больше 25 МБ — выберите поменьше.');
+    let img;
+    try {
+      img = await createImageBitmap(file);
+    } catch (e) {
+      throw new ApiError('VALIDATION', 'Не получилось открыть картинку. Подойдут JPEG, PNG, WebP.');
+    }
+    const encode = (canvas, type, quality) => new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+    try {
+      // Сначала крупно и почти без потерь; не влезает — меньше и сильнее.
+      for (const [side, quality] of [[BACKGROUND.side, 0.82], [BACKGROUND.side, 0.65], [960, 0.6], [720, 0.5]]) {
+        const k = Math.min(1, side / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * k));
+        canvas.height = Math.max(1, Math.round(img.height * k));
+        const g = canvas.getContext('2d');
+        g.imageSmoothingQuality = 'high';
+        g.drawImage(img, 0, 0, canvas.width, canvas.height);
+        let blob = await encode(canvas, 'image/webp', quality);
+        if (!blob || blob.type !== 'image/webp') blob = await encode(canvas, 'image/jpeg', quality);
+        if (blob && blob.size <= BACKGROUND.bytes) return blob;
+      }
+    } finally {
+      img.close && img.close();
+    }
+    throw new ApiError('VALIDATION', 'Не получилось сжать картинку до 400 КБ. Выберите другую.');
+  }
+
   function upload(path, file, onProgress, headers) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -338,6 +397,8 @@
     CARD_FIELDS,
     CARD_POSES,
     CARD_BACKGROUNDS,
+    LOOK,
+    BACKGROUND,
     SOCIALS,
     parseSocial,
     ApiError,
@@ -508,6 +569,20 @@
         if (!/^[A-Za-z0-9_]{3,16}$/.test(nick)) return Promise.reject(new ApiError('VALIDATION', 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.', { fields: { nickname: 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.' } }));
         return http('POST', '/me/skin/nick', { nickname: nick }).then((d) => (emit('players'), d));
       },
+      /**
+       * Свой фон. Картинку уменьшает и сжимает браузер (WebP; где WebP не умеют сохранять — JPEG),
+       * на сервер уходит уже маленький файл. → как myCard
+       */
+      async uploadBackground(file, onProgress) {
+        const blob = await compressBackground(file);
+        const d = await upload('/me/background', blob, onProgress);
+        emit('players');
+        return d;
+      },
+      /** Убрать свою картинку (фон станет «Луг»). */
+      removeBackground: () => http('DELETE', '/me/background').then((d) => (emit('players'), d)),
+      /** Админ с правом «Люди»: убрать чужую картинку фона. → карточка */
+      removePlayerBackground: (nickname) => http('DELETE', `/players/${enc(nickname)}/background`).then((d) => (emit('players'), d.player)),
       onChange: (cb) => on('players', cb),
     },
 

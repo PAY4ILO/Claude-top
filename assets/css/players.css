@@ -61,6 +61,14 @@
     linear-gradient(180deg, transparent 74%, #e9e5a6 74%, #d8d38f 100%),
     linear-gradient(180deg, #120a1f 0%, #3b2357 74%);
 }
+/* Своя картинка игрока: адрес ставит players.js (paintBackground) через el.style.backgroundImage. */
+.bg--custom,
+.swatch--custom {
+  background-color: #23304a;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
 
 /* ------------------------------------------------------------ сетка */
 
@@ -508,6 +516,63 @@
 .swatch[aria-checked='true'] {
   border-color: #fff;
 }
+.chips--sm .chip {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------ персонаж: поза для карточки и для окна */
+
+.look__tabs {
+  margin-top: 2px;
+}
+.look__controls {
+  display: grid;
+  gap: 14px;
+}
+.look__custom {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  background: var(--c-field);
+}
+.look__slider {
+  display: grid;
+  grid-template-columns: minmax(0, 130px) minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+.look__name {
+  color: var(--c-text-2);
+}
+.look__range {
+  width: 100%;
+  accent-color: var(--c-blue-2);
+}
+.look__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text-3);
+}
+.look__status {
+  min-height: 1.4em;
+  font-size: 13px;
+  color: var(--c-text-3);
+}
+.my-card__stage {
+  min-height: 380px;
+}
+.my-card__caption {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--c-text-3);
+}
+.pdetail__moderate {
+  justify-self: start;
+}
 
 /* ------------------------------------------------------------ своя карточка (профиль) */
 
@@ -695,6 +760,16 @@
   }
   .my-card__preview {
     max-width: 280px;
+  }
+  .my-card__preview:has(.my-card__stage) {
+    max-width: none;
+  }
+  .look__slider {
+    grid-template-columns: minmax(0, 1fr) 48px;
+    gap: 4px 12px;
+  }
+  .look__name {
+    grid-column: 1 / -1;
   }
 }
 @media (max-width: 400px) {

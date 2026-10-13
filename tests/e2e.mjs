@@ -346,7 +346,13 @@ ok('окно закрывается по Esc', true);
 
 // Профиль: поза, фон, «о себе», соцсети, свой скин.
 await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card .chip');
-await B.click('.my-card .chip:has-text("Машет")'); await B.waitForSelector('.toast:has-text("Поза сохранена")'); await settle(B, 300);
+await B.click('.my-card .chip:has-text("Машет")'); await B.waitForSelector('.look__status:has-text("Сохранено")'); await settle(B, 300);
+// Окно игрока — своя поза: двигаем руку ползунком, маленькая карточка остаётся «Машет».
+await B.click('.look__tabs [role=tab]:has-text("Окно игрока")'); await B.click('.my-card .chip:has-text("Своя поза")');
+await B.focus('.look__custom .look__range'); await B.keyboard.press('ArrowLeft', { delay: 10 }); await B.keyboard.press('ArrowLeft');
+await B.waitForSelector('.look__status:has-text("Сохранено")'); await settle(B, 800);
+const looks = (await (await B.request.get(BASE + '/api/me/card')).json()).looks;
+ok('своя поза для окна игрока, карточка — «Машет»', looks.detail.pose === 'custom' && looks.detail.angles && looks.card.pose === 'wave', JSON.stringify(looks));
 await B.click('.my-card .swatch[aria-label="Незер"]'); await B.waitForSelector('.toast:has-text("Фон сохранён")'); await settle(B, 300);
 await B.fill('.my-card textarea[name=bio]', 'Строю мосты над лавой');
 await B.fill('.my-card input[name=social-telegram]', 'https://t.me/hawker_tg');
@@ -357,6 +363,12 @@ await B.fill('.my-card input[name=social-youtube]', '');
 await B.click('.my-card__form button[type=submit]'); await B.waitForSelector('.toast:has-text("Карточка сохранена")'); await settle(B, 300);
 const saved = await (await B.request.get(BASE + '/api/me/card')).json();
 ok('карточка сохранена: поза, фон, «о себе», ник из ссылки Telegram', saved.pose === 'wave' && saved.background === 'nether' && saved.bio === 'Строю мосты над лавой' && saved.socials.telegram === 'hawker_tg', JSON.stringify({ pose: saved.pose, background: saved.background, socials: saved.socials }));
+// Свой фон: браузер сжимает картинку, сервер хранит и отдаёт её сам.
+await B.setInputFiles('#bg-file', path.join(HERE, '../assets/img/hero.webp'));
+await B.waitForSelector('.toast:has-text("Фон загружен")'); await settle(B, 300);
+const withBg = await (await B.request.get(BASE + '/api/me/card')).json();
+const bgFile = withBg.customBackground ? await B.request.get(BASE + withBg.customBackground) : null;
+ok('свой фон загружен, сжат и отдаётся сайтом', withBg.background === 'custom' && bgFile && bgFile.status() === 200 && (await bgFile.body()).length <= 400 * 1024 && (await B.locator('.my-card .swatch--custom[aria-checked="true"]').count()) === 1, JSON.stringify({ background: withBg.background, url: withBg.customBackground }));
 await B.setInputFiles('#skin-file', path.join(HERE, '../assets/img/skin-default.png'));
 await B.waitForSelector('.toast:has-text("Скин загружен")'); await settle(B, 300);
 ok('свой скин загружен; без RCON — честно «поставит администрация»', (await B.locator('.skin-sync__text').innerText()).includes('администрация') && (await B.locator('button:has-text("Как в игре")').count()) === 1);
@@ -373,6 +385,7 @@ const guestCard = await G.locator('.pcard[data-nick="__Hawker__"]').innerText();
 ok('гость видит карточку: «о себе» и Telegram, но без статистики и «в сети»', guestCard.includes('Строю мосты над лавой') && guestCard.includes('Telegram') && !guestCard.includes('12 ч') && !/в сети/.test(guestCard), guestCard.replace(/\s+/g, ' '));
 ok('гостю — пояснение про статистику, без вкладок', !(await G.locator('[data-players-note]').isHidden()) && (await G.locator('.players__tabs').isHidden()));
 ok('ссылка Telegram собрана сайтом', (await G.locator('.pcard[data-nick="__Hawker__"] a.social--telegram').getAttribute('href')) === 'https://t.me/hawker_tg');
+ok('гость видит свой фон игрока', (await G.locator('.pcard[data-nick="__Hawker__"] .bg--custom').count()) === 1);
 await G.waitForSelector('[data-online]:not([hidden])');
 ok('«Сейчас на сервере: 1»', (await G.locator('[data-online]').innerText()).includes('Сейчас на сервере: 1'));
 ok('players.html на 320px без горизонтальной прокрутки', await G.evaluate(() => document.documentElement.scrollWidth <= 320));
