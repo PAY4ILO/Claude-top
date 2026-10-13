@@ -295,7 +295,10 @@
           const sh = Math.abs(v2 - v1) * tw;
           // Чуть шире, чтобы между гранями не просвечивали щели (у плоских предметов — нельзя, видно край).
           const e = f.layer ? 0 : Math.min(0.3, 0.5 / Math.max(1e-6, Math.hypot(cu[0], cu[1])));
-          g.drawImage(window.McArt.prepared(f.tex, f.tint, f.shade), sx, sy, sw, sh, sx - e, sy - e, sw + 2 * e, sh + 2 * e);
+          const img = window.McArt.prepared(f.tex, f.tint, f.shade);
+          // Целые пиксели — через рамку из своих же краёв (как у скина), иначе по краям видны полосы соседних пикселей.
+          if ([sx, sy, sw, sh].every(Number.isInteger) && sw > 0 && sh > 0) g.drawImage(faceTile(img, sx, sy, sw, sh), 1, 1, sw, sh, sx - e, sy - e, sw + 2 * e, sh + 2 * e);
+          else g.drawImage(img, sx, sy, sw, sh, sx - e, sy - e, sw + 2 * e, sh + 2 * e);
           if (hits && key) {
             const n = cross(sub(f.G[3], f.G[0]), sub(f.G[1], f.G[0]));
             hits.push({ key, poly: [S[0], S[1], S[2], S[3]], normal: norm(flip ? mul(n, -1) : n) });
@@ -378,7 +381,7 @@
    * Возвращает, как сцена легла на холст (для колец редактора), или null без скина.
    */
   /**
-   * Грань скина отдельной картинкой с рамкой в 1 точку из её же крайних пикселей. Браузер при повороте и масштабе
+   * Грань скина (или текстуры предмета/блока) отдельной картинкой с рамкой в 1 точку из её же крайних пикселей. Браузер при повороте и масштабе
    * берёт пиксели чуть за краем прямоугольника — из соседнего места скина, отсюда тёмные полосы по краям частей.
    */
   const tiles = new WeakMap();
