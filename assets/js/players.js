@@ -151,7 +151,7 @@
   /* ------------------------------------------------------------ подробности */
 
   function openDetails(p) {
-    const look = lookOf(p, 'detail');
+    let look = lookOf(p, 'detail');
     const viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look, label: `Скин игрока ${p.nickname}` });
     // Своя поза игрока — первой кнопкой, чтобы к ней можно было вернуться.
     const options = [...(look.pose === 'custom' ? [['custom', 'Как у игрока']] : []), ...Object.entries(Api.CARD_POSES)];
@@ -167,7 +167,8 @@
           text: label,
           onclick: (e) => {
             poses.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-checked', String(c === e.currentTarget)));
-            viewer.set({ look: key === 'custom' ? look : { pose: key, scale: look.scale, turn: look.turn } });
+            // Другая поза — предметы, блоки, размер и сдвиг остаются, как у игрока.
+            viewer.set({ look: key === 'custom' ? look : { ...look, pose: key, angles: undefined } });
           },
         })
       )
@@ -198,6 +199,34 @@
           }
         },
       });
+    // Свои картинки 16×16 (предметы и блоки из них) тоже видят все.
+    const hasTextures = Object.values(p.looks || {}).some((v) => v.textures && v.textures.length);
+    const moderateTextures =
+      hasTextures &&
+      canModerate() &&
+      h('button', {
+        class: 'btn btn--sm btn--ghost pdetail__moderate',
+        type: 'button',
+        text: 'Убрать свои картинки',
+        onclick: async (e) => {
+          const btn = e.currentTarget;
+          const ok = await UI.confirm({
+            title: 'Убрать свои картинки?',
+            text: `Картинки ${p.nickname} 16×16 и всё, что из них сделано (предметы в руках, на голове и блоки), пропадут с обеих поз. Остальное останется.`,
+            confirmText: 'Убрать',
+          });
+          if (!ok) return;
+          try {
+            const next = await Api.players.removePlayerTextures(p.nickname);
+            look = lookOf(next, 'detail');
+            viewer.set({ look });
+            btn.remove();
+            UI.toast('Свои картинки убраны');
+          } catch (err) {
+            UI.toast(err.message, { type: 'error' });
+          }
+        },
+      });
     const stats = p.stats ? STAT_ROWS.filter((r) => typeof p.stats[r.key] === 'number') : [];
     const ranks = ranksOf(p);
     const dates = [
@@ -220,7 +249,8 @@
         dates.length > 0 && h('dl', { class: 'pdetail__dates' }, dates.map(([k, v]) => h('div', null, h('dt', { text: k }), h('dd', { text: v })))),
         p.full === false && h('p', { class: 'pdetail__note', text: 'Статистика из игры видна игрокам сервера после входа на сайт.' }),
         p.statsAt && h('p', { class: 'pdetail__note', text: 'Статистика обновлена ' + UI.relative(p.statsAt) + '.' }),
-        moderate
+        moderate,
+        moderateTextures
       )
     );
     UI.modal({ title: p.nickname, content, size: 'wide', onClose: () => viewer.destroy() });
@@ -427,22 +457,8 @@
 
     let preview;
     let viewer;
-    // Как стоит персонаж — рабочая копия: предпросмотр меняется сразу, на сервер уходит чуть позже.
+    // Как стоит персонаж (поза, предметы, блоки) — правится в студии персонажа (#/studio); здесь только карточка и ссылка.
     let looks;
-    let lookView = 'card';
-    let previewFigure = null;
-    let previewViewer = null;
-    // Своя поза: редактор с кольцами (как в Blockbench) вместо предпросмотра; какая часть выбрана — общее с кнопками справа.
-    let previewPoser = null;
-    let lookPart = 'rightArm';
-    let lookUi = null; // связь с настройками справа: { selectPart, begin, moved, undo }
-
-    // Ctrl+Z — отменить последнее изменение позы (кроме полей ввода текста).
-    root.addEventListener('keydown', (e) => {
-      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.code !== 'KeyZ') return;
-      if (e.target.closest('textarea, input:not([type=range])')) return;
-      if (lookUi && lookUi.undo()) e.preventDefault();
-    });
 
     function draw() {
       if (viewer) viewer.destroy();
@@ -453,287 +469,35 @@
       clear(root).append(cardSection(p), skinSection(p));
     }
 
-    /** Слева — то, что сейчас настраивают: маленькая карточка или окно игрока. */
+    /** Слева — маленькая карточка, как её видят другие. */
     function refreshPreview() {
-      if (previewViewer) previewViewer.destroy();
-      if (previewPoser) previewPoser.destroy();
-      previewViewer = null;
-      previewFigure = null;
-      previewPoser = null;
-      const p = { ...data.card, looks, full: true };
-      const look = looks[lookView];
-      if (look.pose === 'custom') {
-        const isCard = lookView === 'card';
-        const poser = Skin3D.poser({
-          url: p.skinUrl,
-          slim: p.skinSlim,
-          look,
-          part: lookPart,
-          // Камера в начале — как на карточке или как в окне игрока.
-          yaw: isCard ? 28 : 25,
-          pitch: isCard ? 8 : 10,
-          label: isCard ? 'Своя поза для карточки' : 'Своя поза для окна игрока',
-          onSelect: (key) => lookUi && lookUi.selectPart(key),
-          onStart: () => lookUi && lookUi.begin(),
-          onChange: () => lookUi && lookUi.moved(),
-        });
-        previewPoser = poser;
-        poser.el.append(h('button', { class: 'skin3d__play poser__reset btn btn--sm btn--ghost', type: 'button', text: isCard ? 'Как на карточке' : 'Как в окне', title: 'Вернуть камеру', onclick: () => poser.resetCamera() }));
-        preview.replaceChildren(
-          paintBackground(h('div', { class: 'pdetail__stage my-card__stage' }, poser.el), p),
-          h('p', { class: 'my-card__caption', text: 'Нажмите на голову, руку, ногу или тело и тяните цветные кольца: красное — вперёд-назад, зелёное — вращение, синее — в сторону. У тела справа стрелка «присесть». Пустое место — повернуть камеру. Shift — шаг 15°, Ctrl+Z — отменить.' })
-        );
-        return;
-      }
-      if (lookView === 'detail') {
-        previewViewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look: looks.detail, label: 'Окно игрока — предпросмотр', animate: false });
-        preview.replaceChildren(
-          paintBackground(h('div', { class: 'pdetail__stage my-card__stage' }, previewViewer.el), p),
-          h('p', { class: 'my-card__caption', text: 'Так персонаж стоит в окне, которое открывается по нажатию на карточку.' })
-        );
-      } else {
-        const el = card(p);
-        previewFigure = el.querySelector('.skin3d__figure');
-        preview.replaceChildren(el);
-      }
+      looks = JSON.parse(JSON.stringify(data.looks));
+      preview.replaceChildren(card({ ...data.card, looks, full: true }));
     }
 
-    function livePreview() {
-      const look = looks[lookView];
-      // Перешли со своей позы на готовую или обратно — другой предпросмотр.
-      if ((look.pose === 'custom') !== !!previewPoser) return refreshPreview();
-      if (previewPoser) previewPoser.set({ look, part: lookPart });
-      else if (lookView === 'card' && previewFigure) previewFigure.update(look);
-      else if (lookView === 'detail' && previewViewer) previewViewer.set({ look });
+    /** Коротко, что настроено в виде: поза, предметы, блоки. */
+    function describeLook(look) {
+      const out = [look.pose === 'custom' ? 'своя поза' : (Api.CARD_POSES[look.pose] || Api.CARD_POSES.stand).toLowerCase()];
+      const held = Object.keys(look.held || {}).length;
+      const blocks = (look.blocks || []).length;
+      if (held) out.push(`${held} ${UI.plural(held, 'предмет', 'предмета', 'предметов')}`);
+      if (blocks) out.push(`${blocks} ${UI.plural(blocks, 'блок', 'блока', 'блоков')}`);
+      return out.join(', ');
     }
 
-    /* Персонаж: поза (или своя — ползунками), размер и поворот; отдельно для карточки и для окна. */
-
-    // Подписи осей для каждой части; знак — чтобы «вправо» на ползунке значило «вперёд» / «в сторону от тела».
-    const AXES = {
-      head: [['Кивок', 1], ['Поворот', 1], ['Наклон к плечу', 1]],
-      body: [['Наклон вперёд', 1], ['Поворот', 1], ['Наклон вбок', 1]],
-      rightArm: [['Вперёд — назад', -1], ['Вращение', 1], ['В сторону', -1]],
-      leftArm: [['Вперёд — назад', -1], ['Вращение', 1], ['В сторону', 1]],
-      rightLeg: [['Вперёд — назад', -1], ['Вращение', 1], ['В сторону', -1]],
-      leftLeg: [['Вперёд — назад', -1], ['Вращение', 1], ['В сторону', 1]],
-    };
-
-    // Ползунки углов, которые надо подвинуть, когда позу меняют кольцами.
-    let sliderSync = [];
-
-    /** axis — 0/1/2: цветная метка оси, как у колец; read — откуда взять значение, когда его поменяли кольцами. */
-    function slider({ label, min, max, value, unit = '', onInput, axis, read }) {
-      const out = h('output', { class: 'look__value', text: value + unit });
-      const input = h('input', { class: 'look__range', type: 'range', min: String(min), max: String(max), step: '1', value: String(value), 'aria-label': label });
-      input.addEventListener('input', () => {
-        out.textContent = input.value + unit;
-        onInput(Number(input.value));
-      });
-      if (read) {
-        sliderSync.push(() => {
-          const v = read();
-          input.value = String(v);
-          out.textContent = v + unit;
-        });
-      }
-      return h(
-        'label',
-        { class: 'look__slider', dataset: axis === undefined ? null : { axis: 'xyz'[axis] } },
-        h('span', { class: 'look__name' }, axis !== undefined && h('span', { class: 'look__axis', 'aria-hidden': 'true' }), label),
-        input,
-        out
-      );
-    }
-
+    /* Персонаж: всё — в студии; здесь — что сейчас настроено и ссылка. */
     function lookSection() {
-      const status = h('p', { class: 'look__status', 'aria-live': 'polite' });
-      const persist = UI.debounce(async () => {
-        status.textContent = 'Сохраняю…';
-        try {
-          data = await Api.players.updateMyCard({ looks });
-          status.textContent = 'Сохранено';
-        } catch (err) {
-          status.textContent = '';
-          UI.toast(err.fields ? Object.values(err.fields)[0] : err.message, { type: 'error' });
-        }
-      }, 600);
-      // Отмена: перед каждой серией изменений (движение кольца, ползунка; пауза 0,6 с — новая серия) запоминаем, как было.
-      const history = [];
-      const snap = () => ({ view: lookView, look: JSON.parse(JSON.stringify(looks[lookView])) });
-      let before = snap();
-      let grouped = false;
-      let undoBtn = null;
-      const syncUndo = () => {
-        if (undoBtn) undoBtn.disabled = !history.length;
-      };
-      const settle = UI.debounce(() => {
-        grouped = false;
-        before = snap();
-      }, 600);
-      const change = () => {
-        if (!grouped) {
-          history.push(before);
-          if (history.length > 50) history.shift();
-          grouped = true;
-        }
-        settle();
-        livePreview();
-        persist();
-        syncUndo();
-      };
-      const newGroup = () => {
-        grouped = false;
-        before = snap();
-      };
-      function undo() {
-        const prev = history.pop();
-        if (!prev) return false;
-        looks[prev.view] = prev.look;
-        newGroup();
-        if (prev.view !== lookView) {
-          lookView = prev.view;
-          syncTabs();
-          refreshPreview();
-        } else livePreview();
-        render();
-        persist();
-        return true;
-      }
-      lookUi = {
-        selectPart(key) {
-          lookPart = key;
-          render();
-        },
-        begin: newGroup,
-        moved() {
-          change();
-          sliderSync.forEach((f) => f());
-        },
-        undo,
-      };
-      const controls = h('div', { class: 'look__controls' });
-      const syncTabs = () => tabs.querySelectorAll('.tabs__tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.key === lookView)));
-      const tabs = h(
-        'div',
-        { class: 'tabs look__tabs', role: 'tablist', 'aria-label': 'Что настраиваем' },
-        Object.entries(Api.LOOK.views).map(([key, label]) =>
-          h('button', {
-            class: 'tabs__tab',
-            type: 'button',
-            role: 'tab',
-            'aria-selected': String(key === lookView),
-            dataset: { key },
-            text: label,
-            onclick: () => {
-              lookView = key;
-              syncTabs();
-              newGroup();
-              refreshPreview();
-              render();
-            },
-          })
-        )
-      );
-
-      /** Перерисовать настройки; focus — селектор кнопки, на которую вернуть фокус. */
-      function render(focus) {
-        const look = looks[lookView];
-        sliderSync = [];
-        const pick = (key) => {
-          if (key === look.pose) return;
-          looks[lookView] =
-            key === 'custom'
-              ? { pose: 'custom', angles: Skin3D.poseAngles(look.pose), scale: look.scale, turn: look.turn }
-              : { pose: key, scale: look.scale, turn: look.turn };
-          render(`[data-pose="${key}"]`);
-          change();
-        };
-        const poseChips = h(
-          'div',
-          { class: 'chips', role: 'radiogroup', 'aria-label': 'Поза' },
-          [...Object.entries(Api.CARD_POSES), ['custom', 'Своя поза']].map(([key, label]) =>
-            h('button', { class: 'chip', type: 'button', role: 'radio', 'aria-checked': String(key === look.pose), dataset: { pose: key }, text: label, onclick: () => pick(key) })
-          )
-        );
-        const other = lookView === 'card' ? 'detail' : 'card';
-        UI.append(clear(controls), [
-          h('div', { class: 'my-card__group' }, h('p', { class: 'field__label', text: 'Поза' }), poseChips),
-          look.pose === 'custom' && custom(look),
-          slider({ label: 'Размер', min: Math.round(Api.LOOK.scale[0] * 100), max: Math.round(Api.LOOK.scale[1] * 100), value: Math.round(look.scale * 100), unit: '%', onInput: (v) => ((look.scale = v / 100), change()) }),
-          slider({ label: 'Поворот фигуры', min: -Api.LOOK.turn, max: Api.LOOK.turn, value: look.turn, unit: '°', onInput: (v) => ((look.turn = v), change()) }),
-          h(
-            'div',
-            { class: 'actions-row' },
-            h('button', {
-              class: 'btn btn--sm btn--secondary',
-              type: 'button',
-              text: other === 'detail' ? 'Как в окне игрока' : 'Как на карточке',
-              title: 'Взять позу, размер и поворот с другого вида',
-              onclick: () => {
-                looks[lookView] = JSON.parse(JSON.stringify(looks[other]));
-                render();
-                change();
-              },
-            }),
-            h('button', {
-              class: 'btn btn--sm btn--ghost',
-              type: 'button',
-              text: 'Сбросить',
-              onclick: () => {
-                looks[lookView] = { pose: 'stand', scale: 1, turn: 0 };
-                render();
-                change();
-              },
-            }),
-            (undoBtn = h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Отменить', title: 'Ctrl+Z', disabled: !history.length, onclick: undo }))
-          ),
-        ]);
-        if (focus) controls.querySelector(focus)?.focus();
-      }
-
-      function custom(look) {
-        const parts = h(
-          'div',
-          { class: 'chips chips--sm', role: 'radiogroup', 'aria-label': 'Часть тела' },
-          Skin3D.PARTS.map(({ key, label }) =>
-            h('button', {
-              class: 'chip',
-              type: 'button',
-              role: 'radio',
-              'aria-checked': String(key === lookPart),
-              dataset: { part: key },
-              text: label,
-              onclick: () => {
-                lookPart = key;
-                if (previewPoser) previewPoser.set({ part: key });
-                render(`[data-part="${key}"]`);
-              },
-            })
-          )
-        );
-        return h(
-          'div',
-          { class: 'look__custom' },
-          h('p', { class: 'field__label', text: 'Что двигаем' }),
-          parts,
-          AXES[lookPart].map(([label, sign], i) => {
-            const read = () => sign * look.angles[lookPart][i] || 0;
-            return slider({ label, axis: i, read, min: -Api.LOOK.angle, max: Api.LOOK.angle, value: read(), unit: '°', onInput: (v) => ((look.angles[lookPart][i] = sign * v), change()) });
-          }),
-          slider({ label: 'Присесть', read: () => -look.angles.lift || 0, min: 0, max: -Api.LOOK.lift[0], value: -look.angles.lift || 0, onInput: (v) => ((look.angles.lift = -v || 0), change()) })
-        );
-      }
-
-      render();
       return h(
         'div',
         { class: 'my-card__group look' },
         h('p', { class: 'field__label', text: 'Персонаж' }),
-        h('p', { class: 'card-sub', text: 'На маленькой карточке и в окне игрока персонаж может стоять по-разному. Выберите позу или соберите свою.' }),
-        tabs,
-        controls,
-        status
+        h('p', { class: 'card-sub', text: 'Поза, предметы в руках, блоки вокруг и свои картинки — отдельно для маленькой карточки и для окна игрока.' }),
+        h(
+          'ul',
+          { class: 'look__summary' },
+          Object.entries(Api.LOOK.views).map(([key, label]) => h('li', {}, h('span', { class: 'look__summary-view', text: label + ': ' }), describeLook(looks[key] || { pose: 'stand' })))
+        ),
+        h('div', { class: 'actions-row' }, h('a', { class: 'btn btn--sm', href: '#/studio' }, icon('edit'), 'Открыть студию персонажа'))
       );
     }
 
@@ -1033,6 +797,8 @@
   }
 
   window.Players = {
+    lookOf,
+    paintBackground,
     card,
     openDetails,
     mount,

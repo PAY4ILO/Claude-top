@@ -2,6 +2,8 @@
  * Проверка данных на сервере. Правила ДОЛЖНЫ совпадать с validate/LIMITS в assets/js/api.js
  * (там те же проверки для мгновенных подсказок в форме). Меняете одно — меняйте и другое.
  */
+import { readFileSync } from 'node:fs';
+
 export const LIMITS = {
   nickname: { min: 3, max: 16, pattern: /^[A-Za-z0-9_]+$/ },
   password: { min: 8, max: 128 },
@@ -32,12 +34,53 @@ export const CARD_BACKGROUNDS = ['meadow', 'night', 'sunset', 'ocean', 'cave', '
 /**
  * Как стоит персонаж — отдельно на маленькой карточке (card) и в окне игрока (detail).
  * { pose: ключ позы | 'custom', angles: { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift } (только у custom),
- *   scale — размер фигуры, turn — поворот всей фигуры в градусах }.
+ *   scale — размер фигуры, turn — поворот всей фигуры в градусах,
+ *   offset — сдвиг фигуры в кадре [x, y],
+ *   held — что в руках и на голове: { rightHand, leftHand, head: { id, rot: [x, y, z], size, at: [x, y, z] } },
+ *   blocks — блоки вокруг: [{ id, at: [x, y, z] (низ-центр, 16 = блок), rot — поворот вокруг вертикали, size }],
+ *   textures — свои картинки игрока 16×16 (data:image/png), в held и blocks это id tex1…tex3 }.
+ * id предметов и блоков — из assets/js/mc-index.json (оглавление client.jar, собирает tools/mc-index.mjs).
  * Те же правила — в assets/js/api.js (LOOK).
  */
 export const LOOK_VIEWS = ['card', 'detail'];
 export const LOOK_PARTS = ['head', 'body', 'rightArm', 'leftArm', 'rightLeg', 'leftLeg'];
-export const LOOK = { angle: 180, lift: [-12, 0], scale: [0.6, 1.3], turn: 180 };
+export const LOOK_HELD = ['rightHand', 'leftHand', 'head'];
+export const LOOK = {
+  angle: 180,
+  lift: [-12, 0],
+  scale: [0.6, 1.3],
+  turn: 180,
+  offset: 40,
+  held: { rot: 180, size: [0.5, 2], at: 16 },
+  blocks: { max: 32, side: 96, y: [-48, 96], size: [0.25, 2] },
+  textures: { max: 3, chars: 4096, side: 16 },
+};
+
+// Какие блоки и предметы бывают — из оглавления игры (файл в репозитории, сеть не нужна).
+let mcIds = null;
+function mcKnown() {
+  if (!mcIds) {
+    mcIds = { blocks: new Set(), items: new Set() };
+    try {
+      const ix = JSON.parse(readFileSync(new URL('../../assets/js/mc-index.json', import.meta.url), 'utf8'));
+      for (const [id] of ix.blocks) mcIds.blocks.add(id);
+      for (const [id] of ix.items) mcIds.items.add(id);
+    } catch {
+      // Нет оглавления — разрешены только свои картинки.
+    }
+  }
+  return mcIds;
+}
+
+/** Своя картинка: PNG 16×16 в data:-адресе. */
+function textureOk(v) {
+  if (typeof v !== 'string' || v.length > LOOK.textures.chars) return false;
+  const m = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(v);
+  if (!m) return false;
+  const b = Buffer.from(m[1], 'base64');
+  const png = b.length > 24 && b.readUInt32BE(0) === 0x89504e47 && b.readUInt32BE(4) === 0x0d0a1a0a && b.toString('latin1', 12, 16) === 'IHDR';
+  return png && b.readUInt32BE(16) === LOOK.textures.side && b.readUInt32BE(20) === LOOK.textures.side;
+}
 
 const inRange = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
 
@@ -56,6 +99,39 @@ function lookError(v) {
     }
     if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
   }
+  const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
+  const vec = (x, n, check) => Array.isArray(x) && x.length === n && x.every((k, i) => check(k, i));
+  if (v.offset !== undefined && !vec(v.offset, 2, (k) => inRange(k, -LOOK.offset, LOOK.offset))) return `Сдвиг — от −${LOOK.offset} до ${LOOK.offset}.`;
+  if (v.textures !== undefined) {
+    if (!Array.isArray(v.textures) || v.textures.length > LOOK.textures.max) return `Своих картинок — не больше ${LOOK.textures.max}.`;
+    if (!v.textures.every(textureOk)) return 'Своя картинка — PNG 16×16.';
+  }
+  const known = mcKnown();
+  const texCount = Array.isArray(v.textures) ? v.textures.length : 0;
+  const tex = (id) => /^tex[1-3]$/.test(id) && Number(id.slice(3)) <= texCount;
+  if (v.held !== undefined) {
+    if (!isObj(v.held)) return 'Неверные предметы в руках.';
+    const H = LOOK.held;
+    for (const [slot, e] of Object.entries(v.held)) {
+      if (!LOOK_HELD.includes(slot)) return 'Предмет можно держать только в руках или на голове.';
+      if (e === null) continue;
+      if (!isObj(e) || typeof e.id !== 'string') return 'Неверный предмет.';
+      if (!known.items.has(e.id) && !known.blocks.has(e.id) && !tex(e.id)) return 'Такого предмета нет.';
+      if (e.rot !== undefined && !vec(e.rot, 3, (k) => inRange(k, -H.rot, H.rot))) return `Поворот предмета — от −${H.rot}° до ${H.rot}°.`;
+      if (e.size !== undefined && !inRange(e.size, ...H.size)) return `Размер предмета — от ${H.size[0]} до ${H.size[1]}.`;
+      if (e.at !== undefined && !vec(e.at, 3, (k) => inRange(k, -H.at, H.at))) return 'Предмет слишком далеко от руки.';
+    }
+  }
+  if (v.blocks !== undefined) {
+    const B = LOOK.blocks;
+    if (!Array.isArray(v.blocks) || v.blocks.length > B.max) return `Блоков — не больше ${B.max}.`;
+    for (const b of v.blocks) {
+      if (!isObj(b) || typeof b.id !== 'string' || (!known.blocks.has(b.id) && !tex(b.id))) return 'Такого блока нет.';
+      if (!vec(b.at, 3, (k, i) => (i === 1 ? inRange(k, ...B.y) : inRange(k, -B.side, B.side)))) return 'Блок слишком далеко.';
+      if (b.rot !== undefined && !inRange(b.rot, -180, 180)) return 'Поворот блока — от −180° до 180°.';
+      if (b.size !== undefined && !inRange(b.size, ...B.size)) return `Размер блока — от ${B.size[0]} до ${B.size[1]}.`;
+    }
+  }
   return '';
 }
 
@@ -68,6 +144,19 @@ export function normalizeLook(v) {
     out.angles = { lift: v.angles.lift === undefined ? 0 : round(v.angles.lift) };
     for (const part of LOOK_PARTS) out.angles[part] = v.angles[part].map((x) => round(x));
   }
+  const offset = v.offset ? v.offset.map((x) => round(x, 10)) : null;
+  if (offset && offset.some((x) => x)) out.offset = offset;
+  if (v.textures && v.textures.length) out.textures = [...v.textures];
+  if (v.held) {
+    const held = {};
+    for (const slot of LOOK_HELD) {
+      const e = v.held[slot];
+      if (!e) continue;
+      held[slot] = { id: e.id, rot: (e.rot || [0, 0, 0]).map((x) => round(x)), size: e.size === undefined ? 1 : round(e.size, 100), at: (e.at || [0, 0, 0]).map((x) => round(x, 10)) };
+    }
+    if (Object.keys(held).length) out.held = held;
+  }
+  if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => ({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: b.rot === undefined ? 0 : round(b.rot), size: b.size === undefined ? 1 : round(b.size, 100) }));
   return out;
 }
 // Соцсети на карточке: хранится только ник, ссылку собирает страница — чужой адрес в карточку не попадёт.

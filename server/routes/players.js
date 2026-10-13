@@ -18,6 +18,7 @@
  * Поза — отдельно для маленькой карточки и окна игрока (looks.card / looks.detail, см. LOOK в lib/validate.js);
  * старое поле pose повторяет позу маленькой карточки. Свой фон — PUT /api/me/background (картинку сжимает кабинет),
  * включается background = 'custom'; админ с правом «Люди» может его убрать (DELETE /api/players/<ник>/background).
+ * Так же — свои картинки 16×16 в позе (DELETE /api/players/<ник>/textures: картинки и всё, что на них ссылается).
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -267,7 +268,11 @@ export default function register(router, s) {
     // Поза по видам; старое поле pose — поза маленькой карточки.
     const nextLooks = { ...cur.looks };
     for (const view of LOOK_VIEWS) if (looks && looks[view]) nextLooks[view] = normalizeLook(looks[view]);
-    if (pose !== undefined && !(looks && looks.card)) nextLooks.card = { pose, scale: nextLooks.card.scale, turn: nextLooks.card.turn };
+    if (pose !== undefined && !(looks && looks.card)) {
+      // Готовая поза вместо своих углов; предметы, блоки и остальное остаются.
+      const { angles, ...rest } = nextLooks.card;
+      nextLooks.card = { ...rest, pose };
+    }
     const nextPose = nextLooks.card.pose === 'custom' ? cur.pose : nextLooks.card.pose;
     // Переводы строк и прочие управляющие символы — в пробелы: «о себе» — одна строка.
     const nextBio = bio === undefined ? cur.bio : bio.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, LIMITS.cardBio.max);
@@ -510,6 +515,29 @@ export default function register(router, s) {
     if (c && c.bg_file) {
       setBackground.run(null, c.background === 'custom' ? 'meadow' : c.background, Date.now(), row.user_id);
       s.backgrounds.release(c.bg_file);
+    }
+    return { player: view(byKey.get(row.nick_key), true) };
+  });
+
+  // Модерация своих картинок 16×16 (looks.<вид>.textures): их тоже видят все. Убираем картинки из обоих видов
+  // и всё, что на них ссылается (предметы tex1…tex3 в руках/на голове, такие же блоки); остальное остаётся.
+  router.add('DELETE', '/api/players/:nick/textures', (ctx) => {
+    need.perm(ctx, 'users');
+    const row = byKey.get(String(ctx.params.nick).trim().toLowerCase().slice(0, 32));
+    if (!row || !row.user_id) throw fail.notFound('Нет такого игрока.');
+    const c = cardOf.get(row.user_id);
+    if (c) {
+      const isTex = (id) => /^tex\d+$/.test(id);
+      const looks = parseLooks(c.looks, c.pose);
+      let changed = false;
+      for (const v of LOOK_VIEWS) {
+        const { textures, held, blocks, ...rest } = looks[v];
+        const keptHeld = held ? Object.fromEntries(Object.entries(held).filter(([, e]) => e && !isTex(e.id))) : {};
+        const keptBlocks = blocks ? blocks.filter((b) => !isTex(b.id)) : [];
+        if (textures || Object.keys(keptHeld).length !== Object.keys(held || {}).length || keptBlocks.length !== (blocks || []).length) changed = true;
+        looks[v] = { ...rest, ...(Object.keys(keptHeld).length ? { held: keptHeld } : {}), ...(keptBlocks.length ? { blocks: keptBlocks } : {}) };
+      }
+      if (changed) db.prepare('UPDATE player_cards SET looks = ?, updated_at = ? WHERE user_id = ?').run(JSON.stringify(looks), Date.now(), row.user_id);
     }
     return { player: view(byKey.get(row.nick_key), true) };
   });

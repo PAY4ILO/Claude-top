@@ -10,6 +10,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { crc32, deflateSync } from 'node:zlib';
 import { createApp } from '../server/app.js';
 import { loadConfig } from '../server/config.js';
 
@@ -1143,6 +1144,92 @@ test('карточки: своя поза для маленькой карточ
   await patch({ looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } });
 });
 
+// Настоящая PNG w×h одного цвета (RGBA): подпись, IHDR, IDAT (строки с фильтром 0, сжатые deflate), IEND; у кусков — CRC32.
+function solidPng(w, h, rgba = [0x5d, 0xa1, 0x3c, 0xff]) {
+  const chunk = (type, data) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(data.length, 0);
+    head.write(type, 4, 'latin1');
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+    return Buffer.concat([head, data, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; // бит на канал
+  ihdr[9] = 6; // RGBA; сжатие, фильтр, чересстрочность — 0
+  const row = Buffer.from([0, ...Array.from({ length: w }, () => rgba).flat()]);
+  const pixels = deflateSync(Buffer.concat(Array(h).fill(row)));
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('IDAT', pixels), chunk('IEND', Buffer.alloc(0))]);
+}
+
+test('карточки: предметы в руках, блоки вокруг и свои картинки 16×16', async () => {
+  const ip = { 'X-Real-IP': '10.88.0.3' };
+  const patch = (body) => alice.raw('PATCH', '/api/me/card', body, ip);
+  const png = (w, h) => 'data:image/png;base64,' + solidPng(w, h).toString('base64');
+  const tex = png(16, 16);
+  const stone = { id: 'stone', at: [0, 0, 0] };
+  for (const [look, message] of [
+    [{ held: { rightHand: { id: 'diamond_swordd' } } }, 'Такого предмета нет.'],
+    [{ held: { head: { id: 'tex1' } } }, 'Такого предмета нет.'], // своих картинок нет вовсе
+    [{ blocks: [{ id: 'diamond_sword', at: [0, 0, 0] }] }, 'Такого блока нет.'], // предмет, а не блок
+    [{ textures: [tex], blocks: [{ id: 'tex2', at: [0, 0, 0] }] }, 'Такого блока нет.'],
+    [{ blocks: Array(33).fill(stone) }, 'Блоков — не больше 32.'],
+    [{ blocks: [{ id: 'stone', at: [0, 200, 0] }] }, 'Блок слишком далеко.'],
+    [{ blocks: [{ id: 'stone' }] }, 'Блок слишком далеко.'], // без места
+    [{ held: { head: { id: 'carved_pumpkin', size: 3 } } }, 'Размер предмета — от 0.5 до 2.'],
+    [{ held: { foot: { id: 'diamond_sword' } } }, 'Предмет можно держать только в руках или на голове.'],
+    [{ offset: [50, 0] }, 'Сдвиг — от −40 до 40.'],
+    [{ textures: ['data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64')] }, 'Своя картинка — PNG 16×16.'],
+    [{ textures: [png(17, 17)] }, 'Своя картинка — PNG 16×16.'],
+    [{ textures: [tex, tex, tex, tex] }, 'Своих картинок — не больше 3.'],
+  ]) {
+    const r = await patch({ looks: { card: { pose: 'stand', ...look } } });
+    assert.equal(r.status, 422, JSON.stringify(look).slice(0, 200));
+    assert.equal(r.data.fields.looks, message, JSON.stringify(look).slice(0, 200));
+  }
+
+  const r = await patch({
+    looks: {
+      // Пустое (нулевой сдвиг, пустые слоты и списки) не хранится.
+      card: { pose: 'wave', offset: [0, 0], held: { leftHand: null }, blocks: [], textures: [] },
+      detail: {
+        pose: 'stand',
+        offset: [12.34, -5],
+        textures: [tex],
+        held: { rightHand: { id: 'diamond_sword', rot: [10.4, -20, 0], size: 1.234, at: [1.25, 0, -2] }, leftHand: null, head: { id: 'carved_pumpkin' } },
+        blocks: [stone, { id: 'grass_block', at: [-16.04, -16, 32], rot: 89.6, size: 0.5, extra: 1 }, { id: 'tex1', at: [16, 0, 0] }],
+        extra: true,
+      },
+    },
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.looks.card, { pose: 'wave', scale: 1, turn: 0 });
+  assert.deepEqual(
+    r.data.looks.detail,
+    {
+      pose: 'stand',
+      scale: 1,
+      turn: 0,
+      offset: [12.3, -5],
+      textures: [tex],
+      held: {
+        rightHand: { id: 'diamond_sword', rot: [10, -20, 0], size: 1.23, at: [1.3, 0, -2] },
+        head: { id: 'carved_pumpkin', rot: [0, 0, 0], size: 1, at: [0, 0, 0] },
+      },
+      blocks: [
+        { id: 'stone', at: [0, 0, 0], rot: 0, size: 1 },
+        { id: 'grass_block', at: [-16, -16, 32], rot: 90, size: 0.5 },
+        { id: 'tex1', at: [16, 0, 0], rot: 0, size: 1 },
+      ],
+    },
+    'округлено, лишнее и пустые слоты выброшены'
+  );
+  assert.deepEqual((await client().get('/api/players/Alice_07')).data.player.looks, r.data.looks, 'видно всем');
+  await patch({ looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } });
+});
+
 test('карточки: свой фон — проверка, хранение, замена, модерация', async () => {
   const ip = { 'X-Real-IP': '10.88.0.2' };
   const octet = { 'Content-Type': 'application/octet-stream', ...ip };
@@ -1220,6 +1307,59 @@ test('карточки: свой фон — проверка, хранение, 
   assert.equal(removed.data.background, 'meadow');
   assert.equal(removed.data.customBackground, null);
   assert.ok(!fs.existsSync(fileOf(again.data.backgroundUrl)));
+});
+
+test('карточки: модерация своих картинок 16×16 — убираются картинки и всё, что на них ссылается', async () => {
+  const ip = { 'X-Real-IP': '10.88.0.4' };
+  const tex = 'data:image/png;base64,' + solidPng(16, 16).toString('base64');
+  const tex2 = 'data:image/png;base64,' + solidPng(16, 16, [0xff, 0, 0, 0xff]).toString('base64');
+  const set = await alice.raw(
+    'PATCH',
+    '/api/me/card',
+    {
+      looks: {
+        card: { pose: 'wave', textures: [tex], held: { head: { id: 'tex1' } }, blocks: [{ id: 'tex1', at: [0, 0, 0] }] },
+        detail: {
+          pose: 'stand',
+          offset: [5, 0],
+          textures: [tex, tex2],
+          held: { rightHand: { id: 'tex2' }, leftHand: { id: 'diamond_sword' }, head: { id: 'carved_pumpkin' } },
+          blocks: [{ id: 'stone', at: [0, 0, 0] }, { id: 'tex1', at: [16, 0, 0] }, { id: 'tex2', at: [-16, 0, 0] }],
+        },
+      },
+    },
+    ip
+  );
+  assert.equal(set.status, 200);
+  assert.equal(set.data.looks.detail.textures.length, 2);
+
+  assert.equal((await client().del('/api/players/Alice_07/textures')).status, 401);
+  assert.equal((await alice.del('/api/players/Alice_07/textures')).status, 403, 'игрок не может');
+  assert.equal((await owner.del('/api/players/nobody_here/textures')).status, 404);
+
+  const mod = await owner.del('/api/players/Alice_07/textures');
+  assert.equal(mod.status, 200);
+  const expected = {
+    card: { pose: 'wave', scale: 1, turn: 0 },
+    detail: {
+      pose: 'stand',
+      scale: 1,
+      turn: 0,
+      offset: [5, 0],
+      held: {
+        leftHand: { id: 'diamond_sword', rot: [0, 0, 0], size: 1, at: [0, 0, 0] },
+        head: { id: 'carved_pumpkin', rot: [0, 0, 0], size: 1, at: [0, 0, 0] },
+      },
+      blocks: [{ id: 'stone', at: [0, 0, 0], rot: 0, size: 1 }],
+    },
+  };
+  assert.deepEqual(mod.data.player.looks, expected, 'картинки и ссылки на них убраны, остальное осталось');
+  assert.deepEqual((await client().get('/api/players/Alice_07')).data.player.looks, expected, 'гости тоже видят без картинок');
+  assert.deepEqual((await alice.get('/api/me/card')).data.looks, expected);
+  // Повтор — ничего не ломает.
+  assert.deepEqual((await owner.del('/api/players/Alice_07/textures')).data.player.looks, expected);
+
+  await alice.raw('PATCH', '/api/me/card', { looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } }, ip);
 });
 
 test('скин по нику лицензии: сайт спрашивает Mojang, картинку берёт с textures.minecraft.net', async () => {

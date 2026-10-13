@@ -7,8 +7,10 @@
  *   Skin3D.draw(canvas, skin, opts)      — один кадр: { slim, pose, angles, zoom, yaw, pitch, time }
  *   Skin3D.viewer({ url, slim, pose, look, label }) → { el, set({url, slim, pose, look}), destroy() } — крутится мышью/пальцем/стрелками
  *   Skin3D.figure({ url, slim, pose, look }) → <canvas> с методом update(look) — неподвижная картинка для карточки
- *   Skin3D.poser({ url, slim, look, part, yaw, pitch, onSelect, onStart, onChange, onEnd }) → { el, set({look, part}), resetCamera(), destroy() }
- *                                        — редактор позы как в Blockbench: нажать на часть тела, тянуть цветные кольца
+ *   Skin3D.poser({ url, slim, look, part, yaw, pitch, zoom, scene, snap, target, onSelect, onStart, onChange, onEnd, onTap })
+ *                                        → { el, set({look, part, tool, camera}), resetCamera(), zoomBy(k), destroy() }
+ *                                        — редактор позы как в Blockbench: нажать на часть тела, тянуть цветные кольца;
+ *                                          scene: true — вся сцена студии: предметы, блоки, приближение, сдвиг кадра
  *   Skin3D.poseAngles(key)               — углы позы без анимации (с них начинается «Своя поза»)
  *   look — как стоит персонаж на карточке: { pose: ключ | 'custom', angles (у custom), scale, turn } (см. Api.LOOK)
  *   Skin3D.guessSlim(skin)               — тонкие ли руки (по пустым пикселям, как это определяет сама игра — никак, поэтому «угадать»)
@@ -36,6 +38,7 @@
     { key: 'rightLeg', label: 'Правая нога' },
     { key: 'leftLeg', label: 'Левая нога' },
   ];
+  const PART_KEYS = new Set(PARTS.map((p) => p.key));
 
   /* ------------------------------------------------------------ модель */
 
@@ -140,7 +143,7 @@
     return p;
   }
 
-  /** look → настройки draw(): поза, свои углы, размер, поворот (yaw — поворот камеры по умолчанию для этого вида). */
+  /** look → настройки draw(): поза, свои углы, размер, поворот, сдвиг, предметы, блоки (yaw — поворот камеры по умолчанию для этого вида). */
   function lookOpts(look, yaw) {
     const l = look || {};
     return {
@@ -148,6 +151,10 @@
       angles: l.pose === 'custom' ? l.angles : null,
       zoom: typeof l.scale === 'number' ? l.scale : 1,
       yaw: yaw + (Number(l.turn) || 0),
+      offset: l.offset || null,
+      held: l.held || null,
+      blocks: l.blocks || null,
+      textures: l.textures || null,
     };
   }
 
@@ -179,19 +186,178 @@
   const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   const norm = (a) => mul(a, 1 / (Math.hypot(a[0], a[1], a[2]) || 1));
 
+  /* ------------------------------------------------------------ блоки и предметы Minecraft (McArt) */
+
+  // Грань элемента модели игры: угол (левый верх текстуры), направление вдоль u и вдоль v.
+  const FACE_GEO = {
+    down: (f, t) => [[f[0], f[1], t[2]], [t[0] - f[0], 0, 0], [0, 0, f[2] - t[2]]],
+    up: (f, t) => [[f[0], t[1], f[2]], [t[0] - f[0], 0, 0], [0, 0, t[2] - f[2]]],
+    north: (f, t) => [[t[0], t[1], f[2]], [f[0] - t[0], 0, 0], [0, f[1] - t[1], 0]],
+    south: (f, t) => [[f[0], t[1], t[2]], [t[0] - f[0], 0, 0], [0, f[1] - t[1], 0]],
+    west: (f, t) => [[f[0], t[1], f[2]], [0, 0, t[2] - f[2]], [0, f[1] - t[1], 0]],
+    east: (f, t) => [[t[0], t[1], t[2]], [0, 0, f[2] - t[2]], [0, f[1] - t[1], 0]],
+  };
+  // Затенение граней — как в игре.
+  const FACE_SHADE = { up: 1, down: 0.5, north: 0.8, south: 0.8, west: 0.6, east: 0.6 };
+  const HELD_SLOTS = ['rightHand', 'leftHand', 'head'];
+
+  /** Поворот элемента модели вокруг своей точки (старый формат axis/angle и новый x/y/z). */
+  function elementPoint(r, p) {
+    if (!r) return p;
+    const d = sub(p, r.origin || [8, 8, 8]);
+    let v;
+    if (r.axis) {
+      if (!r.angle) return p;
+      const k = r.rescale ? 1 / Math.cos(r.angle * DEG) : 1;
+      if (r.axis === 'x') v = rotate([d[0], d[1] * k, d[2] * k], [r.angle, 0, 0]);
+      else if (r.axis === 'y') v = rotate([d[0] * k, d[1], d[2] * k], [0, r.angle, 0]);
+      else v = rotate([d[0] * k, d[1] * k, d[2]], [0, 0, r.angle]);
+    } else {
+      v = rotate(d, [r.x || 0, r.y || 0, r.z || 0]);
+    }
+    return add(v, r.origin || [8, 8, 8]);
+  }
+
+  const det3 = (a, b, c) => a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
+
+  /**
+   * Грани модели игры для отрисовки. xf — точка модели (0…16) → координаты вида; toScreen — вид → холст.
+   * Возвращает { depth, paint(g, hits, key) } — по глубине модель встаёт среди частей тела.
+   */
+  function modelDrawable(m, xf, toScreen) {
+    const o = xf([0, 0, 0]);
+    const flip = det3(sub(xf([1, 0, 0]), o), sub(xf([0, 1, 0]), o), sub(xf([0, 0, 1]), o)) < 0;
+    const faces = [];
+    if (m.kind === 'block') {
+      for (const part of m.parts) {
+        for (const el of part.elements) {
+          for (const f of el.faces) {
+            if (!f.tex) continue;
+            const [a, U, V] = FACE_GEO[f.dir](el.from, el.to);
+            const place = (p) => {
+              let q = elementPoint(el.rotation, p);
+              if (part.x || part.y) q = add(rotate(sub(q, [8, 8, 8]), [-part.x, -part.y, 0]), [8, 8, 8]);
+              return xf(q);
+            };
+            const G = [a, add(a, U), add(add(a, U), V), add(a, V)].map(place);
+            const du = sub(G[1], G[0]);
+            const dv = sub(G[3], G[0]);
+            const nz = (dv[0] * du[1] - dv[1] * du[0]) * (flip ? -1 : 1);
+            if (nz <= 1e-6) continue;
+            faces.push({ G, tex: f.tex, uv: f.uv, rotation: f.rotation, tint: f.tint, shade: el.shade ? FACE_SHADE[f.dir] : 1, depth: (G[0][2] + G[2][2]) / 2 });
+          }
+        }
+      }
+    } else {
+      // Плоский предмет: картинка с толщиной в 1 пиксель — несколько слоёв, внутренние темнее.
+      const thick = Math.hypot(...sub(xf([8, 8, 8.5]), xf([8, 8, 7.5]))) * (toScreen.scale || 1);
+      const n = Math.max(2, Math.min(10, Math.round(thick) + 1));
+      for (let k = 0; k < n; k++) {
+        const z = 7.5 + k / (n - 1);
+        const G = [[0, 16, z], [16, 16, z], [16, 0, z], [0, 0, z]].map(xf);
+        for (const l of m.layers) faces.push({ G, tex: l.tex, uv: [0, 0, 16, 16], rotation: 0, tint: l.tint, shade: 1, depth: (G[0][2] + G[2][2]) / 2, layer: true });
+      }
+      faces.sort((a, b) => a.depth - b.depth);
+      const top = faces.length ? faces[faces.length - 1].depth : 0;
+      for (const f of faces) if (f.depth < top - 1e-6) f.shade = 0.55;
+    }
+    faces.sort((a, b) => a.depth - b.depth);
+    const center = xf([8, 8, 8]);
+    return {
+      depth: center[2],
+      paint(g, hits, key) {
+        for (const f of faces) {
+          const tw = f.tex.width / 16;
+          const [u1, v1, u2, v2] = f.uv;
+          if (u1 === u2 || v1 === v2) continue;
+          const r = ((Math.round((f.rotation || 0) / 90) % 4) + 4) % 4;
+          const S = f.G.map(toScreen);
+          const tl = S[r % 4];
+          const tr = S[(1 + r) % 4];
+          const bl = S[(3 + r) % 4];
+          const cu = [(tr[0] - tl[0]) / ((u2 - u1) * tw), (tr[1] - tl[1]) / ((u2 - u1) * tw)];
+          const cv = [(bl[0] - tl[0]) / ((v2 - v1) * tw), (bl[1] - tl[1]) / ((v2 - v1) * tw)];
+          g.setTransform(cu[0], cu[1], cv[0], cv[1], tl[0] - u1 * tw * cu[0] - v1 * tw * cv[0], tl[1] - u1 * tw * cu[1] - v1 * tw * cv[1]);
+          const sx = Math.min(u1, u2) * tw;
+          const sy = Math.min(v1, v2) * tw;
+          const sw = Math.abs(u2 - u1) * tw;
+          const sh = Math.abs(v2 - v1) * tw;
+          // Чуть шире, чтобы между гранями не просвечивали щели (у плоских предметов — нельзя, видно край).
+          const e = f.layer ? 0 : Math.min(0.3, 0.5 / Math.max(1e-6, Math.hypot(cu[0], cu[1])));
+          g.drawImage(window.McArt.prepared(f.tex, f.tint, f.shade), sx, sy, sw, sh, sx - e, sy - e, sw + 2 * e, sh + 2 * e);
+          if (hits && key) {
+            const n = cross(sub(f.G[3], f.G[0]), sub(f.G[1], f.G[0]));
+            hits.push({ key, poly: [S[0], S[1], S[2], S[3]], normal: norm(flip ? mul(n, -1) : n) });
+          }
+        }
+      },
+    };
+  }
+
+  /** Матрица поворота как в игре (display.rotation = XYZ: сначала z, потом y, потом x) — точка → точка. */
+  const rotXYZ = ([x, y, z]) => (p) => rotate(rotate(rotate(p, [0, 0, z]), [0, y, 0]), [x, 0, 0]);
+
+  /**
+   * Предмет в руке или на голове: цепочка как в игре (ItemInHandLayer / CustomHeadLayer + display модели),
+   * плюс свои поворот, размер и сдвиг игрока. Возвращает точку модели (0…16) → точку части тела (до её поворота).
+   */
+  function heldTransform(slot, m, entry, slim) {
+    const left = slot === 'leftHand';
+    const ctx = slot === 'head' ? 'head' : left ? 'thirdperson_lefthand' : 'thirdperson_righthand';
+    let d = m.display[ctx];
+    if (!d && left && m.display.thirdperson_righthand) {
+      const r = m.display.thirdperson_righthand;
+      d = { rotation: [(r.rotation || [0, 0, 0])[0], -(r.rotation || [0, 0, 0])[1], -(r.rotation || [0, 0, 0])[2]], translation: [-(r.translation || [0, 0, 0])[0], (r.translation || [0, 0, 0])[1], (r.translation || [0, 0, 0])[2]], scale: r.scale };
+    }
+    d = d || {};
+    const t = d.translation || [0, 0, 0];
+    const s = (d.scale || [1, 1, 1]).map((k) => k * (entry.size || 1));
+    const R = rotXYZ(d.rotation || [0, 0, 0]);
+    const user = entry.rot || [0, 0, 0];
+    const at = entry.at || [0, 0, 0];
+    // Точка модели → система «руки/головы» игры (y вниз, лицо к −z) → наша (y вверх, лицо к +z).
+    // fromUser — то же, но для точки уже после своего поворота rot (центр модели — [0, 0, 0]): по ней студия
+    // считает оси колец поворота предмета.
+    const fromUser = (v) => add(add(t, at), R(v));
+    const inDisplay = (p) => fromUser(rotate([(p[0] - 8) * s[0], (p[1] - 8) * s[1], (p[2] - 8) * s[2]], user));
+    let place;
+    if (slot === 'head') {
+      place = (q) => {
+        const r = rotate([q[0] * 0.625, -q[1] * 0.625, -q[2] * 0.625], [0, 180, 0]);
+        return [r[0], 24 - (r[1] - 4), -r[2]];
+      };
+    } else {
+      const pivot = left ? [5, slim ? 21.5 : 22, 0] : [-5, slim ? 21.5 : 22, 0];
+      const hand = [left ? 1 : -1, 2, -10];
+      place = (q) => {
+        const r = rotate(rotate(add(hand, q), [0, 180, 0]), [-90, 0, 0]);
+        return [pivot[0] + r[0], pivot[1] - r[1], pivot[2] - r[2]];
+      };
+    }
+    const local = (p) => place(inDisplay(p));
+    local.fromUser = (v) => place(fromUser(v));
+    return local;
+  }
+
   /* ------------------------------------------------------------ рисование */
 
   const ATTACHED = new Set(['head', 'rightArm', 'leftArm']);
   const CENTER_Y = 17; // середина модели по высоте (с поднятыми руками)
   const HEIGHT = 40; // сколько единиц модели помещается по высоте холста
   const WIDTH = 26;
+  const BLOCK = 16; // блок Minecraft в единицах модели (персонаж — 32)
 
   /**
    * Один кадр. canvas — уже нужного размера (в пикселях устройства), skin — 64×64 из load().
    * yaw/pitch — поворот камеры в градусах, pose — ключ позы ('custom' — углы из angles), time — секунды анимации (null — без анимации).
-   * zoom — размер фигуры: растёт вверх от ног, ноги остаются на месте.
-   * hits — массив: в него попадут нарисованные грани { key, poly } (для выбора части мышью), в порядке рисования.
-   * Возвращает, как модель легла на холст (для колец редактора позы), или null без скина.
+   * zoom — размер фигуры: растёт вверх от ног, ноги остаются на месте. offset — [x, y] сдвиг всей сцены в кадре.
+   * held — { rightHand, leftHand, head: { id, rot, size, at } }, blocks — [{ id, at, rot, size }], textures — свои картинки
+   * (см. Api.LOOK); пока модели грузятся у Mojang, их нет, по готовности вызывается onModel() — перерисовать.
+   * hits — массив: в него попадут нарисованные грани { key, poly, normal } (для выбора мышью), в порядке рисования;
+   * key — часть тела, 'held:rightHand' или 'block:3'.
+   * Камера редактора (студия): viewZoom — приближение всего кадра, pan — [x, y] сдвиг в пикселях холста,
+   * floor — сетка блоков на полу.
+   * Возвращает, как сцена легла на холст (для колец редактора), или null без скина.
    */
   function draw(canvas, skin, opts = {}) {
     const g = canvas.getContext('2d');
@@ -201,26 +367,34 @@
     g.clearRect(0, 0, W, H);
     if (!skin) return null;
     g.imageSmoothingEnabled = false;
-    const fitScale = Math.min(W / WIDTH, H / HEIGHT);
+    const fitScale = Math.min(W / WIDTH, H / HEIGHT) * (opts.viewZoom || 1);
     const zoom = opts.zoom || 1;
     const scale = fitScale * zoom;
-    const cx = W / 2;
-    const cy = H / 2 + (opts.shiftY || 0) * scale + CENTER_Y * fitScale * (1 - zoom);
+    const offset = Array.isArray(opts.offset) ? opts.offset : [0, 0];
+    const pan = Array.isArray(opts.pan) ? opts.pan : [0, 0];
+    const cx = W / 2 + pan[0] + (Number(offset[0]) || 0) * fitScale;
+    const cy = H / 2 + pan[1] + (opts.shiftY || 0) * scale + CENTER_Y * fitScale * (1 - zoom) - (Number(offset[1]) || 0) * fitScale;
     const yaw = opts.yaw === undefined ? 25 : opts.yaw;
     const pitch = opts.pitch === undefined ? 10 : opts.pitch;
     const angles = opts.pose === 'custom' && opts.angles ? customPose(opts.angles) : pose(POSE_KEYS.includes(opts.pose) ? opts.pose : 'stand', opts.time);
 
-    // Модель → вид: поворот части вокруг сустава, подъём (сидит), центр, камера.
+    // Часть тела → мир: поворот вокруг сустава, крепление к телу, подъём (сидит). Мир → вид: камера.
     // Голова и руки крепятся к телу: наклонили тело — они наклоняются вместе с ним (ноги — нет).
     const BODY_PIVOT = [0, 12, 0];
     const bodyTurned = angles.body.some((x) => x);
-    const toView = (part, p) => {
+    const parts = model(opts.slim);
+    const byKey = Object.fromEntries(parts.map((p) => [p.key, p]));
+    const toWorld = (part, p) => {
       let local = add(rotate(sub(p, part.pivot), angles[part.key]), part.pivot);
       if (bodyTurned && ATTACHED.has(part.key)) local = add(rotate(sub(local, BODY_PIVOT), angles.body), BODY_PIVOT);
-      local[1] += angles.lift - CENTER_Y;
-      return rotate(rotate(local, [0, yaw, 0]), [pitch, 0, 0]);
+      local[1] += angles.lift;
+      return local;
     };
+    const camera = (d) => rotate(rotate(d, [0, yaw, 0]), [pitch, 0, 0]);
+    const view = (w) => camera([w[0], w[1] - CENTER_Y, w[2]]);
+    const toView = (part, p) => view(toWorld(part, p));
     const toScreen = (p) => [cx + p[0] * scale, cy - p[1] * scale];
+    toScreen.scale = scale;
     const seam = 0.5 / scale; // грани чуть шире, чтобы между ними не просвечивали щели
 
     const drawFace = (f, part) => {
@@ -244,33 +418,89 @@
       };
     };
 
-    const parts = model(opts.slim);
     const queue = parts.map((part) => {
       const [w, h, d] = part.size;
       const [x0, y0, z0] = part.at;
       const box = (grow, [u, v]) => faces(x0 - grow, y0 - grow, z0 - grow, x0 + w + grow, y0 + h + grow, z0 + d + grow, u, v, w, h, d).map((f) => drawFace(f, part));
       const center = toView(part, [x0 + w / 2, y0 + h / 2, z0 + d / 2]);
-      return { depth: center[2], inner: box(0, part.uv), outer: box(part.grow, part.ov) };
+      const inner = box(0, part.uv);
+      const outer = box(part.grow, part.ov);
+      return {
+        depth: center[2],
+        paint() {
+          // Изнанка второго слоя, сама часть, второй слой.
+          for (const f of outer) if (f.nz < -1e-6) f.paint();
+          for (const f of inner) if (f.nz > 1e-6) f.paint();
+          for (const f of outer) if (f.nz > 1e-6) f.paint();
+        },
+      };
     });
-    // Дальние части — первыми. Внутри части: изнанка второго слоя, сама часть, второй слой.
-    queue.sort((a, b) => a.depth - b.depth);
-    for (const q of queue) {
-      for (const f of q.outer) if (f.nz < -1e-6) f.paint();
-      for (const f of q.inner) if (f.nz > 1e-6) f.paint();
-      for (const f of q.outer) if (f.nz > 1e-6) f.paint();
+
+    // Предметы в руках и на голове, блоки вокруг.
+    const art = window.McArt;
+    const heldXf = {};
+    if (art) {
+      const held = opts.held || {};
+      for (const slot of HELD_SLOTS) {
+        const entry = held[slot];
+        if (!entry || !entry.id) continue;
+        const m = art.model(entry.id, opts.onModel, opts.textures, slot !== 'head');
+        if (!m) continue;
+        const local = heldTransform(slot, m, entry, opts.slim);
+        const part = byKey[slot === 'head' ? 'head' : slot === 'leftHand' ? 'leftArm' : 'rightArm'];
+        const xf = (p) => view(toWorld(part, local(p)));
+        heldXf[slot] = { xf, part, local };
+        const d = modelDrawable(m, xf, toScreen);
+        queue.push({ depth: d.depth + 0.01, paint: () => d.paint(g, opts.hits, 'held:' + slot) });
+      }
+      (opts.blocks || []).forEach((b, i) => {
+        if (!b || !b.id) return;
+        const m = art.model(b.id, opts.onModel, opts.textures, false);
+        if (!m) return;
+        const k = (b.size || 1) * (BLOCK / 16);
+        const at = b.at || [0, 0, 0];
+        const xf = (p) => view(add(rotate([(p[0] - 8) * k, p[1] * k, (p[2] - 8) * k], [0, b.rot || 0, 0]), at));
+        const d = modelDrawable(m, xf, toScreen);
+        queue.push({ depth: d.depth, paint: () => d.paint(g, opts.hits, 'block:' + i) });
+      });
     }
+
+    // Сетка на полу (редактор): клетка — блок, линии по краям блоков, стоящих в кратных 16 точках.
+    if (opts.floor) {
+      const edge = 6.5 * BLOCK;
+      const line = (a, b) => {
+        const p = toScreen(view(a));
+        const q = toScreen(view(b));
+        g.moveTo(p[0], p[1]);
+        g.lineTo(q[0], q[1]);
+      };
+      g.save();
+      g.lineWidth = Math.max(1, scale * 0.08);
+      g.strokeStyle = 'rgba(255, 255, 255, 0.09)';
+      g.beginPath();
+      for (let k = -edge; k <= edge; k += BLOCK) {
+        line([k, 0, -edge], [k, 0, edge]);
+        line([-edge, 0, k], [edge, 0, k]);
+      }
+      g.stroke();
+      g.restore();
+    }
+
+    // Дальнее — первым.
+    queue.sort((a, b) => a.depth - b.depth);
+    for (const q of queue) q.paint();
     g.setTransform(1, 0, 0, 1, 0, 0);
 
-    // Направление из мира модели в вид (только камера) и из системы родителя части в вид.
-    const camera = (d) => rotate(rotate(d, [0, yaw, 0]), [pitch, 0, 0]);
+    // Направление из системы родителя части в вид.
     const fromParent = (key, d) => camera(bodyTurned && ATTACHED.has(key) ? rotate(d, angles.body) : d);
     return {
       scale,
       toScreen,
       camera,
+      view,
       /** Сустав части в координатах вида. */
       pivot: (key) => {
-        const part = parts.find((p) => p.key === key);
+        const part = byKey[key];
         return toView(part, part.pivot);
       },
       /**
@@ -281,7 +511,52 @@
         const [rx, ry] = angles[key];
         return [rotate([1, 0, 0], [0, ry, 0]), [0, 1, 0], rotate([0, 0, 1], [rx, ry, 0])].map((d) => norm(fromParent(key, d)));
       },
+      /**
+       * Предмет в слоте: центр (вид) и оси его своего поворота rot — или null, если его нет/не загрузился.
+       * Оси — «гимбал», как у частей тела (rot считается rz → rx → ry): ry — вертикаль системы предмета,
+       * rx — после ry, rz — после rx и ry. Направления переводятся в вид той же цепочкой, что и сам предмет.
+       */
+      held: (slot, rot = [0, 0, 0]) => {
+        const h = heldXf[slot];
+        if (!h) return null;
+        const P = (v) => view(toWorld(h.part, h.local.fromUser(v)));
+        const c = P([0, 0, 0]);
+        const L = (d) => sub(P(mul(d, 4)), c);
+        // Цепочка — повороты и одинаковый масштаб, но если в модели есть отражение, кольца крутили бы наоборот.
+        const flip = det3(L([1, 0, 0]), L([0, 1, 0]), L([0, 0, 1])) < 0 ? -1 : 1;
+        const [rx, ry] = rot;
+        return { center: c, axes: [rotate([1, 0, 0], [0, ry, 0]), [0, 1, 0], rotate([0, 0, 1], [rx, ry, 0])].map((d) => norm(mul(L(d), flip))) };
+      },
+      /** Точка на холсте → точка мира на высоте y (пол — 0) или null (луч вдоль пола). */
+      unproject: (sx, sy, y = 0) => {
+        const back = (v) => rotate(rotate(v, [-pitch, 0, 0]), [0, -yaw, 0]);
+        const a = back([(sx - cx) / scale, (cy - sy) / scale, 0]);
+        const b = back([0, 0, 1]);
+        if (Math.abs(b[1]) < 1e-6) return null;
+        const t = (y - CENTER_Y - a[1]) / b[1];
+        return [a[0] + b[0] * t, y, a[2] + b[2] * t];
+      },
+      /** Направление из вида в мир (для нормали грани блока под мышью). */
+      toWorldDir: (v) => rotate(rotate(v, [-pitch, 0, 0]), [0, -yaw, 0]),
     };
+  }
+
+  /** Значок блока для палитры: как в инвентаре игры (display.gui модели). */
+  function drawIcon(canvas, m) {
+    const g = canvas.getContext('2d');
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, canvas.width, canvas.height);
+    g.imageSmoothingEnabled = false;
+    const d = (m.display && m.display.gui) || { rotation: [30, 225, 0], scale: [0.625, 0.625, 0.625] };
+    const R = rotXYZ(d.rotation || [0, 0, 0]);
+    const s = d.scale || [1, 1, 1];
+    const t = d.translation || [0, 0, 0];
+    const k = canvas.width / 16;
+    const xf = (p) => add(t, R([(p[0] - 8) * s[0], (p[1] - 8) * s[1], (p[2] - 8) * s[2]]));
+    const toScreen = (p) => [canvas.width / 2 + p[0] * k, canvas.height / 2 - p[1] * k];
+    toScreen.scale = k;
+    modelDrawable(m, xf, toScreen).paint(g);
+    g.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   /* ------------------------------------------------------------ загрузка */
@@ -406,8 +681,7 @@
       }
       el.dataset.mounted = '1';
       fit(canvas);
-      const look = lookOpts(state.look, 0);
-      draw(canvas, state.skin, { slim: state.slim, pose: look.pose, angles: look.angles, zoom: look.zoom, yaw: state.yaw, pitch: state.pitch, time: state.playing ? (now - started) / 1000 : null });
+      draw(canvas, state.skin, { ...lookOpts(state.look, 0), slim: state.slim, yaw: state.yaw, pitch: state.pitch, time: state.playing ? (now - started) / 1000 : null, onModel: redraw });
       if (state.playing) frame = requestAnimationFrame(render);
     };
     const redraw = () => {
@@ -519,43 +793,110 @@
   /**
    * Нажать на голову, тело, руку или ногу — вокруг сустава появятся три кольца; тянуть кольцо — поворот вокруг
    * этой оси (Shift — шагом 15°). У тела ещё зелёная стрелка «присесть» у правого края. Пустое место — повернуть камеру.
-   * Меняет look.angles на месте; onChange(part) — после каждого шага, onStart/onEnd — начало и конец движения.
+   * Меняет look на месте; onSelect(key) — выбрали другое, onChange(key) — после каждого шага,
+   * onStart/onEnd — начало и конец движения (для «Отменить»).
+   *
+   * scene: true — редактор всей сцены (студия персонажа):
+   *   — выбрать можно и предмет ('held:<слот>'), и блок ('block:<i>'); пустое место — снять выбор;
+   *   — у предмета кольца его своего поворота rot, у блока — зелёное кольцо поворота, стрелка «выше» и сам блок
+   *     тянется по полу (шаг — snap(key), Shift — наоборот: без сетки или по сетке);
+   *   — кольца частей есть и у готовой позы: потянули — поза становится своей (углы — с готовой);
+   *   — колёсико (и zoomBy) — приближение, правая или средняя кнопка — сдвинуть кадр, на полу сетка блоков;
+   *     размер и сдвиг из look — это рамка карточки, здесь они не применяются;
+   *   — set({ tool }): 'select' | 'place' | 'break'. В 'place' и 'break' нажатие уходит в onTap({ key, normal, ground }):
+   *     key — что под мышью, normal — нормаль грани в мире (у блоков), ground — точка пола под мышью;
+   *     target(те же данные) → { at, size, rot } | null — где показать рамку будущего блока.
    */
   function poser(opts = {}) {
-    const baseYaw = opts.yaw === undefined ? 25 : opts.yaw;
-    const basePitch = opts.pitch === undefined ? 10 : opts.pitch;
-    const state = { url: opts.url, slim: !!opts.slim, look: opts.look, part: opts.part || null, yaw: 0, pitch: basePitch, skin: null };
+    const scene = !!opts.scene;
+    let baseYaw = opts.yaw === undefined ? 25 : opts.yaw;
+    let basePitch = opts.pitch === undefined ? 10 : opts.pitch;
+    // Приближение кадра в начале (сцена студии: чуть дальше — видно блоки вокруг).
+    const baseZoom = Math.max(0.25, Math.min(4, Number(opts.zoom) || 1));
+    const state = { url: opts.url, slim: !!opts.slim, look: opts.look, part: opts.part || null, yaw: 0, pitch: basePitch, zoom: baseZoom, pan: [0, 0], tool: 'select', skin: null, turn: 0 };
     const canvas = document.createElement('canvas');
     canvas.className = 'skin3d__canvas poser__canvas';
     canvas.tabIndex = 0;
     canvas.setAttribute('role', 'img');
-    canvas.setAttribute('aria-label', `${opts.label || 'Своя поза'}. Нажмите на часть тела и тяните цветные кольца; стрелки — повернуть камеру.`);
+    canvas.setAttribute(
+      'aria-label',
+      scene
+        ? `${opts.label || 'Сцена'}. Нажмите на часть тела, предмет или блок и тяните цветные кольца; стрелки — повернуть камеру, плюс и минус — приблизить.`
+        : `${opts.label || 'Своя поза'}. Нажмите на часть тела и тяните цветные кольца; стрелки — повернуть камеру.`
+    );
     const el = document.createElement('div');
     el.className = 'skin3d poser';
     el.append(canvas);
 
     let info = null; // как модель легла на холст в последнем кадре
     let hits = [];
-    let gizmo = null; // кольца выбранной части в пикселях холста
+    let gizmo = null; // кольца выбранного в пикселях холста
     let hover = null;
+    let aim = null; // инструмент 'place' — { at, size, rot } будущего блока; 'break' — ключ блока под мышью
     let drag = null;
     let frame = 0;
     let alive = true;
 
+    const limits = () => (window.Api && window.Api.LOOK && window.Api.LOOK.blocks) || { side: 96, y: [-48, 96] };
+    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const kindOf = (key) => (!key ? null : PART_KEYS.has(key) ? 'part' : key.startsWith('held:') ? 'held' : key.startsWith('block:') ? 'block' : null);
+    const heldOf = (key) => (state.look && state.look.held && state.look.held[key.slice(5)]) || null;
+    const blockOf = (key) => (state.look && Array.isArray(state.look.blocks) && state.look.blocks[Number(key.slice(6))]) || null;
+    const dprOf = () => canvas.width / (canvas.clientWidth || canvas.width);
+
     function resetCamera() {
-      state.yaw = lookOpts(state.look, baseYaw).yaw;
+      state.turn = Number(state.look && state.look.turn) || 0;
+      state.yaw = baseYaw + state.turn;
       state.pitch = basePitch;
+      state.zoom = baseZoom;
+      state.pan = [0, 0];
+      redraw();
+    }
+
+    /** Приближение к точке холста (x, y): она остаётся под мышью. */
+    function zoomAt(x, y, z) {
+      z = clamp(z, 0.25, 4);
+      const k = z / state.zoom;
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+      state.pan = [x - cx - (x - cx - state.pan[0]) * k, y - cy - (y - cy - state.pan[1]) * k];
+      state.zoom = z;
       redraw();
     }
 
     function buildGizmo() {
-      if (!info || !state.part) return null;
-      const dpr = canvas.width / (canvas.clientWidth || canvas.width);
-      const px = Math.max(44 * dpr, Math.min(canvas.width, canvas.height) * 0.2);
-      const R = px / info.scale;
-      const c = info.pivot(state.part);
+      if (!info || !state.part || state.tool !== 'select') return null;
+      const kind = kindOf(state.part);
+      const look = state.look || {};
+      const dpr = dprOf();
+      // Кольца — пятая часть кадра; в отдалённой сцене меньше, чтобы не закрывали соседние части тела.
+      const px = Math.max(44 * dpr, Math.min(canvas.width, canvas.height) * 0.2 * (scene ? Math.min(1, state.zoom) : 1));
+      let R = px / info.scale;
+      let c;
+      let axes;
+      let arrow = null;
+      if (kind === 'part') {
+        if (look.pose !== 'custom' && !scene) return null;
+        c = info.pivot(state.part);
+        axes = info.axes(state.part).map((A, i) => ({ i, A }));
+      } else if (kind === 'held') {
+        const e = heldOf(state.part);
+        const held = e && info.held(state.part.slice(5), e.rot || [0, 0, 0]);
+        if (!held) return null;
+        c = held.center;
+        axes = held.axes.map((A, i) => ({ i, A }));
+      } else if (kind === 'block') {
+        const b = blockOf(state.part);
+        if (!b) return null;
+        const size = (b.size || 1) * (BLOCK / 16);
+        c = info.view(add(b.at, [0, 8 * size, 0]));
+        R = Math.max(R * 0.8, 13 * size);
+        axes = [{ i: 1, A: norm(info.camera([0, 1, 0])) }];
+      } else {
+        return null;
+      }
       const cs = info.toScreen(c);
-      const rings = info.axes(state.part).map((A, i) => {
+      const rings = axes.map(({ i, A }) => {
         const u = norm(cross(A, Math.abs(A[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0]));
         const v = cross(A, u);
         const pts = [];
@@ -566,33 +907,118 @@
         }
         return { i, A, pts };
       });
-      // «Присесть» — стрелка у правого края на высоте пояса: на самой фигуре она закрывала бы ноги.
-      let arrow = null;
-      if (state.part === 'body') {
+      if (kind === 'part' && state.part === 'body') {
+        // «Присесть» — стрелка у правого края на высоте пояса: на самой фигуре она закрывала бы ноги.
         const down = info.camera([0, -1, 0]);
         const x = canvas.width - 32 * dpr;
         const y = Math.max(40 * dpr, Math.min(canvas.height - 56 * dpr, cs[1]));
-        arrow = { from: [x, y - 26 * dpr], to: [x, y + 26 * dpr], perUnit: [down[0] * info.scale, -down[1] * info.scale] };
+        arrow = { from: [x, y - 26 * dpr], to: [x, y + 26 * dpr], perUnit: [down[0] * info.scale, -down[1] * info.scale], sign: -1, label: 'присесть' };
+      } else if (kind === 'block') {
+        // «Выше» — стрелка вверх над блоком: тянуть вверх-вниз.
+        const b = blockOf(state.part);
+        const up = info.camera([0, 1, 0]);
+        const top = info.toScreen(info.view(add(b.at, [0, 16 * (b.size || 1) * (BLOCK / 16), 0])));
+        const d = norm([up[0], -up[1], 0]);
+        arrow = {
+          from: [top[0] + d[0] * 10 * dpr, top[1] + d[1] * 10 * dpr],
+          to: [top[0] + d[0] * 54 * dpr, top[1] + d[1] * 54 * dpr],
+          perUnit: [up[0] * info.scale, -up[1] * info.scale],
+          sign: 1,
+          label: 'выше',
+        };
       }
-      return { c, cs, R, px, dpr, rings, arrow };
+      return { kind, c, cs, R, px, dpr, rings, arrow };
     }
 
-    function paintGizmo() {
+    // Значения, которые крутят кольца и тянет стрелка, — у части тела, предмета или блока.
+    function ringValue(i) {
+      const kind = kindOf(state.part);
+      if (kind === 'part') return state.look.angles[state.part][i];
+      if (kind === 'held') return (heldOf(state.part).rot || [0, 0, 0])[i];
+      return blockOf(state.part).rot || 0;
+    }
+    function setRing(i, v) {
+      const kind = kindOf(state.part);
+      if (kind === 'part') state.look.angles[state.part][i] = v;
+      else if (kind === 'held') {
+        const e = heldOf(state.part);
+        e.rot = (e.rot || [0, 0, 0]).slice();
+        e.rot[i] = v;
+      } else blockOf(state.part).rot = v;
+    }
+    const arrowValue = () => (kindOf(state.part) === 'block' ? blockOf(state.part).at[1] : state.look.angles.lift || 0);
+    function setArrow(v, free) {
+      if (kindOf(state.part) === 'block') {
+        const b = blockOf(state.part);
+        const step = snapStep(state.part, free);
+        b.at = [b.at[0], clamp(Math.round(v / step) * step, limits().y[0], limits().y[1]), b.at[2]];
+      } else {
+        state.look.angles.lift = clamp(Math.round(v), -12, 0);
+      }
+    }
+    /** Шаг сетки для блока; Shift (inverse) — наоборот. */
+    function snapStep(key, inverse) {
+      const step = opts.snap ? opts.snap(key) : 1;
+      if (!inverse) return step;
+      const b = blockOf(key);
+      return step > 1 ? 1 : 16 * ((b && b.size) || 1);
+    }
+
+    function paintBox(g, box, dpr) {
+      const s = (box.size || 1) * (BLOCK / 16);
+      const corner = (sx, y, sz) => info.toScreen(info.view(add(rotate([sx * 8 * s, y, sz * 8 * s], [0, box.rot || 0, 0]), box.at)));
+      const lo = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => corner(a, 0, b));
+      const hi = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => corner(a, 16 * s, b));
+      g.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      g.fillStyle = 'rgba(255, 255, 255, 0.12)';
+      g.lineWidth = 1.5 * dpr;
+      g.setLineDash([4 * dpr, 3 * dpr]);
+      g.beginPath();
+      for (const ring of [lo, hi]) {
+        ring.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y)));
+        g.closePath();
+      }
+      for (let k = 0; k < 4; k++) {
+        g.moveTo(lo[k][0], lo[k][1]);
+        g.lineTo(hi[k][0], hi[k][1]);
+      }
+      g.stroke();
+      g.beginPath();
+      lo.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y)));
+      g.closePath();
+      g.fill();
+      g.setLineDash([]);
+    }
+
+    function paintOverlay() {
       const g = canvas.getContext('2d');
-      const z = gizmo;
+      const dpr = dprOf();
       g.save();
       g.lineCap = 'round';
       g.lineJoin = 'round';
-      // Выбранная часть — тонкий контур.
-      g.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-      g.lineWidth = 1.25 * z.dpr;
-      for (const hit of hits) {
-        if (hit.key !== state.part) continue;
-        g.beginPath();
-        hit.poly.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y)));
-        g.closePath();
-        g.stroke();
-      }
+      const outline = (key, stroke, fill) => {
+        g.strokeStyle = stroke;
+        g.lineWidth = 1.25 * dpr;
+        if (fill) g.fillStyle = fill;
+        for (const hit of hits) {
+          if (hit.key !== key) continue;
+          g.beginPath();
+          hit.poly.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y)));
+          g.closePath();
+          if (fill) g.fill();
+          g.stroke();
+        }
+      };
+      // Выбранное — тонкий контур.
+      if (state.part && state.tool === 'select' && (gizmo || scene)) outline(state.part, 'rgba(255, 255, 255, 0.55)');
+      if (state.tool === 'break' && typeof aim === 'string') outline(aim, '#ff6b6b', 'rgba(255, 80, 80, 0.28)');
+      if (state.tool === 'place' && aim && aim.at) paintBox(g, aim, dpr);
+      if (gizmo) paintGizmo(g);
+      g.restore();
+    }
+
+    function paintGizmo(g) {
+      const z = gizmo;
       const active = (id) => (drag && drag.target === id) || (!drag && hover === id);
       // Сначала задние половины колец (бледно), потом передние.
       for (const front of [false, true]) {
@@ -629,17 +1055,18 @@
         g.lineTo(to[0] - Math.cos(ang + 0.45) * head, to[1] - Math.sin(ang + 0.45) * head);
         g.closePath();
         g.fill();
+        // Подпись — за остриём: у стрелки вниз под ним, у стрелки вверх над ним.
+        const down = to[1] >= from[1];
         g.font = `600 ${11 * z.dpr}px system-ui, sans-serif`;
         g.textAlign = 'center';
-        g.textBaseline = 'top';
-        g.fillText('присесть', to[0], to[1] + 5 * z.dpr);
+        g.textBaseline = down ? 'top' : 'bottom';
+        g.fillText(z.arrow.label, to[0], to[1] + (down ? 5 : -5) * z.dpr);
       }
-      // Сустав.
+      // Центр поворота.
       g.fillStyle = '#fff';
       g.beginPath();
       g.arc(z.cs[0], z.cs[1], 3 * z.dpr, 0, Math.PI * 2);
       g.fill();
-      g.restore();
     }
 
     const render = () => {
@@ -652,17 +1079,25 @@
       }
       el.dataset.mounted = '1';
       fit(canvas);
+      // Поворот фигуры (look.turn) поменяли — ползунком или прямо в look: фигура поворачивается, камера остаётся.
+      const turn = Number(state.look && state.look.turn) || 0;
+      if (turn !== state.turn) {
+        state.yaw += turn - state.turn;
+        state.turn = turn;
+      }
       const look = lookOpts(state.look, 0);
+      // В студии рамка карточки (размер и сдвиг фигуры) не нужна: камера своя — приближение, сдвиг и сетка на полу.
+      const camera = scene ? { zoom: 1, offset: null, viewZoom: state.zoom, pan: state.pan, floor: true } : {};
       hits = [];
-      info = draw(canvas, state.skin, { slim: state.slim, pose: look.pose, angles: look.angles, zoom: look.zoom, yaw: state.yaw, pitch: state.pitch, time: null, hits });
-      gizmo = look.pose === 'custom' ? buildGizmo() : null;
-      if (gizmo) paintGizmo();
+      info = draw(canvas, state.skin, { ...look, ...camera, slim: state.slim, yaw: state.yaw, pitch: state.pitch, time: null, hits, onModel: redraw });
+      gizmo = buildGizmo();
+      if (info) paintOverlay();
     };
     const redraw = () => {
       if (!frame) frame = requestAnimationFrame(render);
     };
 
-    /** Что под точкой холста: кольцо (0, 1, 2), стрелка 'lift', часть тела { part } или null. */
+    /** Что под точкой холста: кольцо (0, 1, 2), стрелка 'lift', часть тела (в сцене — и предмет, блок) { part } или null. */
     function pick(x, y) {
       if (gizmo) {
         const near = 9 * gizmo.dpr;
@@ -680,8 +1115,29 @@
         }
         if (best) return best;
       }
-      for (let k = hits.length - 1; k >= 0; k--) if (inPoly(hits[k].poly, x, y)) return { part: hits[k].key };
+      return hitAt(x, y);
+    }
+
+    /** Что нарисовано под точкой (без колец): { part } или null. */
+    function hitAt(x, y) {
+      for (let k = hits.length - 1; k >= 0; k--) {
+        if (!inPoly(hits[k].poly, x, y)) continue;
+        // Предметы и блоки закрывают тело; выбрать их можно только в редакторе сцены (студии).
+        return PART_KEYS.has(hits[k].key) || scene ? { part: hits[k].key } : null;
+      }
       return null;
+    }
+
+    /** Для инструментов «ставить»/«ломать»: что под мышью, нормаль грани (в мире), точка пола. */
+    function under(x, y) {
+      let top = null;
+      for (let k = hits.length - 1; k >= 0; k--) {
+        if (inPoly(hits[k].poly, x, y)) {
+          top = hits[k];
+          break;
+        }
+      }
+      return { key: top ? top.key : null, normal: top && top.normal && info ? info.toWorldDir(top.normal) : null, ground: info ? info.unproject(x, y, 0) : null };
     }
 
     const pointer = (e) => {
@@ -689,19 +1145,50 @@
       return [((e.clientX - r.left) * canvas.width) / (r.width || 1), ((e.clientY - r.top) * canvas.height) / (r.height || 1)];
     };
 
+    function select(key) {
+      if (key === state.part) return;
+      state.part = key;
+      if (opts.onSelect) opts.onSelect(key);
+    }
+
+    /** Начало движения кольцом или стрелкой: запомнить «как было» и, если поза готовая, сделать её своей. */
+    function begin() {
+      if (opts.onStart) opts.onStart(state.part);
+      if (kindOf(state.part) === 'part' && state.look.pose !== 'custom') {
+        state.look.angles = poseAngles(state.look.pose);
+        state.look.pose = 'custom';
+      }
+    }
+
     canvas.addEventListener('pointerdown', (e) => {
-      if (e.button !== undefined && e.button !== 0) return;
       const [x, y] = pointer(e);
-      const hit = pick(x, y);
+      if (scene && (e.button === 1 || e.button === 2)) {
+        e.preventDefault();
+        try {
+          canvas.setPointerCapture(e.pointerId);
+        } catch {
+          // указатель уже отпущен
+        }
+        drag = { target: 'pan', x, y, pan: state.pan.slice() };
+        return;
+      }
+      if (e.button !== undefined && e.button !== 0) return;
+      const hit = state.tool === 'select' ? pick(x, y) : null;
       try {
         canvas.setPointerCapture(e.pointerId);
       } catch {
         // указатель уже отпущен — тянуть всё равно можно, пока он над холстом
       }
+      if (state.tool !== 'select') {
+        // «Ставить» и «Ломать»: нажатие без движения — действие, с движением — повернуть камеру.
+        drag = { target: 'camera', x, y, yaw: state.yaw, pitch: state.pitch, moved: false, tap: true };
+        return;
+      }
       const angles = state.look && state.look.angles;
-      if (hit && hit.target === 'lift' && angles) {
-        drag = { target: 'lift', x, y, from: angles.lift || 0 };
-      } else if (hit && hit.target !== undefined && angles) {
+      // Кольцо и стрелка: изменение (и шаг отмены) — с первого движения; просто нажатие — выбрать то, что под ними.
+      if (hit && hit.target === 'lift' && (angles || scene)) {
+        drag = { target: 'lift', x, y, from: 0, started: false };
+      } else if (hit && hit.target !== undefined && (angles || scene)) {
         const { A } = hit.ring;
         const r = sub(hit.at.p, gizmo.c);
         const t3 = cross(A, r);
@@ -709,7 +1196,8 @@
           target: hit.target,
           x,
           y,
-          from: angles[state.part][hit.target],
+          from: 0,
+          started: false,
           // Кольцо смотрит на нас — крутим вокруг центра; стоит ребром — тянем вдоль касательной.
           facing: Math.abs(A[2]) > 0.3 ? Math.sign(A[2]) : 0,
           phi: Math.atan2(y - gizmo.cs[1], x - gizmo.cs[0]),
@@ -717,17 +1205,33 @@
           tangent: [t3[0] * info.scale, -t3[1] * info.scale],
           px: gizmo.px,
         };
+      } else if (scene && hit && kindOf(hit.part) === 'block' && info) {
+        // Блок: выбрать и сразу тянуть по полу (на его высоте).
+        const b = blockOf(hit.part);
+        select(hit.part);
+        drag = { target: 'move', key: hit.part, x, y, from: b.at.slice(), start: info.unproject(x, y, b.at[1]), moved: false };
+        redraw();
+        return;
       } else {
-        drag = { target: 'camera', x, y, yaw: state.yaw, pitch: state.pitch, moved: false, part: hit && hit.part };
+        drag = { target: 'camera', x, y, yaw: state.yaw, pitch: state.pitch, moved: false, part: hit ? hit.part : null };
         return;
       }
-      if (opts.onStart) opts.onStart(state.part);
       redraw();
     });
 
     canvas.addEventListener('pointermove', (e) => {
       const [x, y] = pointer(e);
       if (!drag) {
+        if (state.tool !== 'select') {
+          const u = under(x, y);
+          const next = state.tool === 'place' ? (opts.target ? opts.target(u) : null) : kindOf(u.key) === 'block' ? u.key : null;
+          canvas.style.cursor = next ? 'crosshair' : '';
+          if (JSON.stringify(next) !== JSON.stringify(aim)) {
+            aim = next;
+            redraw();
+          }
+          return;
+        }
         const hit = pick(x, y);
         const next = hit ? (hit.target !== undefined ? hit.target : 'part') : null;
         canvas.style.cursor = next === null ? '' : next === 'part' ? 'pointer' : 'grab';
@@ -737,7 +1241,12 @@
         }
         return;
       }
-      const dpr = canvas.width / (canvas.clientWidth || canvas.width);
+      const dpr = dprOf();
+      if (drag.target === 'pan') {
+        state.pan = [drag.pan[0] + x - drag.x, drag.pan[1] + y - drag.y];
+        redraw();
+        return;
+      }
       if (drag.target === 'camera') {
         if (Math.hypot(x - drag.x, y - drag.y) > 4 * dpr) drag.moved = true;
         state.yaw = drag.yaw + ((x - drag.x) / dpr) * 0.7;
@@ -745,12 +1254,36 @@
         redraw();
         return;
       }
-      const angles = state.look.angles;
+      if (drag.target === 'move') {
+        if (!drag.moved) {
+          if (Math.hypot(x - drag.x, y - drag.y) < 4 * dpr) return;
+          drag.moved = true;
+          if (opts.onStart) opts.onStart(drag.key);
+        }
+        const b = blockOf(drag.key);
+        const p = info && info.unproject(x, y, drag.from[1]);
+        if (!b || !p || !drag.start) return;
+        const step = snapStep(drag.key, e.shiftKey);
+        const S = limits().side;
+        const snap = (v) => clamp(Math.round(v / step) * step, -S, S);
+        b.at = [snap(drag.from[0] + p[0] - drag.start[0]), drag.from[1], snap(drag.from[2] + p[2] - drag.start[2])];
+        redraw();
+        if (opts.onChange) opts.onChange(drag.key);
+        return;
+      }
+      if (!drag.started) {
+        if (Math.hypot(x - drag.x, y - drag.y) < 3 * dpr) return;
+        drag.started = true;
+        begin();
+        drag.from = drag.target === 'lift' ? arrowValue() : ringValue(drag.target);
+      }
       if (drag.target === 'lift') {
-        const u = gizmo.arrow.perUnit;
+        const u = gizmo ? gizmo.arrow.perUnit : null;
+        if (!u) return;
         const k = ((x - drag.x) * u[0] + (y - drag.y) * u[1]) / (u[0] * u[0] + u[1] * u[1] || 1);
-        angles.lift = Math.max(-12, Math.min(0, Math.round(drag.from - k)));
+        setArrow(drag.from + k * (gizmo.arrow.sign || -1), e.shiftKey);
       } else {
+        if (!gizmo) return;
         let delta;
         if (drag.facing) {
           const phi = Math.atan2(y - gizmo.cs[1], x - gizmo.cs[0]);
@@ -766,7 +1299,7 @@
         }
         let v = drag.from + delta / DEG;
         if (e.shiftKey) v = Math.round(v / 15) * 15;
-        angles[state.part][drag.target] = Math.round(wrap180(v));
+        setRing(drag.target, Math.round(wrap180(v)));
       }
       redraw();
       if (opts.onChange) opts.onChange(state.part);
@@ -776,23 +1309,51 @@
       if (!drag) return;
       const was = drag;
       drag = null;
+      if (was.target === 'pan') return;
       if (was.target === 'camera') {
-        if (!was.moved && was.part && was.part !== state.part) {
-          state.part = was.part;
-          if (opts.onSelect) opts.onSelect(was.part);
+        if (!was.moved && was.tap) {
+          aim = null;
+          if (opts.onTap) opts.onTap(under(was.x, was.y));
+        } else if (!was.moved && (was.part || scene) && was.part !== state.part) {
+          select(was.part || null);
         }
+      } else if (was.target === 'move') {
+        if (was.moved && opts.onEnd) opts.onEnd(was.key);
+      } else if (!was.started) {
+        const under = hitAt(was.x, was.y);
+        if (under && under.part !== state.part) select(under.part);
       } else if (opts.onEnd) opts.onEnd(state.part);
       redraw();
     };
     canvas.addEventListener('pointerup', stop);
     canvas.addEventListener('pointercancel', stop);
     canvas.addEventListener('pointerleave', () => {
-      if (!drag && hover !== null) {
+      if (drag) return;
+      if (hover !== null || aim !== null) {
         hover = null;
+        aim = null;
         redraw();
       }
     });
+    if (scene) {
+      canvas.addEventListener(
+        'wheel',
+        (e) => {
+          e.preventDefault();
+          const [x, y] = pointer(e);
+          const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+          zoomAt(x, y, state.zoom * Math.exp(-dy * 0.0015));
+        },
+        { passive: false }
+      );
+      canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
     canvas.addEventListener('keydown', (e) => {
+      if (scene && (e.key === '+' || e.key === '=' || e.key === '-')) {
+        e.preventDefault();
+        zoomBy(e.key === '-' ? 1 / 1.25 : 1.25);
+        return;
+      }
       const step = { ArrowLeft: [-15, 0], ArrowRight: [15, 0], ArrowUp: [0, -8], ArrowDown: [0, 8] }[e.key];
       if (!step) return;
       e.preventDefault();
@@ -801,16 +1362,28 @@
       redraw();
     });
 
+    /** Приблизить (k > 1) или отдалить к центру кадра. */
+    function zoomBy(k) {
+      zoomAt(canvas.width / 2, canvas.height / 2, state.zoom * k);
+    }
+
     function set(next = {}) {
-      if (next.look) {
-        if ((Number(next.look.turn) || 0) !== (Number(state.look && state.look.turn) || 0)) {
-          state.look = next.look;
-          resetCamera();
-        }
-        state.look = next.look;
+      if (next.camera) {
+        // Другой вид — камера встаёт, как в нём (поворот фигуры look.turn — тоже).
+        if (next.camera.yaw !== undefined) baseYaw = next.camera.yaw;
+        if (next.camera.pitch !== undefined) basePitch = next.camera.pitch;
+        if (next.look) state.look = next.look;
+        resetCamera();
       }
+      if (next.look) state.look = next.look;
       if (next.part !== undefined) state.part = next.part;
       if (next.slim !== undefined) state.slim = !!next.slim;
+      if (next.tool && next.tool !== state.tool) {
+        state.tool = next.tool;
+        aim = null;
+        hover = null;
+        canvas.style.cursor = '';
+      }
       redraw();
     }
 
@@ -829,7 +1402,20 @@
         redraw();
       })
       .catch(() => el.classList.remove('is-loading'));
-    return { el, canvas, set, resetCamera, destroy, get part() { return state.part; } };
+    return {
+      el,
+      canvas,
+      set,
+      resetCamera,
+      zoomBy,
+      destroy,
+      get part() {
+        return state.part;
+      },
+      get zoom() {
+        return state.zoom;
+      },
+    };
   }
 
   /**
@@ -844,7 +1430,7 @@
     fit(canvas, width, height);
     let current = look || { pose: poseKey };
     let skin = null;
-    const paint = () => skin && draw(canvas, skin, { slim, pitch: 8, ...lookOpts(current, 28) });
+    const paint = () => skin && draw(canvas, skin, { slim, pitch: 8, ...lookOpts(current, 28), onModel: paint });
     /** Другая поза/размер/поворот без перезагрузки скина (предпросмотр в редакторе). */
     canvas.update = (next) => {
       current = next || current;
@@ -859,5 +1445,5 @@
     return canvas;
   }
 
-  window.Skin3D = { POSES, PARTS, AXIS_COLORS, load, draw, viewer, poser, figure, poseAngles, guessSlim, fit };
+  window.Skin3D = { POSES, PARTS, AXIS_COLORS, load, draw, drawIcon, viewer, poser, figure, poseAngles, lookOpts, guessSlim, fit };
 })();

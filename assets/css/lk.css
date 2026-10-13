@@ -2765,3 +2765,519 @@ a.att-file:hover .att-file__icon {
     padding: 32px 22px 26px;
   }
 }
+
+/* ---------------------------------------------------------------- студия персонажа (#/studio, studio.js) */
+
+.page--studio {
+  max-width: 1680px;
+}
+.studio__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
+.studio__views button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Точка у вида — в нём есть несохранённые изменения. */
+.studio__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-warning);
+}
+.studio__dot[hidden] {
+  display: none;
+}
+.studio__history,
+.studio__save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.studio__save-row {
+  margin-left: auto;
+}
+.studio__status {
+  margin-right: 6px;
+  font-size: 13px;
+  color: var(--c-text-3);
+}
+.studio__status.is-dirty {
+  color: var(--c-warning);
+}
+.studio__error {
+  margin: 0 0 16px;
+}
+.studio__error[hidden] {
+  display: none;
+}
+
+/* Три колонки: сцена | превью | инструменты. Уже — инструменты справа, превью под сценой; телефон — одна колонка. */
+.studio {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'work' 'previews' 'tools';
+  gap: 16px;
+  align-items: start;
+}
+.studio__work {
+  grid-area: work;
+}
+.studio__previews {
+  grid-area: previews;
+}
+.studio__tools {
+  grid-area: tools;
+}
+.studio__work,
+.studio__previews,
+.studio__tools {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+}
+.studio__work-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.studio__heading {
+  font-size: 16px;
+  font-weight: 700;
+}
+.studio__selection {
+  font-size: 13px;
+  color: var(--c-text-2);
+}
+.studio__stage {
+  position: relative;
+  display: grid;
+  height: clamp(360px, calc(100dvh - var(--top) - 260px), 760px);
+  border-radius: var(--r-md);
+  background: radial-gradient(120% 90% at 50% 30%, var(--c-surface-3), var(--c-field));
+  overflow: hidden;
+}
+.studio__stage .skin3d,
+.studio__stage .skin3d__canvas {
+  min-height: 0;
+  height: 100%;
+}
+.studio__zoom {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.studio__zoom .icon-btn,
+.studio__zoom .btn {
+  background: rgba(0, 0, 0, 0.45);
+}
+.studio__tool-badge {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  max-width: calc(100% - 20px);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  pointer-events: none;
+}
+.studio__tool-badge[hidden] {
+  display: none;
+}
+.studio__hint {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--c-text-3);
+}
+
+/* Превью: как увидят другие. Выбранный вид — с рамкой. */
+.studio__preview {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 2px solid transparent;
+  border-radius: var(--r-md);
+  background: var(--c-field);
+  transition: border-color 0.15s;
+}
+.studio__preview.is-active {
+  border-color: var(--c-blue-2);
+}
+.studio__preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.studio__preview-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-text-2);
+}
+.studio__preview-edit[aria-pressed='true'] {
+  color: var(--c-blue-2);
+}
+/* Персонаж выглядывает над карточкой — место сверху. */
+.studio__preview-card {
+  width: 100%;
+  max-width: 280px;
+  margin: 0 auto;
+  padding-top: 44px;
+}
+.studio__detail-stage,
+.studio__detail-stage .skin3d,
+.studio__detail-stage .skin3d__canvas {
+  min-height: 300px;
+}
+.studio__detail-stage {
+  cursor: pointer;
+}
+
+/* Инструменты */
+.studio__tabs .tabs__tab {
+  flex: 1 1 0;
+  padding: 0 8px;
+}
+.studio__panel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.studio__group {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.studio__panel .look__custom {
+  min-width: 0;
+}
+.studio__panel .look__slider {
+  grid-template-columns: minmax(0, 120px) minmax(0, 1fr) 52px;
+}
+.studio__notice {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 14px;
+}
+.studio__row-between {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.studio__counter {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.studio__counter.is-full {
+  color: var(--c-warning);
+}
+.studio__filled {
+  margin-left: 4px;
+  color: var(--c-warning);
+}
+.studio__slots button,
+.studio__tool-switch button {
+  padding: 0 12px;
+}
+.studio__current {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--c-field);
+}
+.studio__current-text {
+  flex: 1;
+  min-width: 0;
+}
+.studio__current-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.studio__current-id {
+  font-size: 12px;
+  color: var(--c-text-3);
+  overflow-wrap: anywhere;
+}
+.studio__list {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: auto;
+}
+.studio__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+}
+.studio__row.is-selected {
+  background: var(--c-surface-3);
+}
+.studio__row-text,
+.studio__row-pick {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  text-align: left;
+}
+.studio__row-pick {
+  min-height: 32px;
+  color: var(--c-text-2);
+}
+.studio__row-pick:hover,
+.studio__row-pick[aria-pressed='true'] {
+  color: #fff;
+}
+.studio__row-del {
+  flex: none;
+}
+
+/* Палитра: значки 32 px, страницами. */
+.studio__palette {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+.studio__kinds {
+  justify-self: start;
+}
+.studio__kinds button {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.studio__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  gap: 4px;
+  min-height: 96px;
+}
+.studio__tile {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--c-field);
+  transition: border-color 0.15s, background 0.15s;
+}
+.studio__tile:hover {
+  border-color: var(--c-border-strong);
+  background: var(--c-surface-3);
+}
+.studio__tile[aria-pressed='true'] {
+  border-color: var(--c-blue-2);
+  background: var(--c-surface-3);
+}
+.studio__tile .mc-icon,
+.studio__current .mc-icon,
+.studio__row .mc-icon {
+  width: 32px;
+  height: 32px;
+  image-rendering: pixelated;
+}
+.studio__row .mc-icon {
+  width: 24px;
+  height: 24px;
+  flex: none;
+}
+.studio__current .mc-icon {
+  flex: none;
+}
+.studio__empty {
+  grid-column: 1 / -1;
+}
+.studio__pal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.studio__count,
+.studio__page,
+.studio__loading {
+  font-size: 13px;
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.studio__pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Свои картинки */
+.studio__texs {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.studio__tex {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px;
+  border-radius: var(--r-md);
+  background: var(--c-field);
+}
+.studio__tex-img {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--r-sm);
+  image-rendering: pixelated;
+  background: repeating-conic-gradient(rgba(255, 255, 255, 0.08) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+}
+.studio__current .studio__tex-img {
+  width: 40px;
+  height: 40px;
+}
+.studio__tex-body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.studio__tex-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.studio__tex-del {
+  color: var(--c-danger);
+}
+.studio__no-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: var(--c-surface-3);
+}
+
+/* Окно «Какую часть картинки взять» */
+.studio-crop__row {
+  justify-self: stretch;
+  justify-content: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.studio-crop__stage {
+  flex: none;
+  width: min(300px, 100%);
+}
+/* Сетка 16 × 16 поверх — видно, какие точки получатся. */
+.studio-crop__grid {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.14) 1px, transparent 1px);
+  background-size: 6.25% 6.25%;
+  pointer-events: none;
+}
+.studio-crop__side {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.studio-crop__preview {
+  width: 96px;
+  height: 96px;
+  border-radius: var(--r-sm);
+  image-rendering: pixelated;
+  background: repeating-conic-gradient(rgba(255, 255, 255, 0.08) 0 25%, transparent 0 50%) 0 0 / 24px 24px;
+}
+
+@media (min-width: 1024px) {
+  .studio {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    grid-template-areas: 'work tools' 'previews tools';
+  }
+  .studio__previews {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .studio__previews > .studio__heading {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 1400px) {
+  .studio {
+    grid-template-columns: minmax(0, 1.5fr) minmax(280px, 340px) minmax(360px, 1fr);
+    grid-template-areas: 'work previews tools';
+  }
+  .studio__previews {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .studio__work {
+    position: sticky;
+    top: calc(var(--top) + 16px);
+  }
+}
+@media (max-width: 640px) {
+  .studio__bar {
+    padding: 8px;
+  }
+  .studio__save-row {
+    margin-left: 0;
+  }
+  .studio__history {
+    min-width: 0;
+  }
+  .studio__copy {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    text-align: left;
+  }
+  .studio__views,
+  .studio__views button {
+    flex: 1 1 auto;
+  }
+  .studio__work,
+  .studio__previews,
+  .studio__tools {
+    padding: 12px;
+  }
+  .studio__stage {
+    height: 360px;
+  }
+  .studio__panel .look__slider {
+    grid-template-columns: minmax(0, 1fr) 52px;
+  }
+  .studio__tabs .tabs__tab {
+    flex: 1 1 40%;
+  }
+}

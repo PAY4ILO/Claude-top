@@ -57,6 +57,7 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 | `#/support` | Чат с тех поддержкой |
 | `#/players` | Игроки: поиск, вкладки «Сначала в сети / По времени игры / Недавно были / Топы» (игроку), карточка → окно с 3D-скином и всей статистикой |
 | `#/profile` | Игрок: «Моя карточка» (поза, фон, «о себе», соцсети, скрыть карточку или отдельные поля) и «Мой скин» (PNG, тонкие руки, сайт ставит его на сервер). Всем: фото (загрузка, перетаскивание, обрезка, удаление), ник (у игрока — только через поддержку), пароль, удаление аккаунта |
+| `#/studio` | Студия персонажа — **в работе** |
 | `#/admin/applications[/:id]` | Заявки: фильтры и поиск слева, анкета, решение, вайтлист (добавлен сам / «Повторить» / команда) и удаление справа |
 | `#/admin/tickets[/:id]` | Обращения: список с непрочитанными и «в сети» слева, чат справа (закрыть, удалить) |
 | `#/admin/users[/:id]` | Люди: роли, права админов (для создателя), запросы «Забыли пароль?», одноразовые ссылки сброса, удаление |
@@ -94,6 +95,7 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 - **Сброс пароля** — сайт не шлёт писем: пользователь оставляет запрос, админ выдаёт одноразовую ссылку на сутки.
 - **Файлы** — аватары проверяются по сигнатуре (JPEG/PNG/WebP), сборки — только `.zip`/`.mrpack` с настоящим zip-заголовком; наружу отдаются только страницы и `assets/`.
 - **CSP** без `unsafe-inline`, `frame-ancestors 'none'`, `nosniff`; HTML из сообщений не выполняется.
+  `connect-src` — только свой сайт и `https://piston-data.mojang.com` (куски `client.jar` для блоков и предметов).
 - **Данных пользователей в репозитории нет**: база живёт в `LWL_DATA_DIR` на машине.
 
 ## API
@@ -124,9 +126,10 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 | GET | `/api/players?sort=online\|playtime\|recent` | все | → `{players, total, full}`; гостю и пользователю (`full: false`) — ник, роль, скин, поза, фон, «о себе», соцсети; игроку и админу ещё `stats`, `online`/`lastSeen`, `firstSeen` и `online` (сколько в сети). Скрытые карточки и поля не отдаются |
 | GET | `/api/players/:nick` | все | → `{player}` (так же по ролям) или 404 «Карточки нет или игрок её скрыл» |
 | GET | `/api/online` | все | → `{count}` — сколько сейчас на сервере (60 запросов в минуту с IP) |
-| GET / PATCH | `/api/me/card` | игрок | → `{bio, hidden, hideFields, pose, looks, background, backgroundUrl, customBackground, socials, skin, card}` / любое из `{bio, hidden, hideFields, pose, looks, background, socials}` (`socials` — только меняемые ключи, `""` — удалить; `looks` — `{card?, detail?}`, каждый `{pose: ключ \| "custom", angles?, scale 0.6–1.3, turn ±180}`; `background: "custom"` — только если картинка загружена) |
+| GET / PATCH | `/api/me/card` | игрок | → `{bio, hidden, hideFields, pose, looks, background, backgroundUrl, customBackground, socials, skin, card}` / любое из `{bio, hidden, hideFields, pose, looks, background, socials}` (`socials` — только меняемые ключи, `""` — удалить; `looks` — `{card?, detail?}`, каждый `{pose: ключ \| "custom", angles?, scale 0.6–1.3, turn ±180, offset?, held?, blocks?, textures?}` — см. «Блоки и предметы»; `background: "custom"` — только если картинка загружена) |
 | PUT / DELETE | `/api/me/background` | игрок | сырое тело WebP/JPEG/PNG до 400 КБ и 1600 точек по стороне (кабинет сам уменьшает и сжимает) → как `GET /api/me/card`; DELETE — убрать картинку, фон станет «Луг» (10 загрузок за 10 минут с IP) |
 | DELETE | `/api/players/:nick/background` | «Люди» | убрать чужую картинку фона → `{player}` |
+| DELETE | `/api/players/:nick/textures` | «Люди» | убрать свои картинки 16×16 игрока (`looks.card`/`looks.detail` → `textures`) и всё, что на них ссылается (`held`/`blocks` с id `tex1…tex3`); остальное в позе остаётся → `{player}`; 404 — нет такого игрока |
 | GET | `/api/backgrounds/:sha256.(webp\|jpg\|png)` | все | картинка фона (кешируется навсегда: имя — хеш содержимого) |
 | PUT | `/api/me/skin` | игрок | сырое тело PNG 64×64 или 64×32 до 64 КБ, заголовок `X-Skin-Model: classic\|slim` → как `GET /api/me/card`; сайт ставит скин на сервер через RCON |
 | POST | `/api/me/skin/nick` | игрок | `{nickname}` — скин как у лицензии с этим ником (сайт спрашивает Mojang) → как `GET /api/me/card` |
@@ -196,7 +199,7 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 150 с без вестей. Координаты, инвентарь, IP и способ входа мод не отправляет, сайт их не принимает.
 
 **Скины.** Скин из игры сайт скачивает только с `https://textures.minecraft.net/texture/<hex>` и хранит у себя
-(`LWL_DATA_DIR/skins/<sha256>.png`) — браузер посетителя к Mojang не ходит. В профиле игрок может загрузить
+(`LWL_DATA_DIR/skins/<sha256>.png`) — за скинами браузер посетителя к Mojang не ходит. В профиле игрок может загрузить
 свой PNG: он сразу виден на сайте, а если настроен RCON и `LWL_PUBLIC_URL` — публичный адрес сайта, —
 сайт выполняет на сервере `skin of <ник> url <адрес сайта>/api/skins/<хеш>.png [slim]` (мод `lwl-skins`
 скачивает картинку через MineSkin, поэтому адрес должен открываться из интернета). Иначе кабинет честно
@@ -217,6 +220,16 @@ LWL_ADMINS=you@example.com npm start     # http://localhost:8080
 «Присесть»; пустое место — повернуть камеру. Ползунки остаются для точной настройки, «Отменить» / Ctrl+Z —
 шаг назад. Части только поворачиваются в суставах, как в Minecraft, — оторвать их от тела нельзя.
 В окне игрока посетитель может примерить другие позы, кнопка «Как у игрока» возвращает настроенную.
+
+**Блоки и предметы.** Кроме позы вид персонажа может хранить предметы в правой и левой руке и на голове, до 32 блоков
+вокруг, сдвиг фигуры в кадре и до трёх своих картинок 16×16 (из них получается плоский предмет или куб). Модели
+и текстуры настоящие, из игры, но в репозитории их нет: `assets/js/mc-index.json` — только оглавление официального
+`client.jar` (где лежит каждый файл, родители моделей, списки блоков и предметов). Нужные куски jar браузер посетителя
+берёт сам прямо у Mojang (`piston-data.mojang.com`) и хранит в своём кеше; сервер сайта ничего нового не скачивает,
+а id блоков и предметов сверяет с тем же оглавлением с диска. Названия — английские, из игры. Сундука, щита и других
+вещей, которые игра рисует не моделью, нет; вода и лава — кубы с их текстурой. При переходе на новую версию Minecraft
+оглавление пересобирают на машине разработчика (не на сервере сайта): `node tools/mc-index.mjs [версия]`
+(по умолчанию 26.3).
 
 **Свой фон.** Кроме готовых фонов игрок может загрузить свою картинку (JPEG, PNG, WebP). Браузер сам
 уменьшает её до 1280 точек и сжимает в WebP — обычно выходит 100–300 КБ, сервер принимает не больше 400 КБ.
@@ -296,8 +309,9 @@ assets/js/       api.js    — ЕДИНСТВЕННЫЙ слой данных н
                  ui.js     — DOM-помощники, окна, уведомления, форматирование
                  auth.js   — окно входа, регистрации и «Забыли пароль?»
                  landing.js, lk.js (каркас, роутер, экраны), lk-chat.js (чат)
-                 players.js (карточки, список, окно игрока, «Моя карточка»), skin3d.js (3D-скин на canvas),
-                 players-page.js (карточки на players.html и главной, «Сейчас на сервере»)
+                 players.js (карточки, список, окно игрока, «Моя карточка»), skin3d.js (3D-скин, предметы
+                 и блоки на canvas), players-page.js (карточки на players.html и главной, «Сейчас на сервере»)
+                 mc-art.js (блоки и предметы игры из client.jar у Mojang), mc-index.json (оглавление client.jar)
 assets/img/      картинки сайта (SVG, WebP)
 assets/fonts/    Russo One и Inter + лицензии
 server/          index.js (запуск), app.js (сессии, права, маршрутизация), db.js (схема и миграции),
@@ -306,7 +320,7 @@ server/          index.js (запуск), app.js (сессии, права, ма
                  и файлы в чате, game.js — запросы мода lwl-stats, players.js — карточки и свой скин)
 deploy/          install.sh, update.sh, служба systemd, nginx, бэкапы — см. deploy/README.md
 design/figma/    оригиналы из Figma и рендеры фреймов макета
-tools/           figma-export.mjs, figma-cards.mjs, prepare-assets.py
+tools/           figma-export.mjs, figma-cards.mjs, prepare-assets.py, mc-index.mjs (оглавление client.jar)
 tests/           api.test.mjs (API), e2e.mjs (браузер), fixtures/
 minecraft/       моды для сервера Fabric 26.3: скины (lwl-skins), авторизация (lwl-auth), статистика для сайта
                  (lwl-stats) — см. minecraft/README.md

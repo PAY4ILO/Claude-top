@@ -11,6 +11,8 @@
   `assets/js/ui.js` — `h()`, `UI.append`, окна, тосты, `field()`, иконки (`ICONS`).
 - `assets/js/api.js` — **единственный** модуль страницы, который ходит в сервер. Новые запросы добавлять только сюда
   (и события `emit(...)`, чтобы другие экраны/вкладки обновились).
+- `assets/js/mc-art.js` (`window.McArt`) — блоки и предметы игры по оглавлению `assets/js/mc-index.json`
+  (собирает `tools/mc-index.mjs`), см. «Предметы и блоки» ниже. `#/studio` в кабинете — студия персонажа (**в работе**).
 - `server/` — Node.js без зависимостей: `app.js` (сессии, права `need.user/admin/perm/creator/player`, настройки, роутинг),
   `routes/*.js` (API по разделам), `db.js` (SQLite, миграции), `lib/` (http, пароли scrypt, проверки, `permissions.js` —
   права админов, `rcon.js` — консоль Minecraft-сервера, `files.js` — картинка ли файл по первым байтам, безопасное имя,
@@ -30,6 +32,11 @@
   Внутри `tx()` нельзя `await` (SQLite синхронный) — хеш пароля и работу с файлами делать до транзакции.
 - **CSP без `unsafe-inline`**: никаких `style="…"` в HTML и `setAttribute('style')`; стили — классами в CSS.
   Менять `el.style.width` из JS можно (CSSOM разрешён), так сделан прогресс загрузки.
+- **Внешние адреса** (разрешены владельцем, других нет): сервер сайта ходит только к `textures.minecraft.net` и, для скина
+  по нику, к `api.mojang.com`, `api.minecraftservices.com`, `sessionserver.mojang.com`; браузер посетителя — только
+  к `piston-data.mojang.com` (куски `client.jar`, `McArt`). Это `connect-src` в CSP — он и в `server/lib/http.js`,
+  и в мета-тегах `index.html`, `lk.html`, `players.html`: меняешь — меняй везде. `tools/mc-index.mjs` (ещё
+  `piston-meta.mojang.com`) запускается только на машине разработчика.
 - **`UI.append`/`h()` пропускают `null/undefined/false`**, но не `0` — для чисел писать `n > 0 && …`.
   Нативный `Element.append(null)` печатает «null» — не использовать с условными детьми.
 - `[hidden]` глобально `display:none !important` (base.css): если у элемента свой `display`, `hidden` всё равно работает.
@@ -111,13 +118,35 @@
   перечитывают углы (`read` в `slider()`), история для «Отменить»/Ctrl+Z — в `lookSection()`. e2e считает, где
   кольцо и стрелка «Присесть», той же математикой — меняешь радиус колец (`px`) или место стрелки в `skin3d.js`,
   поправь `poserPoints()` в `tests/e2e.mjs`.
+  **Предметы и блоки** — в том же `looks.<вид>` (без миграции): `offset` [x, y] ±40 — сдвиг фигуры в кадре;
+  `held` — `{rightHand, leftHand, head}`, каждый `{id, rot [x,y,z] ±180, size 0.5–2, at [x,y,z] ±16}` или `null`;
+  `blocks` — до 32 `{id, at [x,y,z] (низ-центр; x, z ±96, y −48…96), rot ±180 (вокруг вертикали), size 0.25–2}`;
+  `textures` — до 3 PNG 16×16 data URL (≤4096 символов, сервер смотрит IHDR), в `held`/`blocks` это id `tex1…tex3`.
+  id предметов и блоков сервер сверяет с `assets/js/mc-index.json` с диска (`mcKnown` в `validate.js`: без сети,
+  читается раз за запуск; файла нет — можно только свои картинки). `normalizeLook` округляет и выкидывает пустое.
+  Пределы `LOOK` — и в `validate.js`, и в `api.js`.
+  Рисует `Skin3D.draw` (`held`, `blocks`, `textures`; `onModel` — перерисовать, когда модель догрузилась; в `opts.hits`
+  ключи `held:<слот>` и `block:<i>`). Предмет в руке/на голове — цепочкой игры (`heldTransform`: ItemInHandLayer /
+  CustomHeadLayer + `display.thirdperson_righthand|thirdperson_lefthand|head` модели, нет левой — зеркало правой),
+  поверх — свои `rot`/`size`/`at`. Блоки сцены: 16 единиц = блок (персонаж — 32).
+  Модели — `McArt`: браузер берёт куски официального `client.jar` прямо у Mojang (`piston-data.mojang.com`, Range
+  кусками по 32 КБ, соседние — одним запросом), распаковывает `DecompressionStream('deflate-raw')`, куски хранит
+  в Cache Storage `mc-jar-<версия>` и качает с `cache: 'no-store'` — HTTP-кеш браузера на Range иногда отдавал весь
+  jar (41 МБ). Не загрузилось — модели нет до перезагрузки страницы. Названия — английские, `lang/en_us.json` из jar
+  (русские лежат на `resources.download.minecraft.net`, а там нет CORS). Сундук, щит и прочее, что игра рисует
+  сущностями (`special`), в оглавление не попадает; вода и лава — кубы с текстурой `*_still`.
+  `node tools/mc-index.mjs [версия]` (по умолчанию 26.3) — только на машине разработчика, не на сервере сайта:
+  читает `client.jar` кусками (Range) и пишет в `mc-index.json` лишь имена, смещения и размеры файлов в jar, родителей
+  моделей, списки блоков и предметов — содержимого Mojang в репозитории нет. Обновляешь Minecraft — перезапусти его.
   **Свой фон** (`lib/backgrounds.js`, `player_cards.bg_file`): браузер сжимает (`compressBackground` в `api.js`: WebP,
   запасной JPEG, ≤1280 точек), сервер принимает `PUT /api/me/background` сырым телом WebP/JPEG/PNG ≤400 КБ и ≤1600 точек,
   без анимированного WebP (проверка по первым байтам `sniffImage`), хранит `LWL_DATA_DIR/backgrounds/<sha256>.<ext>`,
   отдаёт `GET /api/backgrounds/<имя>` (immutable, `nosniff`). При замене старый файл удаляется (`release`, если на него
   больше никто не ссылается), остальное подчищает `sweep()` раз в час; бэкап копирует `backgrounds/`.
   Один фон на оба вида. Убрать чужую картинку — `DELETE /api/players/:nick/background` (право «Люди»; кнопка в окне
-  игрока, `Players.allowModeration` — из кабинета и с `players-page.js`).
+  игрока, `Players.allowModeration` — из кабинета и с `players-page.js`). Так же свои картинки 16×16 —
+  `DELETE /api/players/:nick/textures` (кнопка «Убрать свои картинки», `Api.players.removePlayerTextures`): убирает
+  `textures` из обоих видов и все `held`/`blocks` с id `texN`, остальное в позе не трогает. Журнала действий админов нет.
   `GET /api/online` → `{count}` без входа, 60/мин с IP; «в сети» = `online = 1` и вести не старше `ONLINE_WINDOW_MS` (150 с).
   В e2e статистику шлёт сам тест с `LWL_GAME_TOKEN` (как мод).
 - Ник «Игрока» сам не меняется (он в вайтлисте Minecraft-сервера) — только через поддержку.

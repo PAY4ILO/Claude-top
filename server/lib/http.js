@@ -126,7 +126,7 @@ export function clientIp(req, trustProxy) {
 // То же, что в мета-теге страниц, плюс то, что работает только заголовком (frame-ancestors).
 const CSP =
   "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; font-src 'self'; script-src 'self'; " +
-  "connect-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'";
+  "connect-src 'self' https://piston-data.mojang.com; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'";
 
 export function securityHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');

@@ -9,6 +9,7 @@
  *   #/apply                     — анкета
  *   #/support                   — чат с тех поддержкой
  *   #/profile                   — профиль
+ *   #/studio                    — студия персонажа: поза, предметы, блоки на карточке (игрок)
  *   #/admin/applications[/id]   — заявки: список | карточка заявки
  *   #/admin/tickets[/id]        — обращения: список | чат
  *   #/admin/users[/id]          — пользователи и роли, ссылки для сброса пароля
@@ -129,6 +130,7 @@
     if (a === 'apply') return renderApply();
     if (a === 'support') return renderSupport();
     if (a === 'profile') return renderProfile();
+    if (a === 'studio') return renderStudio();
     if (a === 'players') return renderPlayers();
     if (a === 'server') {
       if (!isPlayer()) return renderServerLocked();
@@ -2118,6 +2120,23 @@
     });
     const list = Players.mount(p.body);
     cleanup = list.destroy;
+  }
+
+  /** Студия персонажа (studio.js): как стоит персонаж на маленькой карточке и в окне игрока. */
+  function renderStudio() {
+    const p = page({
+      title: 'Студия персонажа',
+      sub: 'Поза, предметы в руках, блоки вокруг и свои картинки — отдельно для карточки и для окна игрока.',
+      key: 'profile',
+      actions: h('a', { class: 'btn btn--secondary', href: '#/profile' }, icon('back'), 'К профилю'),
+    });
+    p.root.classList.add('page--studio');
+    if (!isPlayer()) {
+      p.body.append(h('div', { class: 'card' }, stateBlock({ iconName: 'lock', title: 'Карточка — для игроков', text: 'Студия откроется, когда вашу заявку одобрят.', action: h('a', { class: 'btn', href: '#/profile', text: 'В профиль' }) })));
+      return;
+    }
+    const studio = Studio.mount(p.body);
+    cleanup = studio.destroy;
   }
 
   function section(title, text, content, extra) {

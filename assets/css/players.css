@@ -524,13 +524,6 @@
 
 /* ------------------------------------------------------------ персонаж: поза для карточки и для окна */
 
-.look__tabs {
-  margin-top: 2px;
-}
-.look__controls {
-  display: grid;
-  gap: 14px;
-}
 .look__custom {
   display: grid;
   gap: 10px;
@@ -567,10 +560,7 @@
 .look__slider[data-axis='z'] .look__axis {
   background: #3d8bff;
 }
-.poser__reset {
-  top: 10px;
-  bottom: auto;
-}.look__range {
+.look__range {
   width: 100%;
   accent-color: var(--c-blue-2);
 }
@@ -579,17 +569,17 @@
   font-variant-numeric: tabular-nums;
   color: var(--c-text-3);
 }
-.look__status {
-  min-height: 1.4em;
-  font-size: 13px;
-  color: var(--c-text-3);
+/* Профиль: что настроено в студии персонажа */
+.look__summary {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+  color: var(--c-text-2);
 }
-.my-card__stage {
-  min-height: 380px;
-}
-.my-card__caption {
-  margin-top: 10px;
-  font-size: 13px;
+.look__summary-view {
   color: var(--c-text-3);
 }
 .pdetail__moderate {
@@ -782,9 +772,6 @@
   }
   .my-card__preview {
     max-width: 280px;
-  }
-  .my-card__preview:has(.my-card__stage) {
-    max-width: none;
   }
   .look__slider {
     grid-template-columns: minmax(0, 1fr) 48px;

@@ -62,10 +62,28 @@
   const CARD_BACKGROUNDS = { meadow: 'Луг', night: 'Ночь', sunset: 'Закат', ocean: 'Океан', cave: 'Пещера', snow: 'Снег', nether: 'Незер', end: 'Энд' };
   /**
    * Как стоит персонаж: отдельно на маленькой карточке (card) и в окне игрока (detail).
-   * { pose: ключ | 'custom', angles (у custom): { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift }, scale, turn }.
-   * Пределы — как в server/lib/validate.js → LOOK.
+   * { pose: ключ | 'custom', angles (у custom): { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift }, scale, turn,
+   *   offset — сдвиг фигуры в кадре [x, y],
+   *   held — что в руках и на голове: { rightHand, leftHand, head: { id, rot: [x, y, z], size, at: [x, y, z] } | null },
+   *   blocks — блоки вокруг: [{ id, at: [x, y, z] (низ-центр, 16 = блок), rot — поворот вокруг вертикали, size }],
+   *   textures — свои картинки игрока 16×16 (data:image/png), в held и blocks это id tex1…tex3 }.
+   * id предметов и блоков — из assets/js/mc-index.json: здесь проверяются, только если на странице есть McArt
+   * и он уже загрузил оглавление (иначе решает сервер).
+   * Пределы — как в server/lib/validate.js → LOOK (slots — там LOOK_HELD).
    */
-  const LOOK = { views: { card: 'Карточка', detail: 'Окно игрока' }, parts: ['head', 'body', 'rightArm', 'leftArm', 'rightLeg', 'leftLeg'], angle: 180, lift: [-12, 0], scale: [0.6, 1.3], turn: 180 };
+  const LOOK = {
+    views: { card: 'Карточка', detail: 'Окно игрока' },
+    parts: ['head', 'body', 'rightArm', 'leftArm', 'rightLeg', 'leftLeg'],
+    slots: ['rightHand', 'leftHand', 'head'],
+    angle: 180,
+    lift: [-12, 0],
+    scale: [0.6, 1.3],
+    turn: 180,
+    offset: 40,
+    held: { rot: 180, size: [0.5, 2], at: 16 },
+    blocks: { max: 32, side: 96, y: [-48, 96], size: [0.25, 2] },
+    textures: { max: 3, chars: 4096, side: 16 },
+  };
   /** Свой фон: кабинет уменьшает картинку до side точек и сжимает в WebP, чтобы файл был не больше bytes. */
   const BACKGROUND = { side: 1280, bytes: 400 * 1024, sourceBytes: 25 * 1024 * 1024 };
   /**
@@ -132,6 +150,87 @@
 
   /* ------------------------------------------------------------ валидация */
 
+  // Какие блоки и предметы бывают — у McArt (assets/js/mc-art.js), если он есть на странице и уже загрузил оглавление.
+  // Оглавление после загрузки не меняется, поэтому списки собираются один раз.
+  let mcIds = null;
+  function mcKnown() {
+    const art = window.McArt;
+    if (!mcIds && art && art.kind && art.ready) {
+      const list = art.list();
+      mcIds = { blocks: new Set(list.blocks), items: new Set(list.items) };
+    }
+    return mcIds;
+  }
+
+  /** Своя картинка: PNG 16×16 в data:-адресе (смотрим заголовок IHDR, как сервер). */
+  function textureOk(v) {
+    if (typeof v !== 'string' || v.length > LOOK.textures.chars) return false;
+    const m = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(v);
+    if (!m || m[1].replace(/=+$/, '').length < 34) return false; // меньше 25 байт — не PNG
+    let head;
+    try {
+      head = atob(m[1].slice(0, 32)); // первые 24 байта: подпись, длина и имя IHDR, ширина, высота
+    } catch (e) {
+      return false;
+    }
+    const u32 = (i) => ((head.charCodeAt(i) << 24) | (head.charCodeAt(i + 1) << 16) | (head.charCodeAt(i + 2) << 8) | head.charCodeAt(i + 3)) >>> 0;
+    const png = u32(0) === 0x89504e47 && u32(4) === 0x0d0a1a0a && head.slice(12, 16) === 'IHDR';
+    return png && u32(16) === LOOK.textures.side && u32(20) === LOOK.textures.side;
+  }
+
+  const inRange = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+
+  /** Ошибка в одном виде (look) или '' — тексты и порядок проверок как в server/lib/validate.js → lookError. */
+  function lookError(v) {
+    const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+    const vec = (x, n, check) => Array.isArray(x) && x.length === n && x.every((k, i) => check(k, i));
+    if (!isObj(v)) return 'Нужны настройки позы.';
+    if (v.pose !== 'custom' && !Object.hasOwn(CARD_POSES, v.pose)) return 'Такой позы нет.';
+    if (v.scale !== undefined && !inRange(v.scale, ...LOOK.scale)) return `Размер — от ${LOOK.scale[0]} до ${LOOK.scale[1]}.`;
+    if (v.turn !== undefined && !inRange(v.turn, -LOOK.turn, LOOK.turn)) return `Поворот — от −${LOOK.turn}° до ${LOOK.turn}°.`;
+    if (v.pose === 'custom') {
+      const a = v.angles;
+      if (!isObj(a)) return 'Для своей позы нужны углы.';
+      if (LOOK.parts.some((p) => !vec(a[p], 3, (x) => inRange(x, -LOOK.angle, LOOK.angle)))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
+      if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
+    }
+    if (v.offset !== undefined && !vec(v.offset, 2, (k) => inRange(k, -LOOK.offset, LOOK.offset))) return `Сдвиг — от −${LOOK.offset} до ${LOOK.offset}.`;
+    if (v.textures !== undefined) {
+      if (!Array.isArray(v.textures) || v.textures.length > LOOK.textures.max) return `Своих картинок — не больше ${LOOK.textures.max}.`;
+      if (!v.textures.every(textureOk)) return 'Своя картинка — PNG 16×16.';
+    }
+    const known = mcKnown();
+    const texCount = Array.isArray(v.textures) ? v.textures.length : 0;
+    const tex = (id) => /^tex[1-3]$/.test(id) && Number(id.slice(3)) <= texCount;
+    // tex1…tex3 — только из присланных картинок. Остальное — по оглавлению игры; пока его нет, пропускаем
+    // всё похожее на id Minecraft (кроме texN), а есть ли такой блок или предмет, проверит сервер.
+    const exists = (id, kinds) => tex(id) || (known ? kinds.some((k) => known[k].has(id)) : /^[a-z0-9_./-]+$/.test(id) && !/^tex\d*$/.test(id));
+    if (v.held !== undefined) {
+      if (!isObj(v.held)) return 'Неверные предметы в руках.';
+      const H = LOOK.held;
+      for (const [slot, e] of Object.entries(v.held)) {
+        if (!LOOK.slots.includes(slot)) return 'Предмет можно держать только в руках или на голове.';
+        if (e === null) continue;
+        if (!isObj(e) || typeof e.id !== 'string') return 'Неверный предмет.';
+        if (!exists(e.id, ['items', 'blocks'])) return 'Такого предмета нет.';
+        if (e.rot !== undefined && !vec(e.rot, 3, (k) => inRange(k, -H.rot, H.rot))) return `Поворот предмета — от −${H.rot}° до ${H.rot}°.`;
+        if (e.size !== undefined && !inRange(e.size, ...H.size)) return `Размер предмета — от ${H.size[0]} до ${H.size[1]}.`;
+        if (e.at !== undefined && !vec(e.at, 3, (k) => inRange(k, -H.at, H.at))) return 'Предмет слишком далеко от руки.';
+      }
+    }
+    if (v.blocks !== undefined) {
+      const B = LOOK.blocks;
+      if (!Array.isArray(v.blocks) || v.blocks.length > B.max) return `Блоков — не больше ${B.max}.`;
+      for (const b of v.blocks) {
+        if (!isObj(b) || typeof b.id !== 'string' || !exists(b.id, ['blocks'])) return 'Такого блока нет.';
+        if (!vec(b.at, 3, (k, i) => (i === 1 ? inRange(k, ...B.y) : inRange(k, -B.side, B.side)))) return 'Блок слишком далеко.';
+        if (b.rot !== undefined && !inRange(b.rot, -180, 180)) return 'Поворот блока — от −180° до 180°.';
+        if (b.size !== undefined && !inRange(b.size, ...B.size)) return `Размер блока — от ${B.size[0]} до ${B.size[1]}.`;
+      }
+    }
+    return '';
+  }
+
   const validate = {
     nickname(v) {
       v = String(v || '').trim();
@@ -194,20 +293,6 @@
       if (d.pose !== undefined && !Object.hasOwn(CARD_POSES, d.pose)) f.pose = 'Такой позы нет.';
       if (d.background !== undefined && d.background !== 'custom' && !Object.hasOwn(CARD_BACKGROUNDS, d.background)) f.background = 'Такого фона нет.';
       if (d.looks !== undefined) {
-        const inRange = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
-        const lookError = (v) => {
-          if (!v || typeof v !== 'object') return 'Нужны настройки позы.';
-          if (v.pose !== 'custom' && !Object.hasOwn(CARD_POSES, v.pose)) return 'Такой позы нет.';
-          if (v.scale !== undefined && !inRange(v.scale, ...LOOK.scale)) return `Размер — от ${LOOK.scale[0]} до ${LOOK.scale[1]}.`;
-          if (v.turn !== undefined && !inRange(v.turn, -LOOK.turn, LOOK.turn)) return `Поворот — от −${LOOK.turn}° до ${LOOK.turn}°.`;
-          if (v.pose === 'custom') {
-            const a = v.angles;
-            if (!a || typeof a !== 'object') return 'Для своей позы нужны углы.';
-            if (LOOK.parts.some((p) => !Array.isArray(a[p]) || a[p].length !== 3 || a[p].some((x) => !inRange(x, -LOOK.angle, LOOK.angle)))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
-            if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
-          }
-          return '';
-        };
         if (!d.looks || typeof d.looks !== 'object' || Array.isArray(d.looks)) f.looks = 'Нужны настройки позы.';
         else for (const [view, look] of Object.entries(d.looks)) f.looks = f.looks || (Object.hasOwn(LOOK.views, view) ? lookError(look) : 'Нет такого вида карточки.');
         if (!f.looks) delete f.looks;
@@ -529,7 +614,7 @@
       online: () => http('GET', '/online', undefined, true),
       /** Своя карточка: { card (как её видят), bio, hidden, hideFields, pose, background, socials, skin: { slim, sync } | null } */
       myCard: () => http('GET', '/me/card'),
-      /** Меняет только переданное: { bio?, hidden?, hideFields?, pose?, background?, socials? } */
+      /** Меняет только переданное: { bio?, hidden?, hideFields?, pose?, looks? (см. LOOK), background?, socials? } */
       async updateMyCard(patch) {
         const fields = validate.card(patch);
         if (Object.keys(fields).length) throw new ApiError('VALIDATION', null, { fields });
@@ -583,6 +668,8 @@
       removeBackground: () => http('DELETE', '/me/background').then((d) => (emit('players'), d)),
       /** Админ с правом «Люди»: убрать чужую картинку фона. → карточка */
       removePlayerBackground: (nickname) => http('DELETE', `/players/${enc(nickname)}/background`).then((d) => (emit('players'), d.player)),
+      /** Модерация: убрать свои картинки 16×16 игрока (и предметы/блоки с ними) → карточка игрока. */
+      removePlayerTextures: (nickname) => http('DELETE', `/players/${enc(nickname)}/textures`).then((d) => (emit('players'), d.player)),
       onChange: (cb) => on('players', cb),
     },
 

@@ -344,19 +344,36 @@ ok('окно игрока: 3D-скин, позы, статистика', (await 
 await B.keyboard.press('Escape'); await B.waitForSelector('.modal__dialog', { state: 'detached' });
 ok('окно закрывается по Esc', true);
 
-// Профиль: поза, фон, «о себе», соцсети, свой скин.
-await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card .chip');
-await B.click('.my-card .chip:has-text("Машет")'); await B.waitForSelector('.look__status:has-text("Сохранено")'); await settle(B, 300);
+// Профиль: ссылка в студию персонажа; там — поза, предметы, блоки, свои картинки отдельно для карточки и окна игрока.
+await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card a[href="#/studio"]');
+await B.click('.my-card a[href="#/studio"]'); await B.waitForSelector('.studio .poser__canvas'); await settle(B, 500);
+ok('студия: сцена, превью карточки и окна игрока, 4 вкладки инструментов',
+  (await B.locator('.studio__work .poser__canvas').count()) === 1 && (await B.locator('.studio__previews .pcard').count()) === 1 && (await B.locator('.studio__previews .pdetail__stage canvas').count()) === 1 && (await B.locator('.studio__tools [role=tab]').count()) === 4);
+await B.click('.studio__tools [role=tab]:has-text("Предметы")');
+ok('без каталога Minecraft — понятное пояснение, без ошибок', (await B.locator('.studio__notice').innerText()).includes('Каталог Minecraft не загружен'));
+await B.click('.studio__tools [role=tab]:has-text("Поза")');
+const statusText = () => B.locator('.studio__status').innerText();
+const savedLooks = async () => (await (await B.request.get(BASE + '/api/me/card')).json()).looks;
+const studioSave = async (sel = '.studio__save') => {
+  await B.click(sel);
+  await B.waitForSelector('.studio__status:has-text("Всё сохранено")');
+  await settle(B, 300);
+};
+await B.click('.studio__panel .chip:has-text("Машет")'); await B.waitForSelector('.studio__status.is-dirty');
+ok('изменение — «не сохранено», точка у вида', (await statusText()) === 'Изменения не сохранены' && (await B.locator('.studio__views [data-view="card"] .studio__dot:not([hidden])').count()) === 1);
+await studioSave();
 // Окно игрока — своя поза: двигаем руку ползунком, маленькая карточка остаётся «Машет».
-await B.click('.look__tabs [role=tab]:has-text("Окно игрока")'); await B.click('.my-card .chip:has-text("Своя поза")');
+await B.click('.studio__views [data-view="detail"]'); await B.click('.studio__panel .chip:has-text("Своя поза")');
+ok('превью окна игрока выделено', (await B.locator('.studio__preview--detail.is-active').count()) === 1);
 await B.focus('.look__custom .look__range'); await B.keyboard.press('ArrowLeft', { delay: 10 }); await B.keyboard.press('ArrowLeft');
-await B.waitForSelector('.look__status:has-text("Сохранено")'); await settle(B, 800);
-const looks = (await (await B.request.get(BASE + '/api/me/card')).json()).looks;
+await studioSave('.studio__save-all');
+const looks = await savedLooks();
 ok('своя поза для окна игрока, карточка — «Машет»', looks.detail.pose === 'custom' && looks.detail.angles && looks.card.pose === 'wave', JSON.stringify(looks));
-// Кольца как в Blockbench. Где на холсте кольцо, нога и стрелка — считаем той же математикой, что рисует редактор.
+// Кольца как в Blockbench. Где на холсте кольцо, нога и стрелка — считаем той же математикой, что рисует сцена студии
+// (камера окна игрока: поворот 25°, наклон 10°, кадр отдалён до 0,6 — SCENE_ZOOM в studio.js).
 const poserPoints = () =>
   B.evaluate(async () => {
-    const cv = document.querySelector('.poser__canvas');
+    const cv = document.querySelector('.studio .poser__canvas');
     cv.scrollIntoView({ block: 'center' });
     const me = await Api.players.myCard();
     const look = me.looks.detail;
@@ -364,7 +381,7 @@ const poserPoints = () =>
     off.width = cv.width;
     off.height = cv.height;
     const hits = [];
-    const info = Skin3D.draw(off, await Skin3D.load(me.card.skinUrl), { slim: me.card.skinSlim, pose: 'custom', angles: look.angles, zoom: look.scale, yaw: 25 + look.turn, pitch: 10, hits });
+    const info = Skin3D.draw(off, await Skin3D.load(me.card.skinUrl), { slim: me.card.skinSlim, pose: 'custom', angles: look.angles, zoom: 1, viewZoom: 0.6, pan: [0, 0], floor: true, yaw: 25 + look.turn, pitch: 10, hits });
     const r = cv.getBoundingClientRect();
     const toC = ([x, y]) => [r.left + (x * r.width) / cv.width, r.top + (y * r.height) / cv.height];
     const dpr = cv.width / cv.clientWidth;
@@ -373,11 +390,15 @@ const poserPoints = () =>
     const h = Math.abs(A[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
     let u = [A[1] * h[2] - A[2] * h[1], A[2] * h[0] - A[0] * h[2], A[0] * h[1] - A[1] * h[0]];
     u = u.map((v) => v / Math.hypot(...u));
-    const R = Math.max(44 * dpr, Math.min(cv.width, cv.height) * 0.2) / info.scale;
+    const R = Math.max(44 * dpr, Math.min(cv.width, cv.height) * 0.2 * 0.6) / info.scale;
     const ring = toC(info.toScreen([c[0] + u[0] * R, c[1] + u[1] * R, c[2] + u[2] * R]));
     const area = (q) => Math.abs((q[1][0] - q[0][0]) * (q[3][1] - q[0][1]) - (q[1][1] - q[0][1]) * (q[3][0] - q[0][0]));
-    const f = hits.filter((x) => x.key === 'leftLeg').sort((a, b) => area(b.poly) - area(a.poly))[0].poly;
-    const leg = toC([(f[0][0] + f[2][0]) / 2, (f[0][1] + f[2][1]) / 2]);
+    // Грань левой ноги, которую ничего не закрывает: сцена выбирает верхнюю грань под точкой.
+    const inside = (q, x, y) => { let r = false; for (let i = 0, j = q.length - 1; i < q.length; j = i++) if ((q[i][1] > y) !== (q[j][1] > y) && x < ((q[j][0] - q[i][0]) * (y - q[i][1])) / (q[j][1] - q[i][1]) + q[i][0]) r = !r; return r; };
+    const mid = (q) => [(q[0][0] + q[2][0]) / 2, (q[0][1] + q[2][1]) / 2];
+    const top = ([x, y]) => [...hits].reverse().find((t) => inside(t.poly, x, y));
+    const f = hits.filter((x) => x.key === 'leftLeg').sort((a, b) => area(b.poly) - area(a.poly)).find((t) => top(mid(t.poly)) === t).poly;
+    const leg = toC(mid(f));
     const hip = info.toScreen(info.pivot('body'))[1];
     const arrow = toC([cv.width - 32 * dpr, Math.max(40 * dpr, Math.min(cv.height - 56 * dpr, hip))]);
     return { ring, leg, arrow };
@@ -387,23 +408,42 @@ const dragBy = async ([x, y], dx, dy) => {
   await B.mouse.down();
   await B.mouse.move(x + dx, y + dy, { steps: 12 });
   await B.mouse.up();
-  await settle(B, 1200);
+  await settle(B, 400);
 };
-const armOf = async () => (await (await B.request.get(BASE + '/api/me/card')).json()).looks.detail;
-const armBefore = (await armOf()).angles.rightArm;
+const detailOf = async () => (await savedLooks()).detail;
+const armBefore = (await detailOf()).angles.rightArm;
 let pts = await poserPoints();
 await dragBy(pts.ring, 4, -60);
-const armAfter = (await armOf()).angles.rightArm;
+await studioSave();
+const armAfter = (await detailOf()).angles.rightArm;
 const armSlider = await B.locator('.look__custom .look__slider[data-axis="x"] output').innerText();
 ok('кольцо: тянем красное — рука поворачивается, ползунок за ней', Math.abs(armAfter[0] - armBefore[0]) >= 20 && armSlider === `${-armAfter[0]}°`, JSON.stringify({ armBefore, armAfter, armSlider }));
-await B.keyboard.press('Control+z'); await settle(B, 1200);
-ok('Ctrl+Z отменяет поворот', JSON.stringify((await armOf()).angles.rightArm) === JSON.stringify(armBefore), JSON.stringify((await armOf()).angles.rightArm));
-await B.mouse.click(...pts.leg);
-ok('нажатие на ногу выбирает её', (await B.locator('.look__custom .chip[aria-checked="true"]').innerText()) === 'Левая нога');
+await B.keyboard.press('Control+z'); await studioSave();
+ok('Ctrl+Z отменяет поворот', JSON.stringify((await detailOf()).angles.rightArm) === JSON.stringify(armBefore), JSON.stringify((await detailOf()).angles.rightArm));
+await B.keyboard.press('Control+y'); await studioSave();
+ok('Ctrl+Y возвращает его', JSON.stringify((await detailOf()).angles.rightArm) === JSON.stringify(armAfter), JSON.stringify((await detailOf()).angles.rightArm));
+pts = await poserPoints(); // сохранение прокрутило страницу — точки заново
+await B.mouse.click(...pts.leg); await settle(B, 300);
+const legChip = await B.locator('.look__custom .chip[aria-checked="true"]').innerText();
+ok('нажатие на ногу выбирает её', legChip === 'Левая нога', legChip);
 await B.click('.look__custom .chip[data-part="body"]');
 pts = await poserPoints();
 await dragBy(pts.arrow, 0, 70);
-ok('стрелка «присесть» у тела', (await armOf()).angles.lift <= -3, JSON.stringify((await armOf()).angles.lift));
+await studioSave();
+ok('стрелка «присесть» у тела', (await detailOf()).angles.lift <= -3, JSON.stringify((await detailOf()).angles.lift));
+// Своя картинка 16×16: загрузить → выбрать квадрат → сохранить.
+await B.click('.studio__tools [role=tab]:has-text("Свои картинки")');
+await B.setInputFiles('#studio-tex-file', path.join(HERE, '../assets/img/skin-default.png'));
+await B.waitForSelector('.modal__dialog .studio-crop'); await B.click('.modal__dialog button:has-text("Готово")');
+await B.waitForSelector('.studio__tex'); await studioSave();
+const tex = (await detailOf()).textures || [];
+ok('своя картинка 16×16 сохранена', tex.length === 1 && /^data:image\/png;base64,/.test(tex[0]) && tex[0].length <= 4096, String(tex.length));
+const wide = B.viewportSize();
+await B.setViewportSize({ width: 320, height: 700 }); await settle(B, 500);
+ok('студия на 320px без горизонтальной прокрутки', await B.evaluate(() => document.documentElement.scrollWidth <= 320), String(await B.evaluate(() => document.documentElement.scrollWidth)));
+await B.setViewportSize(wide);
+await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card .swatch');
+ok('в профиле — что настроено в студии', /машет/.test(await B.locator('.look__summary').innerText()) && /своя поза/.test(await B.locator('.look__summary').innerText()), await B.locator('.look__summary').innerText());
 await B.click('.my-card .swatch[aria-label="Незер"]'); await B.waitForSelector('.toast:has-text("Фон сохранён")'); await settle(B, 300);
 await B.fill('.my-card textarea[name=bio]', 'Строю мосты над лавой');
 await B.fill('.my-card input[name=social-telegram]', 'https://t.me/hawker_tg');
@@ -448,7 +488,7 @@ await B.goto(BASE + '/lk.html#/players'); await B.waitForSelector('.players__box
 ok('скрытая карточка исчезла из «Игроков»', (await B.locator('.pcard[data-nick="__Hawker__"]').count()) === 0);
 await G.reload(); await G.waitForSelector('.players__box[aria-busy="false"] .pcard, .players__box[aria-busy="false"] .state');
 ok('и с публичной страницы', (await G.locator('.pcard[data-nick="__Hawker__"]').count()) === 0);
-await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card .chip');
+await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card .swatch');
 await B.locator('label.checkbox--hint', { hasText: 'Скрыть карточку' }).click();
 await B.waitForSelector('.toast:has-text("Карточка снова видна")'); await settle(B, 300);
 
