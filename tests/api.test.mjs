@@ -1180,7 +1180,7 @@ test('карточки: предметы в руках, блоки вокруг 
     [{ blocks: [{ id: 'stone' }] }, 'Блок слишком далеко.'], // без места
     [{ held: { head: { id: 'carved_pumpkin', size: 3 } } }, 'Размер предмета — от 0.5 до 2.'],
     [{ held: { foot: { id: 'diamond_sword' } } }, 'Предмет можно держать только в руках или на голове.'],
-    [{ offset: [50, 0] }, 'Сдвиг — от −40 до 40.'],
+    [{ offset: [250, 0] }, 'Сдвиг — от −200 до 200.'],
     [{ textures: ['data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64')] }, 'Своя картинка — PNG 16×16.'],
     [{ textures: [png(17, 17)] }, 'Своя картинка — PNG 16×16.'],
     [{ textures: [tex, tex, tex, tex] }, 'Своих картинок — не больше 3.'],

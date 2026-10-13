@@ -108,7 +108,7 @@
   Нет скина нигде — Стив: `config.defaultSkinTexture` (`31f477eb…`), `skins.defaultSkin()` качает его с textures.minecraft.net
   при первом обращении (асинхронно, повтор через час при ошибке), в API `skinDefault: true`; пока не скачан — `/assets/img/skin-default.png`.
   **Поза по видам** (миграция 8, `player_cards.looks` JSON): `looks.card` — маленькая карточка, `looks.detail` — окно игрока,
-  каждый `{pose: ключ | 'custom', angles (у custom: head/body/руки/ноги [x,y,z] ±180°, lift), scale 0.6–1.3, turn ±180}`.
+  каждый `{pose: ключ | 'custom', angles (у custom: head/body/руки/ноги [x,y,z] ±180°, lift), scale 0.2–4, turn ±180}`.
   Пределы `LOOK` — и в `api.js`, и в `server/lib/validate.js` (`normalizeLook`). Старая колонка `pose` = поза карточки
   (если она не custom); старое поле `pose` в PATCH меняет `looks.card.pose`. Рисует `Skin3D.draw` (`zoom` растёт от ног,
   голова и руки поворачиваются вместе с телом); `scale` — размер фигуры, не пропорции тела.
@@ -118,7 +118,7 @@
   перечитывают углы (`read` в `slider()`), история для «Отменить»/Ctrl+Z — в `lookSection()`. e2e считает, где
   кольцо и стрелка «Присесть», той же математикой — меняешь радиус колец (`px`) или место стрелки в `skin3d.js`,
   поправь `poserPoints()` в `tests/e2e.mjs`.
-  **Предметы и блоки** — в том же `looks.<вид>` (без миграции): `offset` [x, y] ±40 — сдвиг фигуры в кадре;
+  **Предметы и блоки** — в том же `looks.<вид>` (без миграции): `offset` [x, y] ±200 — сдвиг фигуры в кадре;
   `held` — `{rightHand, leftHand, head}`, каждый `{id, rot [x,y,z] ±180, size 0.5–2, at [x,y,z] ±16}` или `null`;
   `blocks` — до 32 `{id, at [x,y,z] (низ-центр; x, z ±96, y −48…96), rot ±180 (вокруг вертикали), size 0.25–2}`;
   `textures` — до 3 PNG 16×16 data URL (≤4096 символов, сервер смотрит IHDR), в `held`/`blocks` это id `tex1…tex3`.

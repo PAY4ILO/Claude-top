@@ -105,11 +105,11 @@
 .pcard__figure {
   position: absolute;
   left: 50%;
-  bottom: 0;
-  width: 150px;
-  height: 190px;
-  margin-left: -75px;
-  transform-origin: bottom center;
+  bottom: -40px;
+  width: 320px;
+  height: 270px;
+  margin-left: -160px;
+  transform-origin: 50% 230px;
   transition: transform 0.3s var(--ease);
   pointer-events: none;
 }

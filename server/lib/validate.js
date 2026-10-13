@@ -48,9 +48,9 @@ export const LOOK_HELD = ['rightHand', 'leftHand', 'head'];
 export const LOOK = {
   angle: 180,
   lift: [-12, 0],
-  scale: [0.6, 1.3],
+  scale: [0.2, 4],
   turn: 180,
-  offset: 40,
+  offset: 200,
   held: { rot: 180, size: [0.5, 2], at: 16 },
   blocks: { max: 32, side: 96, y: [-48, 96], size: [0.25, 2] },
   textures: { max: 3, chars: 4096, side: 16 },

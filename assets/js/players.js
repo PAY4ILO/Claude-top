@@ -112,7 +112,8 @@
   /* ------------------------------------------------------------ карточка */
 
   function card(p, { onOpen } = {}) {
-    const figure = Skin3D.figure({ url: p.skinUrl, slim: p.skinSlim, look: lookOf(p, 'card'), label: `Скин игрока ${p.nickname}` });
+    // Холст шире и выше самой фигуры: блоки и предметы вокруг не обрезаются (размер фигуры — как раньше).
+    const figure = Skin3D.figure({ url: p.skinUrl, slim: p.skinSlim, look: lookOf(p, 'card'), width: 320, height: 270, viewZoom: 190 / 270, label: `Скин игрока ${p.nickname}` });
     const ranks = ranksOf(p).slice(0, 2);
     const main = p.stats ? STAT_ROWS.filter((r) => r.main && typeof p.stats[r.key] === 'number') : [];
     const el = h(

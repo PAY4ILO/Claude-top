@@ -359,6 +359,32 @@
    * floor — сетка блоков на полу.
    * Возвращает, как сцена легла на холст (для колец редактора), или null без скина.
    */
+  /**
+   * Грань скина отдельной картинкой с рамкой в 1 точку из её же крайних пикселей. Браузер при повороте и масштабе
+   * берёт пиксели чуть за краем прямоугольника — из соседнего места скина, отсюда тёмные полосы по краям частей.
+   */
+  const tiles = new WeakMap();
+  function faceTile(skin, sx, sy, tw, th) {
+    let map = tiles.get(skin);
+    if (!map) tiles.set(skin, (map = new Map()));
+    const key = `${sx},${sy},${tw},${th}`;
+    let c = map.get(key);
+    if (!c) {
+      c = document.createElement('canvas');
+      c.width = tw + 2;
+      c.height = th + 2;
+      const t = c.getContext('2d');
+      t.imageSmoothingEnabled = false;
+      t.drawImage(skin, sx, sy, tw, th, 1, 1, tw, th);
+      t.drawImage(c, 1, 1, tw, 1, 1, 0, tw, 1); // верх
+      t.drawImage(c, 1, th, tw, 1, 1, th + 1, tw, 1); // низ
+      t.drawImage(c, 1, 0, 1, th + 2, 0, 0, 1, th + 2); // лево
+      t.drawImage(c, tw, 0, 1, th + 2, tw + 1, 0, 1, th + 2); // право
+      map.set(key, c);
+    }
+    return c;
+  }
+
   function draw(canvas, skin, opts = {}) {
     const g = canvas.getContext('2d');
     const W = canvas.width;
@@ -412,7 +438,7 @@
         nz,
         paint() {
           g.setTransform((su[0] - s0[0]) / tw, (su[1] - s0[1]) / tw, (sv[0] - s0[0]) / th, (sv[1] - s0[1]) / th, s0[0], s0[1]);
-          g.drawImage(skin, sx, sy, tw, th, -seam, -seam, tw + 2 * seam, th + 2 * seam);
+          g.drawImage(faceTile(skin, sx, sy, tw, th), 1, 1, tw, th, -seam, -seam, tw + 2 * seam, th + 2 * seam);
           if (opts.hits) opts.hits.push({ key: part.key, poly: [s0, su, [su[0] + sv[0] - s0[0], su[1] + sv[1] - s0[1]], sv] });
         },
       };
@@ -1422,7 +1448,7 @@
    * Неподвижная картинка для карточки в сетке: персонаж в позе, вполоборота.
    * Возвращает <canvas>; скин догружается сам.
    */
-  function figure({ url, slim, pose: poseKey, look, width = 150, height = 190, label }) {
+  function figure({ url, slim, pose: poseKey, look, width = 150, height = 190, viewZoom = 1, label }) {
     const canvas = document.createElement('canvas');
     canvas.className = 'skin3d__figure';
     canvas.setAttribute('role', 'img');
@@ -1430,7 +1456,7 @@
     fit(canvas, width, height);
     let current = look || { pose: poseKey };
     let skin = null;
-    const paint = () => skin && draw(canvas, skin, { slim, pitch: 8, ...lookOpts(current, 28), onModel: paint });
+    const paint = () => skin && draw(canvas, skin, { slim, pitch: 8, viewZoom, ...lookOpts(current, 28), onModel: paint });
     /** Другая поза/размер/поворот без перезагрузки скина (предпросмотр в редакторе). */
     canvas.update = (next) => {
       current = next || current;
