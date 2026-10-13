@@ -1118,6 +1118,11 @@ test('карточки: своя поза для маленькой карточ
     { card: { pose: 'custom', angles: { ...custom, head: [999, 0, 0] } } },
     { card: { pose: 'custom', angles: { ...custom, body: [0, 0] } } },
     { card: { pose: 'custom', angles: { ...custom, lift: 30 } } },
+    { card: { pose: 'custom', angles: { ...custom, move: { head: [0, 33, 0] } } } },
+    { card: { pose: 'custom', angles: { ...custom, move: { body: [-33, 0, 0] } } } },
+    { card: { pose: 'custom', angles: { ...custom, move: { tail: [1, 0, 0] } } } },
+    { card: { pose: 'custom', angles: { ...custom, move: { head: [1, 0] } } } },
+    { card: { pose: 'custom', angles: { ...custom, move: [1, 2, 3] } } },
   ]) {
     const r = await patch({ looks });
     assert.equal(r.status, 422, JSON.stringify(looks));
@@ -1141,6 +1146,12 @@ test('карточки: своя поза для маленькой карточ
   const old = await patch({ pose: 'walk' });
   assert.deepEqual(old.data.looks.card, { pose: 'walk', scale: 1, turn: 0 });
   assert.equal(old.data.looks.detail.pose, 'custom');
+  // Сдвиг частей тела: до ±32, нулевые сдвиги не хранятся.
+  const moved = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, move: { head: [0, 32, -1.24], leftArm: [-32, 0, 0], body: [0, 0, 0] } } } } });
+  assert.equal(moved.status, 200);
+  assert.deepEqual(moved.data.looks.detail.angles.move, { head: [0, 32, -1.2], leftArm: [-32, 0, 0] });
+  const still = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, move: { body: [0, 0, 0] } } } } });
+  assert.equal(still.data.looks.detail.angles.move, undefined, 'одни нули — сдвига нет');
   await patch({ looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } });
 });
 

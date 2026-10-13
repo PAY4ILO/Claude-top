@@ -12,7 +12,7 @@
 - `assets/js/api.js` — **единственный** модуль страницы, который ходит в сервер. Новые запросы добавлять только сюда
   (и события `emit(...)`, чтобы другие экраны/вкладки обновились).
 - `assets/js/mc-art.js` (`window.McArt`) — блоки и предметы игры по оглавлению `assets/js/mc-index.json`
-  (собирает `tools/mc-index.mjs`), см. «Предметы и блоки» ниже. `#/studio` в кабинете — студия персонажа (**в работе**).
+  (собирает `tools/mc-index.mjs`), см. «Предметы и блоки» ниже. `assets/js/studio.js` (`Studio.mount`) — студия персонажа `#/studio` в кабинете.
 - `server/` — Node.js без зависимостей: `app.js` (сессии, права `need.user/admin/perm/creator/player`, настройки, роутинг),
   `routes/*.js` (API по разделам), `db.js` (SQLite, миграции), `lib/` (http, пароли scrypt, проверки, `permissions.js` —
   права админов, `rcon.js` — консоль Minecraft-сервера, `files.js` — картинка ли файл по первым байтам, безопасное имя,
@@ -108,7 +108,9 @@
   Нет скина нигде — Стив: `config.defaultSkinTexture` (`31f477eb…`), `skins.defaultSkin()` качает его с textures.minecraft.net
   при первом обращении (асинхронно, повтор через час при ошибке), в API `skinDefault: true`; пока не скачан — `/assets/img/skin-default.png`.
   **Поза по видам** (миграция 8, `player_cards.looks` JSON): `looks.card` — маленькая карточка, `looks.detail` — окно игрока,
-  каждый `{pose: ключ | 'custom', angles (у custom: head/body/руки/ноги [x,y,z] ±180°, lift), scale 0.2–4, turn ±180}`.
+  каждый `{pose: ключ | 'custom', angles (у custom: head/body/руки/ноги [x,y,z] ±180°, lift, move?), scale 0.2–4, turn ±180}`.
+  `angles.move` — сдвиг частей тела `{часть: [x,y,z]}` ±32 (`LOOK.move`; голова и руки едут вместе с телом, `toWorld` в `skin3d.js`);
+  в студии — ползунки «Сдвиг вбок/вверх/вперёд» и перетаскивание уже выбранной части на сцене (drag `'shift'` в `poser`).
   Пределы `LOOK` — и в `api.js`, и в `server/lib/validate.js` (`normalizeLook`). Старая колонка `pose` = поза карточки
   (если она не custom); старое поле `pose` в PATCH меняет `looks.card.pose`. Рисует `Skin3D.draw` (`zoom` растёт от ног,
   голова и руки поворачиваются вместе с телом); `scale` — размер фигуры, не пропорции тела.
@@ -186,6 +188,22 @@ Docker → находит Caddyfile на машине по `docker inspect` (Mou
 Если добавляешь зависимость, переменную окружения или системный пакет — обнови `deploy/install.sh`, `deploy/lwl.env.example` и `deploy/README.md`.
 `LWL_GAME_TOKEN` (токен игрового сервера для входа по коду и статистики) `install.sh` и `update.sh` генерируют сами, если его нет в `lwl.env`,
 и печатают, куда вписать на сервере: `config/lwl/connect.json` → `siteToken` (и `siteUrl`); тот же токен — в `config/lwl-stats.json`.
+
+## Состояние работы (2026-10-14, для продолжения с другого аккаунта)
+
+- Ветка `claude/dazzling-hamilton-nvsyzx`, **не запушено**. Последние коммиты: `df90780` (студия, McArt), `29aaf0a`
+  (без полос на скине — `faceTile` в `skin3d.js`; scale 0.2–4, offset ±200; холст мини-карточки 320×270),
+  `7e64f91` (мини-карточка обрезается по земле).
+- Сдвиг частей тела (`angles.move`, до ±32, нули не хранятся) — закоммичен с тестами. В окне игрока (и его
+  предпросмотре в студии) модель **не крутится** (`Skin3D.viewer({ rotate: false })`) и **нет «Скачать скин»** —
+  так попросил владелец. В «Мой скин» в кабинете крутить можно, как раньше.
+- e2e на Windows без `npx playwright install`: временная копия `tests/e2e.mjs` с `chromium.launch({ channel: 'msedge' })`.
+- **Ждёт владельца**: на страницах нет `<script src="assets/js/mc-art.js"></script>` (перед `skin3d.js` в `index.html`,
+  `lk.html`, `players.html`) — защита Claude Code дважды заблокировала эту правку («ослабление безопасности»); без неё
+  студия не показывает предметы и блоки («Каталог Minecraft не загружен»), позы работают. CSP `connect-src` уже разрешает
+  `piston-data.mojang.com`. Владелец вставляет сам или явно разрешает.
+- Возможные доработки: полосы по краям на текстурах предметов/блоков (как `faceTile`, но в `modelDrawable`/`McArt.prepared`);
+  стрелки-гизмо для сдвига части по осям (сейчас — тянуть саму часть в плоскости экрана).
 
 ## Что дальше (идеи, о которых говорили)
 

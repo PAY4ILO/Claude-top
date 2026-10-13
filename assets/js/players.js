@@ -153,7 +153,7 @@
 
   function openDetails(p) {
     let look = lookOf(p, 'detail');
-    const viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look, label: `Скин игрока ${p.nickname}` });
+    const viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look, label: `Скин игрока ${p.nickname}`, rotate: false });
     // Своя поза игрока — первой кнопкой, чтобы к ней можно было вернуться.
     const options = [...(look.pose === 'custom' ? [['custom', 'Как у игрока']] : []), ...Object.entries(Api.CARD_POSES)];
     const poses = h(
@@ -175,7 +175,7 @@
       )
     );
     const stage = paintBackground(
-      h('div', { class: 'pdetail__stage' }, viewer.el, h('a', { class: 'pdetail__download link', href: p.skinUrl, download: `${p.nickname}.png`, text: 'Скачать скин' })),
+      h('div', { class: 'pdetail__stage' }, viewer.el),
       p
     );
     // Модерация: картинку фона видят все, даже гости.

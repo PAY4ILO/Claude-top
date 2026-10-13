@@ -389,15 +389,6 @@
   border-radius: var(--r-md);
   overflow: hidden;
 }
-.pdetail__download {
-  position: absolute;
-  left: 12px;
-  bottom: 10px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.45);
-  font-size: 13px;
-}
 .pdetail__info {
   display: grid;
   align-content: start;
@@ -466,6 +457,12 @@
 }
 .skin3d__canvas:active {
   cursor: grabbing;
+}
+/* Не крутится (окно игрока): обычный курсор, страницу можно листать пальцем поверх. */
+.skin3d__canvas--fixed,
+.skin3d__canvas--fixed:active {
+  cursor: inherit;
+  touch-action: auto;
 }
 .skin3d__canvas:focus-visible {
   outline: 3px solid var(--c-focus);

@@ -5,7 +5,8 @@
  *
  *   Skin3D.load(url)                     → Promise<canvas 64×64> (старые скины 64×32 достраиваются)
  *   Skin3D.draw(canvas, skin, opts)      — один кадр: { slim, pose, angles, zoom, yaw, pitch, time }
- *   Skin3D.viewer({ url, slim, pose, look, label }) → { el, set({url, slim, pose, look}), destroy() } — крутится мышью/пальцем/стрелками
+ *   Skin3D.viewer({ url, slim, pose, look, label, rotate }) → { el, set({url, slim, pose, look}), destroy() } — крутится мышью/пальцем/стрелками
+ *                                        (rotate: false — не крутится, стоит, как задано в look)
  *   Skin3D.figure({ url, slim, pose, look }) → <canvas> с методом update(look) — неподвижная картинка для карточки
  *   Skin3D.poser({ url, slim, look, part, yaw, pitch, zoom, scene, snap, target, onSelect, onStart, onChange, onEnd, onTap })
  *                                        → { el, set({look, part, tool, camera}), resetCamera(), zoomBy(k), destroy() }
@@ -140,6 +141,11 @@
     const p = pose('stand', null);
     for (const { key } of PARTS) if (Array.isArray(angles[key]) && angles[key].length === 3) p[key] = angles[key].map(Number);
     p.lift = Number(angles.lift) || 0;
+    // Сдвиг частей тела [x, y, z] (в единицах модели, 16 = блок).
+    if (angles.move && typeof angles.move === 'object') {
+      p.move = {};
+      for (const { key } of PARTS) if (Array.isArray(angles.move[key]) && angles.move[key].length === 3) p.move[key] = angles.move[key].map((x) => Number(x) || 0);
+    }
     return p;
   }
 
@@ -413,6 +419,11 @@
     const toWorld = (part, p) => {
       let local = add(rotate(sub(p, part.pivot), angles[part.key]), part.pivot);
       if (bodyTurned && ATTACHED.has(part.key)) local = add(rotate(sub(local, BODY_PIVOT), angles.body), BODY_PIVOT);
+      if (angles.move) {
+        // Свой сдвиг части; голова и руки едут и вместе с телом.
+        if (angles.move[part.key]) local = add(local, angles.move[part.key]);
+        if (ATTACHED.has(part.key) && angles.move.body) local = add(local, angles.move.body);
+      }
       local[1] += angles.lift;
       return local;
     };
@@ -677,7 +688,9 @@
     canvas.className = 'skin3d__canvas';
     canvas.tabIndex = 0;
     canvas.setAttribute('role', 'img');
-    const label = () => `${opts.label || 'Скин'}. Стрелки или перетаскивание — повернуть.`;
+    const rotatable = opts.rotate !== false;
+    if (!rotatable) canvas.classList.add('skin3d__canvas--fixed');
+    const label = () => (rotatable ? `${opts.label || 'Скин'}. Стрелки или перетаскивание — повернуть.` : opts.label || 'Скин');
     canvas.setAttribute('aria-label', label());
 
     const play = document.createElement('button');
@@ -723,6 +736,7 @@
 
     let drag = null;
     canvas.addEventListener('pointerdown', (e) => {
+      if (!rotatable) return;
       drag = { x: e.clientX, y: e.clientY, yaw: state.yaw, pitch: state.pitch };
       canvas.setPointerCapture(e.pointerId);
     });
@@ -738,6 +752,7 @@
     canvas.addEventListener('pointerup', stop);
     canvas.addEventListener('pointercancel', stop);
     canvas.addEventListener('keydown', (e) => {
+      if (!rotatable) return;
       const step = { ArrowLeft: [-15, 0], ArrowRight: [15, 0], ArrowUp: [0, -8], ArrowDown: [0, 8] }[e.key];
       if (!step) return;
       e.preventDefault();
@@ -864,6 +879,11 @@
     let alive = true;
 
     const limits = () => (window.Api && window.Api.LOOK && window.Api.LOOK.blocks) || { side: 96, y: [-48, 96] };
+    const moveLimit = () => (window.Api && window.Api.LOOK && window.Api.LOOK.move) || 32;
+    const shiftOf = (key) => {
+      const m = state.look && state.look.angles && state.look.angles.move;
+      return (m && Array.isArray(m[key]) && m[key]) || [0, 0, 0];
+    };
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
     const kindOf = (key) => (!key ? null : PART_KEYS.has(key) ? 'part' : key.startsWith('held:') ? 'held' : key.startsWith('block:') ? 'block' : null);
     const heldOf = (key) => (state.look && state.look.held && state.look.held[key.slice(5)]) || null;
@@ -1231,6 +1251,9 @@
           tangent: [t3[0] * info.scale, -t3[1] * info.scale],
           px: gizmo.px,
         };
+      } else if (hit && hit.part && hit.part === state.part && kindOf(hit.part) === 'part' && info) {
+        // Уже выбранную часть тела тянем — она сдвигается (в плоскости экрана).
+        drag = { target: 'shift', x, y, from: [0, 0, 0], started: false };
       } else if (scene && hit && kindOf(hit.part) === 'block' && info) {
         // Блок: выбрать и сразу тянуть по полу (на его высоте).
         const b = blockOf(hit.part);
@@ -1260,7 +1283,7 @@
         }
         const hit = pick(x, y);
         const next = hit ? (hit.target !== undefined ? hit.target : 'part') : null;
-        canvas.style.cursor = next === null ? '' : next === 'part' ? 'pointer' : 'grab';
+        canvas.style.cursor = next === null ? '' : next === 'part' ? (hit.part === state.part && kindOf(hit.part) === 'part' ? 'move' : 'pointer') : 'grab';
         if (next !== hover) {
           hover = next;
           redraw();
@@ -1301,9 +1324,17 @@
         if (Math.hypot(x - drag.x, y - drag.y) < 3 * dpr) return;
         drag.started = true;
         begin();
-        drag.from = drag.target === 'lift' ? arrowValue() : ringValue(drag.target);
+        drag.from = drag.target === 'lift' ? arrowValue() : drag.target === 'shift' ? shiftOf(state.part).slice() : ringValue(drag.target);
       }
-      if (drag.target === 'lift') {
+      if (drag.target === 'shift') {
+        const d = info.toWorldDir([(x - drag.x) / info.scale, -(y - drag.y) / info.scale, 0]);
+        const M = moveLimit();
+        const step = e.shiftKey ? 1 : 0.5;
+        const next = drag.from.map((v, i) => clamp(Math.round((v + d[i]) / step) * step, -M, M));
+        const a = state.look.angles;
+        a.move = a.move || {};
+        a.move[state.part] = next;
+      } else if (drag.target === 'lift') {
         const u = gizmo ? gizmo.arrow.perUnit : null;
         if (!u) return;
         const k = ((x - drag.x) * u[0] + (y - drag.y) * u[1]) / (u[0] * u[0] + u[1] * u[1] || 1);

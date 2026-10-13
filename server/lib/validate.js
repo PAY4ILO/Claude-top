@@ -33,7 +33,8 @@ export const CARD_BACKGROUNDS = ['meadow', 'night', 'sunset', 'ocean', 'cave', '
 
 /**
  * Как стоит персонаж — отдельно на маленькой карточке (card) и в окне игрока (detail).
- * { pose: ключ позы | 'custom', angles: { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift } (только у custom),
+ * { pose: ключ позы | 'custom', angles: { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift, move? } (только у custom;
+ *   move — сдвиг частей { часть: [x, y, z] }),
  *   scale — размер фигуры, turn — поворот всей фигуры в градусах,
  *   offset — сдвиг фигуры в кадре [x, y],
  *   held — что в руках и на голове: { rightHand, leftHand, head: { id, rot: [x, y, z], size, at: [x, y, z] } },
@@ -51,6 +52,7 @@ export const LOOK = {
   scale: [0.2, 4],
   turn: 180,
   offset: 200,
+  move: 32, // сдвиг части тела (angles.move), единицы модели
   held: { rot: 180, size: [0.5, 2], at: 16 },
   blocks: { max: 32, side: 96, y: [-48, 96], size: [0.25, 2] },
   textures: { max: 3, chars: 4096, side: 16 },
@@ -98,6 +100,13 @@ function lookError(v) {
       if (!Array.isArray(r) || r.length !== 3 || r.some((x) => !inRange(x, -LOOK.angle, LOOK.angle))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
     }
     if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
+    if (a.move !== undefined) {
+      if (!a.move || typeof a.move !== 'object' || Array.isArray(a.move)) return 'Неверный сдвиг частей тела.';
+      for (const [part, m] of Object.entries(a.move)) {
+        if (!LOOK_PARTS.includes(part)) return 'Неверный сдвиг частей тела.';
+        if (!Array.isArray(m) || m.length !== 3 || m.some((x) => !inRange(x, -LOOK.move, LOOK.move))) return `Сдвиг части тела — от −${LOOK.move} до ${LOOK.move}.`;
+      }
+    }
   }
   const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
   const vec = (x, n, check) => Array.isArray(x) && x.length === n && x.every((k, i) => check(k, i));
@@ -143,6 +152,12 @@ export function normalizeLook(v) {
   if (v.pose === 'custom') {
     out.angles = { lift: v.angles.lift === undefined ? 0 : round(v.angles.lift) };
     for (const part of LOOK_PARTS) out.angles[part] = v.angles[part].map((x) => round(x));
+    const move = {};
+    for (const part of LOOK_PARTS) {
+      const m = v.angles.move && v.angles.move[part];
+      if (m && m.some((x) => round(x, 10))) move[part] = m.map((x) => round(x, 10));
+    }
+    if (Object.keys(move).length) out.angles.move = move;
   }
   const offset = v.offset ? v.offset.map((x) => round(x, 10)) : null;
   if (offset && offset.some((x) => x)) out.offset = offset;

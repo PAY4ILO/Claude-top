@@ -61,6 +61,12 @@
       const a = v.angles || Skin3D.poseAngles('stand');
       out.angles = { lift: a.lift === undefined ? 0 : round(a.lift) };
       for (const part of LOOK.parts) out.angles[part] = (a[part] || [0, 0, 0]).map((x) => round(x));
+      const move = {};
+      for (const part of LOOK.parts) {
+        const m = a.move && a.move[part];
+        if (m && m.some((x) => round(x, 10))) move[part] = m.map((x) => round(x, 10));
+      }
+      if (Object.keys(move).length) out.angles.move = move;
     }
     const offset = v.offset ? v.offset.map((x) => round(x, 10)) : null;
     if (offset && offset.some((x) => x)) out.offset = offset;
@@ -808,7 +814,7 @@
       // В середине — как увидят другие.
       const cardEl = Players.card(p, { onOpen: () => setView('card') });
       figureEl = cardEl.querySelector('.skin3d__figure');
-      viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look: S.looks.detail, label: 'Окно игрока — предпросмотр', animate: false });
+      viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look: S.looks.detail, label: 'Окно игрока — предпросмотр', animate: false, rotate: false });
       const detailStage = Players.paintBackground(h('div', { class: 'pdetail__stage studio__detail-stage' }, viewer.el), p);
       let down = null;
       detailStage.addEventListener('pointerdown', (e) => (down = [e.clientX, e.clientY]), true);
@@ -1020,6 +1026,29 @@
             },
           });
         }),
+        ['Сдвиг вбок', 'Сдвиг вверх', 'Сдвиг вперёд'].map((label, i) => {
+          const read = () => {
+            const m = angles().move && angles().move[part];
+            return m ? m[i] : 0;
+          };
+          return slider({
+            label,
+            read,
+            min: -LOOK.move,
+            max: LOOK.move,
+            step: 0.5,
+            value: read(),
+            group: `move:${part}:${i}`,
+            onInput: (v) => {
+              ensureCustom();
+              const a = cur().angles;
+              a.move = a.move || {};
+              const m = (a.move[part] || [0, 0, 0]).slice();
+              m[i] = v;
+              a.move[part] = m;
+            },
+          });
+        }),
         slider({
           label: 'Присесть',
           read: () => -angles().lift || 0,
@@ -1032,7 +1061,7 @@
             cur().angles.lift = -v || 0;
           },
         }),
-        h('p', { class: 'field__hint', text: 'Готовая поза станет своей, как только подвинете часть тела — ползунком или кольцом на сцене.' })
+        h('p', { class: 'field__hint', text: 'Готовая поза станет своей, как только повернёте или сдвинете часть тела. На сцене: кольца — повернуть, а выбранную часть можно просто тянуть — она сдвинется.' })
       );
 
       const offset = (i) => (cur().offset ? cur().offset[i] : 0);

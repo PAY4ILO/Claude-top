@@ -341,6 +341,7 @@ ok('вкладки сортировки и «Топы» — игроку', (awai
 ok('скин нарисован на холсте', (await B.locator('.pcard[data-nick="__Hawker__"] canvas').count()) === 1);
 await B.click('.pcard[data-nick="__Hawker__"] .pcard__open'); await B.waitForSelector('.modal__dialog .skin3d canvas');
 ok('окно игрока: 3D-скин, позы, статистика', (await B.locator('.modal__dialog .chip').count()) === 6 && (await B.locator('.modal__dialog .pdetail__stat').count()) >= 5);
+ok('окно игрока: модель не крутится, скачать скин нельзя', (await B.locator('.modal__dialog .skin3d__canvas--fixed').count()) === 1 && (await B.locator('.modal__dialog a[download]').count()) === 0);
 await B.keyboard.press('Escape'); await B.waitForSelector('.modal__dialog', { state: 'detached' });
 ok('окно закрывается по Esc', true);
 

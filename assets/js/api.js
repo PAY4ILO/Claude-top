@@ -80,6 +80,7 @@
     scale: [0.2, 4],
     turn: 180,
     offset: 200,
+    move: 32,
     held: { rot: 180, size: [0.5, 2], at: 16 },
     blocks: { max: 32, side: 96, y: [-48, 96], size: [0.25, 2] },
     textures: { max: 3, chars: 4096, side: 16 },
@@ -193,6 +194,13 @@
       if (!isObj(a)) return 'Для своей позы нужны углы.';
       if (LOOK.parts.some((p) => !vec(a[p], 3, (x) => inRange(x, -LOOK.angle, LOOK.angle)))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
       if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
+      if (a.move !== undefined) {
+        if (!isObj(a.move)) return 'Неверный сдвиг частей тела.';
+        for (const [part, m] of Object.entries(a.move)) {
+          if (!LOOK.parts.includes(part)) return 'Неверный сдвиг частей тела.';
+          if (!vec(m, 3, (x) => inRange(x, -LOOK.move, LOOK.move))) return `Сдвиг части тела — от −${LOOK.move} до ${LOOK.move}.`;
+        }
+      }
     }
     if (v.offset !== undefined && !vec(v.offset, 2, (k) => inRange(k, -LOOK.offset, LOOK.offset))) return `Сдвиг — от −${LOOK.offset} до ${LOOK.offset}.`;
     if (v.textures !== undefined) {
