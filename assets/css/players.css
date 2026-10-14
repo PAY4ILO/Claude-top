@@ -75,9 +75,7 @@
 .pgrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
-  gap: 52px 20px;
-  /* место для голов, которые выглядывают над первым рядом */
-  padding-top: 30px;
+  gap: 20px;
 }
 
 /* ------------------------------------------------------------ карточка */
@@ -96,30 +94,23 @@
 .pcard:focus-within {
   border-color: var(--c-focus);
 }
+/* Сцена — ровно кадр камеры из студии (холст 320×270, рамка «Камеры» тех же пропорций): что поставили
+   в кадр, то и видно, а всё за ним обрезается краем карточки — не налезает на заголовок и соседей. */
 .pcard__scene {
   position: relative;
-  height: 140px;
+  aspect-ratio: 320 / 270;
+  overflow: hidden;
   border-radius: calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0 0;
 }
-/* Персонаж стоит на «земле» фона и выглядывает над краем карточки. */
 .pcard__figure {
   position: absolute;
-  left: 50%;
-  bottom: 0;
-  width: 320px;
-  height: 230px;
-  margin-left: -160px;
-  overflow: hidden; /* по земле: ниже края сцены ничего не видно */
-  transform-origin: bottom center;
+  inset: 0;
+  transform-origin: 50% 85%; /* у ног: фигура стоит на 230-й точке из 270 */
   transition: transform 0.3s var(--ease);
   pointer-events: none;
 }
 .pcard:hover .pcard__figure {
-  transform: scale(1.05);
-}
-/* Холст на 40px выше видимой части: фигура по центру холста стоит на краю сцены. */
-.pcard__figure .skin3d__figure {
-  height: 270px;
+  transform: scale(1.04);
 }
 .skin3d__figure {
   display: block;
@@ -191,6 +182,68 @@
   color: var(--c-warning);
   font-size: 12px;
   font-weight: 600;
+}
+/* Способность: на карточке и в окне игрока. */
+.ability {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.3;
+}
+.ability svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--c-blue-2);
+}
+.ability__label {
+  flex: none;
+  color: var(--c-text-3);
+}
+.ability__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-text);
+  font-weight: 700;
+}
+.ability--empty svg,
+.ability--empty .ability__name {
+  color: var(--c-text-3);
+  font-weight: 400;
+  font-style: italic;
+}
+.ability--lg {
+  font-size: 15px;
+}
+.ability--lg svg {
+  width: 18px;
+  height: 18px;
+}
+.ability--lg .ability__name {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.pdetail__ability {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-info-bg);
+}
+.pdetail__ability .ability {
+  flex: 1 1 auto;
+}
+.pdetail__ability-form {
+  display: grid;
+  gap: 10px;
+  width: 100%;
 }
 .pcard__bio {
   color: var(--c-text-2);
@@ -278,7 +331,7 @@
   cursor: default;
 }
 .pcard__skeleton-scene {
-  height: 140px;
+  aspect-ratio: 320 / 270;
   border-radius: calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0 0;
 }
 .pcard__skeleton-line {
@@ -590,9 +643,6 @@
   grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
   gap: 28px;
   align-items: start;
-}
-.my-card__preview {
-  padding-top: 30px;
 }
 .my-card__preview .pcard {
   cursor: default;

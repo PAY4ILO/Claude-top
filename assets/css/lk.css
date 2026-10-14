@@ -3004,12 +3004,10 @@ a.att-file:hover .att-file__icon {
 .studio__preview-edit[aria-pressed='true'] {
   color: var(--c-blue-2);
 }
-/* Персонаж выглядывает над карточкой — место сверху. */
 .studio__preview-card {
   width: 100%;
   max-width: 280px;
   margin: 0 auto;
-  padding-top: 44px;
 }
 .studio__detail-stage,
 .studio__detail-stage .skin3d,

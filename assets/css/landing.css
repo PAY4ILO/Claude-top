@@ -384,6 +384,16 @@
 
 /* ----------------------------------------------------------------- футер */
 
+/* короткая страница (мало игроков): футер прижат к низу окна, а не висит посередине */
+body.landing {
+  display: flex;
+  flex-direction: column;
+}
+body.landing > main {
+  flex: 1 0 auto;
+}
+
+
 .site-footer {
   background: var(--c-header);
   border-top: 1px solid var(--c-border);

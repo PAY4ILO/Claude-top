@@ -82,6 +82,20 @@
     return null;
   }
 
+  /** Способность на сервере (её выдаёт мод, на карточке подписывает админ). Нет — «ещё не выбрана». */
+  function abilityRow(p, cls) {
+    return h(
+      'p',
+      { class: `ability ${cls || ''}${p.ability ? '' : ' ability--empty'}` },
+      icon('spark'),
+      h('span', { class: 'ability__label', text: 'Способность' }),
+      h('span', { class: 'ability__name', text: p.ability || 'ещё не выбрана' })
+    );
+  }
+
+  // Подсказки для админа — способности, которые уже есть в моде lwl; можно вписать и любую другую.
+  const KNOWN_ABILITIES = ['Разум-пара', 'Больше не человек', 'Маджонг'];
+
   /** Соцсети: ссылки собираются здесь из проверенных ников, Discord — копируется. */
   function socials(p, cls) {
     const items = Object.entries(Api.SOCIALS)
@@ -130,6 +144,7 @@
           roleTag(p)
         ),
         (p.online !== undefined || ranks.length > 0) && h('div', { class: 'pcard__meta' }, presence(p), ranks.map((r) => h('span', { class: 'rank', title: r.hint, text: r.label }))),
+        abilityRow(p),
         p.bio ? h('p', { class: 'pcard__bio', text: p.bio }) : h('p', { class: 'pcard__bio pcard__bio--empty', text: 'Пока ничего о себе не написал(а).' }),
         main.length > 0 &&
           h(
@@ -209,6 +224,59 @@
           }
         },
       });
+    // Способность видят все; подписывает (и меняет) админ с правом «Люди» — прямо здесь.
+    const abilityBox = h('div', { class: 'pdetail__ability' });
+    function showAbility() {
+      clear(abilityBox);
+      UI.append(abilityBox, [
+        abilityRow(p, 'ability--lg'),
+        canModerate() && h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: p.ability ? 'Изменить' : 'Подписать', onclick: editAbility }),
+      ]);
+    }
+    function editAbility() {
+      const listId = 'ability-names-' + Math.random().toString(36).slice(2, 7);
+      const field = UI.field({
+        label: 'Способность',
+        name: 'ability',
+        value: p.ability,
+        placeholder: 'Например: Маджонг',
+        maxlength: String(Api.LIMITS.ability.max),
+        hint: 'Как её выдали в игре (/lwl ability). Пусто — убрать подпись.',
+        attrs: { list: listId, autocomplete: 'off' },
+      });
+      const save = h('button', { class: 'btn btn--sm', type: 'submit', text: 'Сохранить' });
+      const form = h(
+        'form',
+        { class: 'pdetail__ability-form', novalidate: true },
+        field,
+        h('datalist', { id: listId }, KNOWN_ABILITIES.map((name) => h('option', { value: name }))),
+        h('div', { class: 'actions-row' }, save, h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Отмена', onclick: showAbility }))
+      );
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        UI.clearErrors(form);
+        const value = form.elements.ability.value;
+        const f = Api.validate.ability({ ability: value });
+        if (f.ability) {
+          UI.setFieldError(form, 'ability', f.ability);
+          return;
+        }
+        UI.setLoading(save, true);
+        try {
+          const next = await Api.players.setAbility(p.nickname, value);
+          p.ability = next.ability;
+          showAbility();
+          UI.toast(next.ability ? `Способность ${p.nickname}: ${next.ability}` : 'Подпись способности убрана');
+        } catch (err) {
+          UI.setLoading(save, false);
+          if (err.fields && err.fields.ability) UI.setFieldError(form, 'ability', err.fields.ability);
+          else UI.toast(err.message, { type: 'error' });
+        }
+      });
+      clear(abilityBox).append(form);
+      form.elements.ability.focus();
+    }
+    showAbility();
     const stats = p.stats ? STAT_ROWS.filter((r) => typeof p.stats[r.key] === 'number') : [];
     const ranks = ranksOf(p);
     const dates = [
@@ -223,6 +291,7 @@
         'div',
         { class: 'pdetail__info' },
         h('div', { class: 'pdetail__meta' }, roleTag(p), presence(p), ranks.map((r) => h('span', { class: 'rank', title: r.hint, text: r.label }))),
+        abilityBox,
         p.bio && h('p', { class: 'pdetail__bio', text: p.bio }),
         socials(p),
         stats.length > 0 &&
@@ -611,6 +680,7 @@
               h('p', { class: 'field__hint', text: 'Своя картинка: JPEG, PNG или WebP. Сайт сам уменьшит её и сожмёт — обычно до 100–300 КБ.' })
             ),
             form,
+            h('p', { class: 'field__hint', text: 'Способность на карточке подписывает админ — ту, что выдали в игре.' }),
             h('div', { class: 'my-card__group' }, hiddenToggle, fieldsToggle, fieldsBox)
           )
         )

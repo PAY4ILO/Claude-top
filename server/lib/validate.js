@@ -19,6 +19,7 @@ export const LIMITS = {
   packVersion: { max: 40 },
   setting: { max: 1000 },
   cardBio: { max: 140 },
+  ability: { max: 48 },
 };
 
 export const APPLICATION_SOURCES = ['Друзья', 'YouTube', 'TikTok', 'Telegram', 'Другое'];
@@ -326,6 +327,14 @@ export const validate = {
     if (!LICENSES.includes(d.license)) f.license = 'Укажите, есть ли у вас лицензия Minecraft.';
     if (str(d.contact).trim().length > LIMITS.contact.max) f.contact = `Максимум ${LIMITS.contact.max} символов.`;
     if (d.agree !== true) f.agree = 'Нужно согласиться с правилами сервера.';
+    return f;
+  },
+  /** Способность на карточке (ставит админ); пустая строка — убрать. */
+  ability(d) {
+    const f = {};
+    if (typeof d.ability !== 'string') f.ability = 'Это должен быть текст.';
+    else if (d.ability.trim().length > LIMITS.ability.max) f.ability = `Максимум ${LIMITS.ability.max} символов.`;
+    else if (/[\u0000-\u001f\u007f]/.test(d.ability)) f.ability = 'Одной строкой, без переносов.';
     return f;
   },
   /** «Моя карточка»: проверяются только присланные поля. */

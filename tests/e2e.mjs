@@ -343,8 +343,19 @@ ok('скин нарисован на холсте', (await B.locator('.pcard[dat
 await B.click('.pcard[data-nick="__Hawker__"] .pcard__open'); await B.waitForSelector('.modal__dialog .skin3d canvas');
 ok('окно игрока: 3D-скин и статистика, примерять чужие позы нельзя — только своя поза игрока', (await B.locator('.modal__dialog .skin3d canvas').count()) === 1 && (await B.locator('.modal__dialog .chip').count()) === 0 && (await B.locator('.modal__dialog .pdetail__stat').count()) >= 5);
 ok('окно игрока: модель не крутится, скачать скин нельзя', (await B.locator('.modal__dialog .skin3d__canvas--fixed').count()) === 1 && (await B.locator('.modal__dialog a[download]').count()) === 0);
+ok('способность: на карточке «ещё не выбрана», игрок подписать её не может', /Способность\s*ещё не выбрана/.test(myCardText) && (await B.locator('.modal__dialog .pdetail__ability button').count()) === 0);
 await B.keyboard.press('Escape'); await B.waitForSelector('.modal__dialog', { state: 'detached' });
 ok('окно закрывается по Esc', true);
+
+// Админ подписывает способность прямо в окне игрока.
+await A.goto(BASE + '/lk.html#/players'); await A.waitForSelector('.pcard[data-nick="__Hawker__"]');
+await A.click('.pcard[data-nick="__Hawker__"] .pcard__open'); await A.waitForSelector('.modal__dialog .pdetail__ability button');
+await A.click('.modal__dialog .pdetail__ability button:has-text("Подписать")');
+await A.fill('.modal__dialog input[name=ability]', 'Маджонг');
+await A.click('.modal__dialog .pdetail__ability-form button[type=submit]');
+await A.waitForSelector('.toast:has-text("Способность __Hawker__")');
+ok('админ подписал способность в окне игрока', (await A.locator('.modal__dialog .pdetail__ability .ability__name').innerText()) === 'Маджонг' && (await A.locator('.modal__dialog .pdetail__ability button:has-text("Изменить")').count()) === 1);
+await A.keyboard.press('Escape'); await A.waitForSelector('.modal__dialog', { state: 'detached' });
 
 // Профиль: ссылка в студию персонажа; там — поза, предметы, блоки, свои картинки отдельно для карточки и окна игрока.
 await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card a[href="#/studio"]');
@@ -583,6 +594,16 @@ ok('гость видит свой фон игрока', (await G.locator('.pcar
 await G.waitForSelector('[data-online]:not([hidden])');
 ok('«Сейчас на сервере: 1»', (await G.locator('[data-online]').innerText()).includes('Сейчас на сервере: 1'));
 ok('players.html на 320px без горизонтальной прокрутки', await G.evaluate(() => document.documentElement.scrollWidth <= 320));
+ok('гость видит способность на карточке', /Способность\s*Маджонг/.test(guestCard), guestCard.replace(/\s+/g, ' '));
+ok('сцена карточки — ровно кадр камеры и обрезает всё за ним', await G.evaluate(() => {
+  const s = document.querySelector('.pcard[data-nick="__Hawker__"] .pcard__scene');
+  const a = s.getBoundingClientRect();
+  const b = s.querySelector('canvas').getBoundingClientRect();
+  return getComputedStyle(s).overflow === 'hidden' && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2 && Math.abs(a.width / a.height - 320 / 270) < 0.02;
+}));
+await G.setViewportSize({ width: 1280, height: 2400 });
+ok('короткая страница: футер прижат к низу окна', await G.evaluate(() => Math.abs(document.querySelector('.site-footer').getBoundingClientRect().bottom - innerHeight) < 2));
+await G.setViewportSize({ width: 320, height: 700 });
 
 // Скрыть карточку в профиле → она пропадает из списка (и у игрока, и у гостя).
 await B.locator('label.checkbox--hint', { hasText: 'Скрыть карточку' }).click();

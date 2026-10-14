@@ -948,7 +948,7 @@ test('карточки: видны всем; гостю и «Пользоват�
       'по нику, сортировка из запроса не действует'
     );
     const p = (await who.get('/api/players/Alice_07')).data.player;
-    assert.deepEqual(Object.keys(p).sort(), ['avatar', 'background', 'backgroundUrl', 'bio', 'creator', 'looks', 'nickname', 'pose', 'role', 'skinDefault', 'skinSlim', 'skinUrl', 'socials']);
+    assert.deepEqual(Object.keys(p).sort(), ['ability', 'avatar', 'background', 'backgroundUrl', 'bio', 'creator', 'looks', 'nickname', 'pose', 'role', 'skinDefault', 'skinSlim', 'skinUrl', 'socials']);
   }
   assert.equal((await client().get('/api/players/nobody_here')).status, 404);
   // Своя карточка — только «Игрокам» и админам.
@@ -1578,6 +1578,28 @@ test('карточки: модерация своих картинок 16×16 �
   assert.deepEqual((await owner.del('/api/players/Alice_07/textures')).data.player.looks, expected);
 
   await alice.raw('PATCH', '/api/me/card', { looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } }, ip);
+});
+
+test('карточки: способность подписывает админ с правом «Люди», видят все', async () => {
+  const set = (who, nick, ability) => who.put(`/api/players/${nick}/ability`, { ability });
+  assert.equal((await alice.get('/api/players/Alice_07')).data.player.ability, '', 'по умолчанию пусто');
+  assert.equal((await set(client(), 'Alice_07', 'Маджонг')).status, 401);
+  assert.equal((await set(alice, 'Alice_07', 'Маджонг')).status, 403, 'сам игрок не может');
+  assert.equal((await set(owner, 'nobody_here', 'Маджонг')).status, 404);
+  for (const bad of [42, 'x'.repeat(49), 'две\nстроки']) assert.equal((await set(owner, 'Alice_07', bad)).status, 422, JSON.stringify(bad));
+
+  const ok = await set(owner, 'alice_07', '  Разум-пара  ');
+  assert.equal(ok.status, 200);
+  assert.equal(ok.data.player.ability, 'Разум-пара', 'пробелы по краям срезаны, ник без учёта регистра');
+  assert.equal((await client().get('/api/players/Alice_07')).data.player.ability, 'Разум-пара', 'гость тоже видит');
+  assert.equal((await alice.get('/api/me/card')).data.card.ability, 'Разум-пара');
+  // Игрок без аккаунта на сайте (есть только в игре) — тоже можно.
+  assert.equal((await set(owner, 'Steve_Bot', 'Больше не человек')).data.player.ability, 'Больше не человек');
+  assert.equal((await client().get('/api/players')).data.players.find((p) => p.nickname === 'Steve_Bot').ability, 'Больше не человек');
+  // Замена и снятие.
+  assert.equal((await set(owner, 'Alice_07', 'Маджонг')).data.player.ability, 'Маджонг');
+  assert.equal((await set(owner, 'Alice_07', '')).data.player.ability, '');
+  assert.equal((await set(owner, 'Steve_Bot', ' ')).data.player.ability, '', 'одни пробелы — убрать');
 });
 
 test('скин по нику лицензии: сайт спрашивает Mojang, картинку берёт с textures.minecraft.net', async () => {

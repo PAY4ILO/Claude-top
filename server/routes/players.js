@@ -98,15 +98,18 @@ export default function register(router, s) {
   // Все карточки: игроки из мода (+ аккаунт сайта, если есть) и «Игроки»/админы сайта, которые в игру ещё не заходили.
   const CARD_COLUMNS = `u.id AS user_id, u.role AS user_role, u.email AS user_email, u.nickname AS user_nickname, u.avatar_at,
       c.bio, c.hidden, c.hide_fields, c.pose, c.looks, c.background, c.bg_file, c.socials, c.skin_hash AS site_skin_hash, c.skin_slim AS site_skin_slim, c.skin_at`;
+  // Способность — по нику (player_abilities.nick_key), поэтому подписана и у тех, кто есть только в игре.
   const ALL = `
     SELECT p.nick_key, p.nickname, 1 AS has_stats, p.first_seen, p.last_seen, p.online, p.presence_at, p.playtime_sec, p.deaths,
       p.mob_kills, p.player_kills, p.blocks_mined, p.advancements, p.distance_m, p.skin_hash AS game_skin_hash,
-      p.skin_slim AS game_skin_slim, p.skin_changed_at, p.stats_at, ${CARD_COLUMNS}
+      p.skin_slim AS game_skin_slim, p.skin_changed_at, p.stats_at, ${CARD_COLUMNS},
+      (SELECT a.ability FROM player_abilities a WHERE a.nick_key = p.nick_key) AS ability
     FROM player_stats p
     LEFT JOIN users u ON u.nickname = p.nick_key
     LEFT JOIN player_cards c ON c.user_id = u.id
     UNION ALL
-    SELECT lower(u.nickname), u.nickname, 0, NULL, NULL, 0, NULL, 0, 0, 0, 0, 0, 0, 0, NULL, 0, NULL, NULL, ${CARD_COLUMNS}
+    SELECT lower(u.nickname), u.nickname, 0, NULL, NULL, 0, NULL, 0, 0, 0, 0, 0, 0, 0, NULL, 0, NULL, NULL, ${CARD_COLUMNS},
+      (SELECT a.ability FROM player_abilities a WHERE a.nick_key = lower(u.nickname))
     FROM users u
     LEFT JOIN player_cards c ON c.user_id = u.id
     WHERE u.role IN ('player', 'admin') AND NOT EXISTS (SELECT 1 FROM player_stats p WHERE p.nick_key = lower(u.nickname))`;
@@ -145,6 +148,7 @@ export default function register(router, s) {
       looks: parseLooks(row.looks, row.pose),
       ...backgroundOf(row),
       bio: row.bio || '',
+      ability: row.ability || '',
       socials: parseSocials(row.socials),
     };
     if (!full) return card;
@@ -581,6 +585,25 @@ export default function register(router, s) {
     if (c && c.bg_file) {
       setBackground.run(null, c.background === 'custom' ? 'meadow' : c.background, Date.now(), row.user_id);
       s.backgrounds.release(c.bg_file);
+    }
+    return { player: view(byKey.get(row.nick_key), true) };
+  });
+
+  // Способность игрока (её выдаёт мод командой /lwl ability) — подпись на карточке. Ставит админ с правом «Люди»;
+  // игрок сам её не меняет. Пустая строка — убрать.
+  router.add('PUT', '/api/players/:nick/ability', (ctx) => {
+    const admin = need.perm(ctx, 'users');
+    const f = clean(validate.ability({ ability: ctx.body.ability }));
+    if (Object.keys(f).length) throw fail.validation(f);
+    const row = byKey.get(String(ctx.params.nick).trim().toLowerCase().slice(0, 32));
+    if (!row) throw fail.notFound('Нет такого игрока.');
+    const ability = ctx.body.ability.trim().replace(/\s+/g, ' ');
+    if (ability) {
+      db.prepare(
+        'INSERT INTO player_abilities (nick_key, ability, set_by, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(nick_key) DO UPDATE SET ability = excluded.ability, set_by = excluded.set_by, updated_at = excluded.updated_at'
+      ).run(row.nick_key, ability, admin.id, Date.now());
+    } else {
+      db.prepare('DELETE FROM player_abilities WHERE nick_key = ?').run(row.nick_key);
     }
     return { player: view(byKey.get(row.nick_key), true) };
   });

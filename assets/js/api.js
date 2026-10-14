@@ -31,6 +31,7 @@
     packDescription: { max: 1000 },
     packVersion: { max: 40 },
     cardBio: { max: 140 },
+    ability: { max: 48 },
     skinBytes: 64 * 1024,
   };
 
@@ -344,6 +345,14 @@
       if (!Object.hasOwn(LICENSES, d.license)) f.license = 'Укажите, есть ли у вас лицензия Minecraft.';
       if (String(d.contact || '').trim().length > LIMITS.contact.max) f.contact = `Максимум ${LIMITS.contact.max} символов.`;
       if (!d.agree) f.agree = 'Нужно согласиться с правилами сервера.';
+      return f;
+    },
+    /** Способность на карточке (ставит админ); пустая строка — убрать. */
+    ability(d) {
+      const f = {};
+      if (typeof d.ability !== 'string') f.ability = 'Это должен быть текст.';
+      else if (d.ability.trim().length > LIMITS.ability.max) f.ability = `Максимум ${LIMITS.ability.max} символов.`;
+      else if (/[\u0000-\u001f\u007f]/.test(d.ability)) f.ability = 'Одной строкой, без переносов.';
       return f;
     },
     /** «Моя карточка»: проверяются только переданные поля. */
@@ -790,6 +799,8 @@
       removePlayerBackground: (nickname) => http('DELETE', `/players/${enc(nickname)}/background`).then((d) => (emit('players'), d.player)),
       /** Модерация: убрать свои картинки 16×16 игрока (и предметы/блоки с ними) → карточка игрока. */
       removePlayerTextures: (nickname) => http('DELETE', `/players/${enc(nickname)}/textures`).then((d) => (emit('players'), d.player)),
+      /** Право «Люди»: подписать способность игрока на карточке ('' — убрать) → карточка игрока. */
+      setAbility: (nickname, ability) => http('PUT', `/players/${enc(nickname)}/ability`, { ability }).then((d) => (emit('players'), d.player)),
       onChange: (cb) => on('players', cb),
     },
 

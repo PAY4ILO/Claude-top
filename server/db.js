@@ -249,6 +249,17 @@ const MIGRATIONS = [
   -- bg_file — своя картинка фона: LWL_DATA_DIR/backgrounds/<sha256>.webp|jpg|png; включена, когда background = 'custom'.
   ALTER TABLE player_cards ADD COLUMN bg_file TEXT;
   `,
+
+  /* 9: способность игрока на сервере (её выдаёт мод lwl командой /lwl ability) — подпись на карточке, ставит админ */
+  `
+  -- По нику (как player_stats.nick_key), а не по аккаунту: карточка есть и у тех, кто есть только в игре.
+  CREATE TABLE player_abilities (
+    nick_key TEXT PRIMARY KEY,
+    ability TEXT NOT NULL,
+    set_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(file) {
