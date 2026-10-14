@@ -530,13 +530,17 @@ await B.click('.studio__tile[data-id="player_head"]');
 await B.click('.studio__skins .chip:has-text("Алекс")');
 await studioSave();
 ok('голова игрока — скин Алекс', ((await detailOf()).held || {}).head?.skin === 'slim/alex', JSON.stringify((await detailOf()).held));
-// Своя картинка 16×16: загрузить → выбрать квадрат → сохранить.
+// Своя картинка: загрузить → выбрать квадрат («как есть» — в своём разрешении) → сохранить.
 await B.click('.studio__tools [role=tab]:has-text("Свои картинки")');
 await B.setInputFiles('#studio-tex-file', path.join(HERE, '../assets/img/skin-default.png'));
-await B.waitForSelector('.modal__dialog .studio-crop'); await B.click('.modal__dialog button:has-text("Готово")');
+await B.waitForSelector('.modal__dialog .studio-crop');
+ok('окно картинки: размер «как есть» — в своём разрешении', /Как есть, 64 × 64/.test(await B.locator('.studio-crop__sizes .chip[aria-checked="true"]').innerText()), await B.locator('.studio-crop__sizes').innerText());
+await B.click('.modal__dialog button:has-text("Готово")');
 await B.waitForSelector('.studio__tex'); await studioSave();
 const tex = (await detailOf()).textures || [];
-ok('своя картинка 16×16 сохранена', tex.length === 1 && /^data:image\/png;base64,/.test(tex[0]) && tex[0].length <= 4096, String(tex.length));
+const texFile = tex.length === 1 && /^[0-9a-f]{64}$/.test(tex[0]) ? await B.request.get(`${BASE}/api/textures/${tex[0]}.png`) : null;
+const texBody = texFile && texFile.status() === 200 ? await texFile.body() : null;
+ok('своя картинка сохранена файлом в своём разрешении (64×64)', !!texBody && texBody.readUInt32BE(16) === 64 && texBody.readUInt32BE(20) === 64, JSON.stringify(tex));
 const wide = B.viewportSize();
 await B.setViewportSize({ width: 320, height: 700 }); await settle(B, 500);
 ok('студия на 320px без горизонтальной прокрутки', await B.evaluate(() => document.documentElement.scrollWidth <= 320), String(await B.evaluate(() => document.documentElement.scrollWidth)));

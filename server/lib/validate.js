@@ -69,7 +69,7 @@ export const LOOK = {
   held: { rot: 180, size: [0.1, 8], at: 128 },
   blocks: { max: 64, side: 1024, y: [-1024, 1024], size: [0.1, 8] },
   mobs: { max: 16, side: 1024, y: [-1024, 1024], size: [0.1, 8] },
-  textures: { max: 3, chars: 4096, side: 16 },
+  textures: { max: 3, chars: 4096, side: 16, maxSide: 512, bytes: 1024 * 1024 }, // side и chars — старые встроенные 16×16
 };
 
 // Какие блоки и предметы бывают — из оглавления игры (файл в репозитории, сеть не нужна).
@@ -88,8 +88,9 @@ function mcKnown() {
   return mcIds;
 }
 
-/** Своя картинка: PNG 16×16 в data:-адресе. */
+/** Своя картинка: sha256 загруженного файла (lib/textures.js) или, в старых карточках, PNG 16×16 в data:-адресе. */
 function textureOk(v) {
+  if (typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)) return true;
   if (typeof v !== 'string' || v.length > LOOK.textures.chars) return false;
   const m = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(v);
   if (!m) return false;
@@ -164,7 +165,7 @@ function lookError(v) {
   if (v.size !== undefined && !inRange(v.size, ...LOOK.size)) return `Размер персонажа — от ${LOOK.size[0]} до ${LOOK.size[1]}.`;
   if (v.textures !== undefined) {
     if (!Array.isArray(v.textures) || v.textures.length > LOOK.textures.max) return `Своих картинок — не больше ${LOOK.textures.max}.`;
-    if (!v.textures.every(textureOk)) return 'Своя картинка — PNG 16×16.';
+    if (!v.textures.every(textureOk)) return 'Неверная своя картинка — загрузите её заново.';
   }
   const known = mcKnown();
   const texCount = Array.isArray(v.textures) ? v.textures.length : 0;

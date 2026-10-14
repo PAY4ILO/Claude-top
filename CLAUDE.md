@@ -150,7 +150,13 @@
   `held` — `{rightHand, leftHand, head}`, каждый `{id, rot [x,y,z] ±180, size 0.1–8, at [x,y,z] ±128, skin?}` или `null`;
   `blocks` — до 64 `{id, at [x,y,z] (низ-центр; x, z ±1024, y ±1024), rot [x,y,z] ±180 (вокруг центра блока; старое число —
   поворот вокруг вертикали, `normalizeLook` переводит в [0, y, 0]), size 0.1–8, skin?}`;
-  `textures` — до 3 PNG 16×16 data URL (≤4096 символов, сервер смотрит IHDR), в `held`/`blocks` это id `tex1…tex3`.
+  `textures` — до 3 своих картинок, в `held`/`blocks` это id `tex1…tex3`. Картинка — файл в своём разрешении
+  (`lib/textures.js`: `PUT /api/me/textures` сырым PNG до 512 точек по стороне и 1 МБ → `{texture: sha256}`,
+  `LWL_DATA_DIR/textures/<sha256>.png`, отдаётся `GET /api/textures/<sha256>.png` immutable); в `textures` — её sha256,
+  при сохранении сервер проверяет, что файл есть. В старых карточках — PNG 16×16 прямо в data:-адресе (≤4096 символов,
+  сервер смотрит IHDR), они тоже работают. Обрезает и кодирует кабинет (`cropTexture`: «как есть» или 256…16);
+  `Api.textureUrl` — адрес для `<img>`. Загружают до сохранения, поэтому `sweep()` удаляет файл без ссылок из
+  `player_cards.looks` через сутки; бэкап копирует `textures/`. Бортик плоского предмета кешируется на текстуру (`itemEdges`).
   id предметов и блоков сервер сверяет с `assets/js/mc-index.json` с диска (`mcKnown` в `validate.js`: без сети,
   читается раз за запуск; файла нет — можно только свои картинки) и списком голов `LOOK_HEADS`. `normalizeLook` округляет и выкидывает пустое.
   Пределы `LOOK` — и в `validate.js`, и в `api.js`.

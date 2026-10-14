@@ -101,7 +101,7 @@
       types: ['player', 'zombie', 'husk', 'drowned', 'skeleton', 'stray', 'wither_skeleton', 'creeper', 'enderman', 'spider', 'cave_spider', 'slime', 'piglin', 'zombified_piglin', 'witch', 'villager', 'iron_golem', 'snow_golem', 'pig', 'cow', 'sheep', 'chicken', 'wolf'],
       poses: ['stand', 'walk', 'wave', 'cheer', 'point', 'sit', 'zombie'],
     },
-    textures: { max: 3, chars: 4096, side: 16 },
+    textures: { max: 3, chars: 4096, side: 16, maxSide: 512, bytes: 1024 * 1024 },
   };
   /** Свой фон: кабинет уменьшает картинку до side точек и сжимает в WebP, чтобы файл был не больше bytes. */
   const BACKGROUND = { side: 1280, bytes: 400 * 1024, sourceBytes: 25 * 1024 * 1024 };
@@ -183,6 +183,8 @@
 
   /** Своя картинка: PNG 16×16 в data:-адресе (смотрим заголовок IHDR, как сервер). */
   function textureOk(v) {
+    // Загруженная картинка (sha256 файла на сайте) или, в старых карточках, PNG 16×16 прямо в data:-адресе.
+    if (typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)) return true;
     if (typeof v !== 'string' || v.length > LOOK.textures.chars) return false;
     const m = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(v);
     if (!m || m[1].replace(/=+$/, '').length < 34) return false; // меньше 25 байт — не PNG
@@ -241,7 +243,7 @@
     if (v.size !== undefined && !inRange(v.size, ...LOOK.size)) return `Размер персонажа — от ${LOOK.size[0]} до ${LOOK.size[1]}.`;
     if (v.textures !== undefined) {
       if (!Array.isArray(v.textures) || v.textures.length > LOOK.textures.max) return `Своих картинок — не больше ${LOOK.textures.max}.`;
-      if (!v.textures.every(textureOk)) return 'Своя картинка — PNG 16×16.';
+      if (!v.textures.every(textureOk)) return 'Неверная своя картинка — загрузите её заново.';
     }
     const known = mcKnown();
     const texCount = Array.isArray(v.textures) ? v.textures.length : 0;
@@ -550,6 +552,8 @@
     CARD_BACKGROUNDS,
     LOOK,
     BACKGROUND,
+    /** Адрес своей картинки студии: sha256 → /api/textures/<sha256>.png, старый data:-адрес — как есть. */
+    textureUrl: (t) => (typeof t === 'string' && /^[0-9a-f]{64}$/.test(t) ? `${CONFIG.apiBase}/textures/${t}.png` : t),
     SOCIALS,
     parseSocial,
     ApiError,
@@ -752,6 +756,14 @@
         const nick = String(nickname || '').trim();
         if (!/^[A-Za-z0-9_]{3,16}$/.test(nick)) return Promise.reject(new ApiError('VALIDATION', 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.', { fields: { nickname: 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.' } }));
         return http('POST', '/me/skin/nick', { nickname: nick }).then((d) => (emit('players'), d));
+      },
+      /**
+       * Своя картинка для студии: PNG (Blob) в своём разрешении, до LOOK.textures.maxSide точек и LOOK.textures.bytes.
+       * → { texture: sha256, width, height }; в карточку попадает, когда вид сохранят (looks.<вид>.textures).
+       */
+      async uploadTexture(blob, onProgress) {
+        if (!blob || blob.size > LOOK.textures.bytes) throw new ApiError('VALIDATION', `Картинка больше ${LOOK.textures.bytes / 1024 / 1024} МБ — выберите размер поменьше.`);
+        return upload('/me/textures', blob, onProgress);
       },
       /**
        * Скин лицензии по нику — для головы игрока или игрока на сцене студии (свой скин не меняется).

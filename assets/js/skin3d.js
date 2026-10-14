@@ -389,54 +389,73 @@
       }
       return;
     }
-    // Плоский предмет.
+    // Плоский предмет (своя картинка — в её разрешении): картинка спереди и сзади и бортик по краю непрозрачных точек.
     for (let li = 0; li < m.layers.length; li++) {
       const l = m.layers[li];
       const tex = l.tex;
-      const N = tex.width; // анимированные — квадрат первого кадра
-      const s = 16 / N;
+      const W = tex.width;
+      const H = tex.height;
       const zf = 8.5 + li * 0.002;
       const zb = 7.5 - li * 0.002;
       const op = { key: o.key, tint: l.tint, cut: 0.1 };
-      out.push(quad(xf([0, 16, zf]), xf([16, 16, zf]), xf([0, 0, zf]), tex, [0, 0, N, N], op));
-      out.push(quad(xf([0, 16, zb]), xf([16, 16, zb]), xf([0, 0, zb]), tex, [0, 0, N, N], op));
-      const mk = maskOf(tex);
-      const at = (i, j) => i >= 0 && j >= 0 && i < N && j < N && mk.bits[j * mk.w + i] === 1;
-      const side = { ...op, shade: 0.75 };
-      // Бортики слева и справа — вертикальными полосками, сверху и снизу — горизонтальными.
-      for (let i = 0; i < N; i++) {
-        for (const dx of [-1, 1]) {
-          let j = 0;
-          while (j < N) {
-            if (!(at(i, j) && !at(i + dx, j))) {
-              j++;
-              continue;
-            }
-            let k = j;
-            while (k + 1 < N && at(i, k + 1) && !at(i + dx, k + 1)) k++;
-            const x = (dx < 0 ? i : i + 1) * s;
-            out.push(quad(xf([x, 16 - j * s, zf]), xf([x, 16 - j * s, zb]), xf([x, 16 - (k + 1) * s, zf]), tex, [i, j, i + 1, k + 1], side));
-            j = k + 1;
-          }
-        }
+      out.push(quad(xf([0, 16, zf]), xf([16, 16, zf]), xf([0, 0, zf]), tex, [0, 0, W, H], op));
+      out.push(quad(xf([0, 16, zb]), xf([16, 16, zb]), xf([0, 0, zb]), tex, [0, 0, W, H], op));
+      for (const e of itemEdges(tex)) {
+        const side = { ...op, shade: e.shade };
+        if (e.v) out.push(quad(xf([e.x, e.y0, zf]), xf([e.x, e.y0, zb]), xf([e.x, e.y1, zf]), tex, e.uv, side));
+        else out.push(quad(xf([e.x0, e.y, zf]), xf([e.x1, e.y, zf]), xf([e.x0, e.y, zb]), tex, e.uv, side));
       }
-      for (let j = 0; j < N; j++) {
-        for (const dy of [-1, 1]) {
-          let i = 0;
-          while (i < N) {
-            if (!(at(i, j) && !at(i, j + dy))) {
-              i++;
-              continue;
-            }
-            let k = i;
-            while (k + 1 < N && at(k + 1, j) && !at(k + 1, j + dy)) k++;
-            const y = 16 - (dy < 0 ? j : j + 1) * s;
-            out.push(quad(xf([i * s, y, zf]), xf([(k + 1) * s, y, zf]), xf([i * s, y, zb]), tex, [i, j, k + 1, j + 1], { ...side, shade: dy < 0 ? 1 : 0.5 }));
-            i = k + 1;
+    }
+  }
+
+  const edges = new WeakMap();
+  /**
+   * Бортик плоского предмета (кешируется на текстуру — у картинки 512×512 считать его каждый кадр дорого):
+   * полоски по краям непрозрачных точек. Вертикальные { v: true, x, y0, y1, uv }, горизонтальные { x0, x1, y, uv };
+   * координаты — в системе предмета (0…16), uv — в точках текстуры.
+   */
+  function itemEdges(tex) {
+    let list = edges.get(tex);
+    if (list) return list;
+    list = [];
+    const W = tex.width;
+    const H = tex.height;
+    const sx = 16 / W;
+    const sy = 16 / H;
+    const mk = maskOf(tex);
+    const at = (i, j) => i >= 0 && j >= 0 && i < W && j < H && mk.bits[j * mk.w + i] === 1;
+    for (let i = 0; i < W; i++) {
+      for (const dx of [-1, 1]) {
+        let j = 0;
+        while (j < H) {
+          if (!(at(i, j) && !at(i + dx, j))) {
+            j++;
+            continue;
           }
+          let k = j;
+          while (k + 1 < H && at(i, k + 1) && !at(i + dx, k + 1)) k++;
+          list.push({ v: true, x: (dx < 0 ? i : i + 1) * sx, y0: 16 - j * sy, y1: 16 - (k + 1) * sy, uv: [i, j, i + 1, k + 1], shade: 0.75 });
+          j = k + 1;
         }
       }
     }
+    for (let j = 0; j < H; j++) {
+      for (const dy of [-1, 1]) {
+        let i = 0;
+        while (i < W) {
+          if (!(at(i, j) && !at(i, j + dy))) {
+            i++;
+            continue;
+          }
+          let k = i;
+          while (k + 1 < W && at(k + 1, j) && !at(k + 1, j + dy)) k++;
+          list.push({ x0: i * sx, x1: (k + 1) * sx, y: 16 - (dy < 0 ? j : j + 1) * sy, uv: [i, j, k + 1, j + 1], shade: dy < 0 ? 1 : 0.5 });
+          i = k + 1;
+        }
+      }
+    }
+    edges.set(tex, list);
+    return list;
   }
 
   /** Матрица поворота как в игре (display.rotation = XYZ: сначала z, потом y, потом x) — точка → точка. */

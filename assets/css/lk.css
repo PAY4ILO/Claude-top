@@ -3368,6 +3368,11 @@ a.att-file:hover .att-file__icon {
   gap: 6px;
   justify-items: start;
 }
+.studio-crop__sizes {
+  display: grid;
+  gap: 6px;
+  justify-self: stretch;
+}
 .studio-crop__preview {
   width: 96px;
   height: 96px;

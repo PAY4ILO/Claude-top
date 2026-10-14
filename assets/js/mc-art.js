@@ -17,7 +17,8 @@
  *          when — условие части (заборы, стены, стёкла: { north: 'true' } …), off — сдвиг [x, y, z] второй половины
  *          (верх двери, изголовье кровати); какие части рисовать, решает Skin3D по соседним блокам
  *        { kind: 'item', layers: [{ tex, tint }], display, handheld }
- *     id 'tex1'…'tex3' — своя картинка игрока (textures[0…2], data:image/png): flat — плоский предмет, иначе куб.
+ *     id 'tex1'…'tex3' — своя картинка игрока (textures[0…2]: sha256 загруженного файла или старый data:image/png 16×16),
+ *     в её разрешении: flat — плоский предмет, иначе куб.
  *   McArt.entityTexture(name, onReady) → <canvas> текстуры моба целиком ('zombie/zombie') или null (грузится)
  *   McArt.display(model, onReady) → display модели предмета ('item/template_skull') или null (грузится)
  *   McArt.prepared(tex, tint, shade) — текстура с оттенком и затенением (кешируется)
@@ -199,7 +200,9 @@
     return textures.get(key);
   }
 
-  /** Своя картинка игрока: data:image/png → canvas 16×16 (без сглаживания). */
+  /** Своя картинка игрока: sha256 загруженного файла (/api/textures/<sha256>.png) или старый data:-адрес 16×16. */
+  const customUrl = (t) => (typeof t === 'string' && /^[0-9a-f]{64}$/.test(t) ? `/api/textures/${t}.png` : t);
+  /** Своя картинка → canvas в её разрешении (без сглаживания). */
   const customs = new Map();
   function custom(url) {
     if (!customs.has(url)) {
@@ -209,15 +212,15 @@
           const img = new Image();
           img.onload = () => {
             const c = document.createElement('canvas');
-            c.width = 16;
-            c.height = 16;
+            c.width = img.naturalWidth || 16;
+            c.height = img.naturalHeight || 16;
             const g = c.getContext('2d');
             g.imageSmoothingEnabled = false;
-            g.drawImage(img, 0, 0, 16, 16);
+            g.drawImage(img, 0, 0, c.width, c.height);
             resolve(c);
           };
           img.onerror = () => reject(new Error('картинка'));
-          img.src = url;
+          img.src = customUrl(url);
         })
       );
       if (customs.size > 60) customs.delete(customs.keys().next().value);

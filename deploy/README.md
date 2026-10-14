@@ -146,12 +146,14 @@ sudo rm -f /var/lib/lwl/lwl.db-wal /var/lib/lwl/lwl.db-shm
 sudo rsync -a --delete /var/backups/lwl/attachments-2026-09-30/ /var/lib/lwl/attachments/
 sudo rsync -a --delete /var/backups/lwl/skins-2026-09-30/ /var/lib/lwl/skins/
 sudo rsync -a --delete /var/backups/lwl/backgrounds-2026-09-30/ /var/lib/lwl/backgrounds/
-sudo chown -R lwl:lwl /var/lib/lwl/lwl.db /var/lib/lwl/attachments /var/lib/lwl/skins /var/lib/lwl/backgrounds
+sudo rsync -a --delete /var/backups/lwl/textures-2026-09-30/ /var/lib/lwl/textures/
+sudo chown -R lwl:lwl /var/lib/lwl/lwl.db /var/lib/lwl/attachments /var/lib/lwl/skins /var/lib/lwl/backgrounds /var/lib/lwl/textures
 sudo systemctl start lwl
 ```
 
 Бэкап — это база (аккаунты, заявки, переписка, настройки, аватары, карточки игроков), папка `attachments-ДАТА`
-с фото и файлами из чата поддержки, папки `skins-ДАТА` со скинами игроков и `backgrounds-ДАТА` с их картинками фона. Эти файлы не меняются, поэтому
+с фото и файлами из чата поддержки, папки `skins-ДАТА` со скинами игроков, `backgrounds-ДАТА` с их картинками фона
+и `textures-ДАТА` со своими картинками из студии персонажа. Эти файлы не меняются, поэтому
 одинаковые файлы в снимках за разные дни — жёсткие ссылки
 на одно и то же: лишнего места не занимают. Файлы сборок лежат в `/var/lib/lwl/packs/` и в бэкап не входят:
 если нужно, копируйте их отдельно или просто загрузите заново.

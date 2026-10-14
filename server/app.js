@@ -22,6 +22,7 @@ import registerPlayers from './routes/players.js';
 import { createMailer } from './lib/mail.js';
 import { createMojang } from './lib/mojang.js';
 import { createBackgrounds } from './lib/backgrounds.js';
+import { createTextures } from './lib/textures.js';
 import { createSkins } from './lib/skins.js';
 import { rconConfigured, whitelistRemove } from './lib/rcon.js';
 
@@ -37,6 +38,7 @@ export function createApp(config) {
   fs.mkdirSync(path.join(config.dataDir, 'attachments'), { recursive: true });
   fs.mkdirSync(path.join(config.dataDir, 'skins'), { recursive: true });
   fs.mkdirSync(path.join(config.dataDir, 'backgrounds'), { recursive: true });
+  fs.mkdirSync(path.join(config.dataDir, 'textures'), { recursive: true });
   useFastHashing(config.fastHash);
   const db = openDb(path.join(config.dataDir, 'lwl.db'));
   const limiter = new RateLimiter();
@@ -139,6 +141,7 @@ export function createApp(config) {
     s.attachments.sweep();
     s.skins.sweep();
     s.backgrounds.sweep();
+    s.textures.sweep();
   }, 3600 * 1000);
   cleanupTimer.unref();
 
@@ -206,6 +209,8 @@ export function createApp(config) {
   s.skins = createSkins({ db, dir: path.join(config.dataDir, 'skins'), origin: config.skinOrigin || 'https://textures.minecraft.net', defaultTexture: config.defaultSkinTexture });
   // Свои фоны карточек: LWL_DATA_DIR/backgrounds/<sha256>.<webp|jpg|png>.
   s.backgrounds = createBackgrounds({ db, dir: path.join(config.dataDir, 'backgrounds') });
+  // Свои картинки студии (предметы, блоки): LWL_DATA_DIR/textures/<sha256>.png.
+  s.textures = createTextures({ db, dir: path.join(config.dataDir, 'textures') });
   s.mojang = createMojang(config.mojang);
   s.mail = createMailer(config.smtp);
   /** Ссылка на страницу сайта для письма; без LWL_PUBLIC_URL — null (адрес из запроса в письмо не берём). */
@@ -309,6 +314,7 @@ export function createApp(config) {
     db,
     skins: s.skins,
     backgrounds: s.backgrounds,
+    textures: s.textures,
     close() {
       clearInterval(cleanupTimer);
       limiter.stop();

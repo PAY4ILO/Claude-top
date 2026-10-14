@@ -27,6 +27,7 @@ import { MojangError } from '../lib/mojang.js';
 import { rconCommand, rconConfigured } from '../lib/rcon.js';
 import { BG_MAX_BYTES, backgroundMime, checkBackground, isBackgroundName } from '../lib/backgrounds.js';
 import { SKIN_MAX_BYTES, isSkinHash, isSkinPng } from '../lib/skins.js';
+import { TEX_MAX_BYTES, checkTexture, isTextureHash, lookTextures } from '../lib/textures.js';
 import { CARD_BACKGROUNDS, CARD_FIELDS, CARD_POSES, LIMITS, LOOK_VIEWS, SOCIALS, clean, lookSkins, normalizeLook, validate } from '../lib/validate.js';
 
 export const ONLINE_WINDOW_MS = 150 * 1000; // мод шлёт список раз в минуту; две пропущенные отправки — уже не в сети
@@ -272,6 +273,7 @@ export default function register(router, s) {
     for (const view of LOOK_VIEWS) {
       if (!(looks && looks[view])) continue;
       if (lookSkins(nextLooks[view]).some((hash) => !fs.existsSync(s.skins.fileOf(hash)))) throw fail.validation({ looks: 'Скин для головы или игрока на сцене не найден — выберите его заново.' });
+      if (lookTextures(nextLooks[view]).some((hash) => !s.textures.exists(hash))) throw fail.validation({ looks: 'Своя картинка не найдена на сайте — загрузите её заново.' });
     }
     if (pose !== undefined && !(looks && looks.card)) {
       // Готовая поза вместо своих углов; предметы, блоки и остальное остаются.
@@ -604,6 +606,53 @@ export default function register(router, s) {
       if (changed) db.prepare('UPDATE player_cards SET looks = ?, updated_at = ? WHERE user_id = ?').run(JSON.stringify(looks), Date.now(), row.user_id);
     }
     return { player: view(byKey.get(row.nick_key), true) };
+  });
+
+  /* ------------------------------------------------------------ свои картинки студии */
+
+  // Сырое тело — PNG в своём разрешении (до 512 точек по стороне; обрезает и кодирует кабинет). → { texture: sha256 }
+  // В карточку картинка попадает только при сохранении вида (looks.<вид>.textures); без ссылок файл живёт сутки.
+  router.add(
+    'PUT',
+    '/api/me/textures',
+    async (ctx) => {
+      need.player(ctx);
+      need.rate(ctx, 'texture', 30, 10 * 60_000, 'Слишком много картинок подряд. Подождите несколько минут.');
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of ctx.req) {
+        size += chunk.length;
+        if (size > TEX_MAX_BYTES) throw fail.tooLarge(`Картинка больше ${TEX_MAX_BYTES / 1024 / 1024} МБ — выберите размер поменьше.`);
+        chunks.push(chunk);
+      }
+      const data = Buffer.concat(chunks);
+      const checked = checkTexture(data);
+      if (checked.error) throw fail.validation({ texture: checked.error }, checked.error);
+      const texture = await s.textures.store(data);
+      return { texture, width: checked.width, height: checked.height };
+    },
+    { raw: true }
+  );
+
+  router.add('GET', '/api/textures/:name', (ctx) => {
+    const m = /^([0-9a-f]{64})\.png$/.exec(String(ctx.params.name));
+    if (!m || !isTextureHash(m[1])) throw fail.notFound();
+    let data;
+    try {
+      data = fs.readFileSync(s.textures.fileOf(m[1]));
+    } catch {
+      throw fail.notFound();
+    }
+    const etag = `"${m[1]}"`;
+    const headers = { 'Cache-Control': 'public, max-age=31536000, immutable', ETag: etag, 'X-Content-Type-Options': 'nosniff' };
+    if (ctx.req.headers['if-none-match'] === etag) {
+      ctx.res.writeHead(304, headers);
+      ctx.res.end();
+      return HANDLED;
+    }
+    ctx.res.writeHead(200, { ...headers, 'Content-Type': 'image/png', 'Content-Length': data.length });
+    ctx.res.end(ctx.req.method === 'HEAD' ? undefined : data);
+    return HANDLED;
   });
 
   // Публично, как скины: имя — sha256 содержимого, по адресу всегда одна и та же картинка.

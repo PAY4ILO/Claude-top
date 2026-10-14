@@ -1272,8 +1272,9 @@ test('карточки: предметы в руках, блоки вокруг 
     [{ mobs: [{ type: 'zombie', at: [0, 0, 0], pose: 'custom', angles: {} }] }, 'Свою позу можно задать только игроку.'],
     [{ mobs: [{ type: 'player', at: [0, 0, 0], pose: 'custom' }] }, 'Для своей позы нужны углы.'],
     [{ mobs: Array(17).fill({ type: 'pig', at: [0, 0, 0] }) }, 'Мобов — не больше 16.'],
-    [{ textures: ['data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64')] }, 'Своя картинка — PNG 16×16.'],
-    [{ textures: [png(17, 17)] }, 'Своя картинка — PNG 16×16.'],
+    [{ textures: ['data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64')] }, 'Неверная своя картинка — загрузите её заново.'],
+    [{ textures: [png(17, 17)] }, 'Неверная своя картинка — загрузите её заново.'],
+    [{ textures: ['ABCDEF'.repeat(10)] }, 'Неверная своя картинка — загрузите её заново.'],
     [{ textures: [tex, tex, tex, tex] }, 'Своих картинок — не больше 3.'],
   ]) {
     const r = await patch({ looks: { card: { pose: 'stand', ...look } } });
@@ -1403,6 +1404,48 @@ test('карточки: скин лицензии по нику для голо�
   await alice.raw('PATCH', '/api/me/card', { looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } }, ip);
   app.skins.sweep();
   assert.ok(!fs.existsSync(file), 'никому не нужен — удалён');
+});
+
+test('карточки: свои картинки в своём разрешении — файлом, по sha256 из карточки, чистка', async () => {
+  const ip = { 'X-Real-IP': '10.88.0.5' };
+  const octet = { 'Content-Type': 'application/octet-stream', ...ip };
+  const put = (who, body) => who.put('/api/me/textures', body, octet);
+  assert.equal((await client().put('/api/me/textures', solidPng(16, 16), octet)).status, 401, 'гостю нельзя');
+  assert.equal((await bob.put('/api/me/textures', solidPng(16, 16), octet)).status, 403, 'нужна одобренная заявка');
+  assert.equal((await put(alice, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>'))).status, 422, 'только PNG');
+  assert.equal((await put(alice, solidPng(600, 600))).status, 422, 'больше 512 точек');
+  assert.equal((await put(alice, Buffer.concat([solidPng(16, 16), Buffer.alloc(1024 * 1024 + 10)]))).status, 413, 'больше 1 МБ');
+
+  const big = solidPng(256, 256, [0x20, 0x80, 0xff, 0xff]);
+  const up = await put(alice, big);
+  assert.equal(up.status, 200, JSON.stringify(up.data));
+  assert.deepEqual(up.data, { texture: createHash('sha256').update(big).digest('hex'), width: 256, height: 256 });
+  const file = await client().get(`/api/textures/${up.data.texture}.png`);
+  assert.equal(file.status, 200);
+  assert.equal(file.headers.get('content-type'), 'image/png');
+  assert.match(file.headers.get('cache-control'), /immutable/);
+  assert.ok(file.data.equals(big), 'та же картинка, в своём разрешении');
+  assert.equal((await client().get('/api/textures/nope.png')).status, 404);
+
+  // В карточке — только sha256; файла нет — не сохраняется.
+  const patch = (looks) => alice.raw('PATCH', '/api/me/card', { looks }, ip);
+  const saved = await patch({ card: { pose: 'stand', textures: [up.data.texture], held: { rightHand: { id: 'tex1' } }, blocks: [{ id: 'tex1', at: [16, 0, 0] }] } });
+  assert.equal(saved.status, 200, JSON.stringify(saved.data));
+  assert.deepEqual(saved.data.looks.card.textures, [up.data.texture]);
+  const ghost = await patch({ card: { pose: 'stand', textures: ['f'.repeat(64)] } });
+  assert.equal(ghost.status, 422);
+  assert.match(ghost.data.fields.looks, /Своя картинка не найдена/);
+
+  // Чистка: картинка без ссылок из карточек старше суток удаляется, нужная карточке — остаётся.
+  const lonely = solidPng(128, 128, [0xff, 0, 0, 0xff]);
+  const up2 = await put(alice, lonely);
+  assert.equal(up2.status, 200);
+  const old = new Date(Date.now() - 2 * 24 * 3600 * 1000);
+  for (const h of [up.data.texture, up2.data.texture]) fs.utimesSync(path.join(dataDir, 'textures', h + '.png'), old, old);
+  app.textures.sweep();
+  assert.ok(fs.existsSync(path.join(dataDir, 'textures', up.data.texture + '.png')), 'нужна карточке — остаётся');
+  assert.ok(!fs.existsSync(path.join(dataDir, 'textures', up2.data.texture + '.png')), 'никому не нужна — удалена');
+  await patch({ card: { pose: 'wave' }, detail: { pose: 'wave' } });
 });
 
 test('карточки: свой фон — проверка, хранение, замена, модерация', async () => {

@@ -147,7 +147,7 @@
     return l;
   }
 
-  /* ------------------------------------------------------------ картинки 16×16 */
+  /* ------------------------------------------------------------ свои картинки */
 
   function loadImage(file) {
     return new Promise((resolve, reject) => {
@@ -167,9 +167,11 @@
     });
   }
 
-  /** Квадрат картинки → холст 16×16. crisp — ближайшая точка (пиксель-арт), иначе плавно, уменьшая вдвое за шаг. */
-  function downscale(img, sx, sy, side, crisp) {
-    const N = LOOK.textures.side;
+  /**
+   * Квадрат картинки → холст N×N. crisp — ближайшая точка (пиксель-арт), иначе плавно, уменьшая вдвое за шаг.
+   * Если квадрат меньше N — увеличивает (чётко или плавно, так же).
+   */
+  function downscale(img, sx, sy, side, crisp, N) {
     let src = img;
     let x = sx;
     let y = sy;
@@ -198,18 +200,27 @@
     return out;
   }
 
+  const toPng = (canvas) => new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png'));
+
   /**
    * Окно «Какую часть взять»: квадрат двигают мышью, пальцем или стрелками, приближают колёсиком, ползунком, + и −.
-   * Рядом — как получится в 16×16. Возвращает Promise<data:image/png> или null («Отмена»).
+   * Размер — «как есть» (сколько точек в выбранном квадрате, не больше LOOK.textures.maxSide) или меньше: 256…16.
+   * Рядом — как получится. Возвращает Promise<{ blob (PNG), size }> или null («Отмена»).
+   * Получилось больше LOOK.textures.bytes — размер уменьшается вдвое, пока не влезет (reduced: true).
    */
   function cropTexture(img) {
     const iw = img.naturalWidth;
     const ih = img.naturalHeight;
+    const MAX = LOOK.textures.maxSide;
     const MAX_ZOOM = clamp(Math.min(iw, ih) / 4, 1, 32);
     let zoom = 1;
     let cx = iw / 2;
     let cy = ih / 2;
+    // 'native' — разрешение самой картинки (выбранного квадрата), иначе число точек по стороне.
+    let res = 'native';
     const side = () => Math.min(iw, ih) / zoom;
+    const nativeSize = () => clamp(Math.round(side()), 1, MAX);
+    const outSize = () => (res === 'native' ? nativeSize() : Math.min(res, nativeSize() * 8, MAX));
     const fix = () => {
       const half = side() / 2;
       cx = clamp(cx, half, iw - half);
@@ -217,25 +228,52 @@
     };
 
     const canvas = h('canvas', { class: 'crop__canvas' });
+    const grid = h('div', { class: 'studio-crop__grid', 'aria-hidden': 'true' });
     const stage = h(
       'div',
       { class: 'crop__stage studio-crop__stage', tabindex: '0', autofocus: true, role: 'img', 'aria-label': 'Картинка. Перетащите, чтобы выбрать часть; стрелки — сдвиг, плюс и минус — масштаб.' },
       canvas,
-      h('div', { class: 'studio-crop__grid', 'aria-hidden': 'true' })
+      grid
     );
-    const preview = h('canvas', { class: 'studio-crop__preview', width: '16', height: '16', role: 'img', 'aria-label': 'Как получится: 16 на 16 точек' });
+    const preview = h('canvas', { class: 'studio-crop__preview', width: '16', height: '16', role: 'img', 'aria-label': 'Как получится' });
+    const sizeText = h('p', { class: 'field__hint' });
     const range = h('input', { class: 'crop__range', type: 'range', min: '1', max: String(MAX_ZOOM), step: '0.01', value: '1', 'aria-label': 'Масштаб' });
     const crisp = h('input', { type: 'checkbox', checked: Math.min(iw, ih) <= 64 });
+    const sizes = h('div', { class: 'chips chips--sm', role: 'radiogroup', 'aria-label': 'Размер картинки' });
     const zoomBtn = (name, label, k) => h('button', { class: 'icon-btn', type: 'button', 'aria-label': label, onclick: () => setZoom(zoom * k) }, icon(name));
     const done = h('button', { class: 'btn', type: 'button', text: 'Готово' });
     const content = h(
       'div',
       { class: 'crop studio-crop' },
-      h('div', { class: 'studio-crop__row' }, stage, h('div', { class: 'studio-crop__side' }, h('p', { class: 'field__label', text: 'Получится' }), preview, h('p', { class: 'field__hint', text: '16 × 16 точек' }))),
+      h('div', { class: 'studio-crop__row' }, stage, h('div', { class: 'studio-crop__side' }, h('p', { class: 'field__label', text: 'Получится' }), preview, sizeText)),
       h('div', { class: 'crop__controls' }, zoomBtn('minus', 'Отдалить', 1 / 1.25), range, zoomBtn('plus', 'Приблизить', 1.25)),
+      h('div', { class: 'studio-crop__sizes' }, h('p', { class: 'field__label', text: 'Размер' }), sizes),
       h('label', { class: 'checkbox' }, crisp, h('span', { text: 'Чёткие пиксели — для пиксель-арта и скинов' })),
       h('div', { class: 'modal__actions' }, h('button', { class: 'btn btn--ghost', type: 'button', text: 'Отмена', onclick: () => m.close() }), done)
     );
+
+    /** Варианты размера: «как есть» и меньше — 256, 128, 64, 32, 16 (что меньше самой картинки). */
+    function drawSizes() {
+      const n = nativeSize();
+      const options = [['native', `Как есть, ${n} × ${n}`], ...[256, 128, 64, 32, 16].filter((v) => v < n).map((v) => [v, `${v} × ${v}`])];
+      if (res !== 'native' && res >= n) res = 'native';
+      clear(sizes).append(
+        ...options.map(([v, label]) =>
+          h('button', {
+            class: 'chip',
+            type: 'button',
+            role: 'radio',
+            'aria-checked': String(v === res),
+            text: label,
+            onclick: () => {
+              res = v;
+              drawSizes();
+              draw();
+            },
+          })
+        )
+      );
+    }
 
     function draw() {
       const rect = stage.getBoundingClientRect();
@@ -247,15 +285,22 @@
       const s = side();
       g.clearRect(0, 0, px, px);
       g.drawImage(img, cx - s / 2, cy - s / 2, s, s, 0, 0, px, px);
-      const small = downscale(img, cx - s / 2, cy - s / 2, s, crisp.checked);
+      const N = outSize();
+      const small = downscale(img, cx - s / 2, cy - s / 2, s, crisp.checked, N);
+      if (preview.width !== N) preview.width = preview.height = N;
       const pg = preview.getContext('2d');
-      pg.clearRect(0, 0, 16, 16);
+      pg.clearRect(0, 0, N, N);
       pg.drawImage(small, 0, 0);
+      sizeText.textContent = `${N} × ${N} точек`;
+      // Сетка точек поверх — только пока точки крупные (до 32 по стороне), иначе она бы закрыла картинку.
+      grid.hidden = N > 32;
+      grid.style.backgroundSize = `${100 / N}% ${100 / N}%`;
     }
     function setZoom(z) {
       zoom = clamp(z, 1, MAX_ZOOM);
       range.value = String(zoom);
       fix();
+      drawSizes();
       draw();
     }
     function pan(dx, dy) {
@@ -315,12 +360,25 @@
         },
       });
     });
-    done.addEventListener('click', () => {
+    done.addEventListener('click', async () => {
+      done.disabled = true;
       const s = side();
-      result = downscale(img, cx - s / 2, cy - s / 2, s, crisp.checked).toDataURL('image/png');
+      let N = outSize();
+      let blob = await toPng(downscale(img, cx - s / 2, cy - s / 2, s, crisp.checked, N));
+      let reduced = false;
+      // Пёстрая фотография в PNG бывает тяжёлой — уменьшаем, пока не влезет в лимит сайта.
+      while (blob && blob.size > LOOK.textures.bytes && N > 16) {
+        N = Math.max(16, Math.round(N / 2));
+        blob = await toPng(downscale(img, cx - s / 2, cy - s / 2, s, crisp.checked, N));
+        reduced = true;
+      }
+      done.disabled = false;
+      if (!blob) return UI.toast('Не получилось сохранить картинку.', { type: 'error' });
+      result = { blob, size: N, reduced };
       m.close();
     });
     resize.observe(stage);
+    drawSizes();
     draw();
     return promise;
   }
@@ -846,22 +904,32 @@
         UI.toast(err.message, { type: 'error' });
         return;
       }
-      const src = await cropTexture(img);
-      if (!src || !alive) return;
-      if (src.length > LOOK.textures.chars) {
-        UI.toast('Картинка получилась слишком пёстрой — попробуйте другую часть или «Чёткие пиксели».', { type: 'error' });
-        return;
-      }
-      const look = cur();
-      if ((look.textures || []).length >= LOOK.textures.max) {
+      const picked = await cropTexture(img);
+      if (!picked || !alive) return;
+      if ((cur().textures || []).length >= LOOK.textures.max) {
         UI.toast(`Своих картинок — не больше ${LOOK.textures.max}.`, { type: 'error' });
         return;
       }
+      // Картинка — отдельным файлом на сайте (в своём разрешении); в карточке — только её sha256.
+      let uploaded;
+      try {
+        uploaded = await Api.players.uploadTexture(picked.blob);
+      } catch (err) {
+        if (alive) UI.toast(err.fields ? Object.values(err.fields)[0] : err.message, { type: 'error' });
+        return;
+      }
+      if (!alive) return;
+      const look = cur();
       begin(null);
-      look.textures = [...(look.textures || []), src];
+      look.textures = [...(look.textures || []), uploaded.texture];
       changed();
       renderTools();
-      UI.toast('Картинка добавлена — дайте её в руку, наденьте на голову или поставьте блоком.', { type: 'success' });
+      UI.toast(
+        picked.reduced
+          ? `Картинка добавлена, но файл был слишком тяжёлым — уменьшена до ${picked.size} × ${picked.size}.`
+          : `Картинка ${picked.size} × ${picked.size} добавлена — дайте её в руку, наденьте на голову или поставьте блоком.`,
+        { type: 'success' }
+      );
     }
 
     function copyToOther() {
@@ -1601,7 +1669,7 @@
       const A = art();
       if (A && isHead(id)) return headIcon(id, px, skin);
       if (A) return A.icon(id, px, null, cur().textures || []);
-      if (isTex(id) && cur().textures && cur().textures[Number(id.slice(3)) - 1]) return h('img', { class: 'studio__tex-img', src: cur().textures[Number(id.slice(3)) - 1], alt: '', width: String(px), height: String(px) });
+      if (isTex(id) && cur().textures && cur().textures[Number(id.slice(3)) - 1]) return h('img', { class: 'studio__tex-img', src: Api.textureUrl(cur().textures[Number(id.slice(3)) - 1]), alt: '', width: String(px), height: String(px) });
       return h('span', { class: 'studio__no-icon', 'aria-hidden': 'true' });
     }
 
@@ -2175,7 +2243,7 @@
         return h(
           'li',
           { class: 'studio__tex' },
-          h('img', { class: 'studio__tex-img', src, alt: `Своя картинка ${i + 1}`, width: '64', height: '64' }),
+          h('img', { class: 'studio__tex-img', src: Api.textureUrl(src), alt: `Своя картинка ${i + 1}`, width: '64', height: '64' }),
           h(
             'div',
             { class: 'studio__tex-body' },
@@ -2227,11 +2295,11 @@
         );
       });
       UI.append(panel, [
-        h('p', { class: 'card-sub', text: `Картинка 16 × 16 точек — как текстура в игре. Её можно дать в руку, надеть на голову или поставить блоком. До ${max} картинок в каждом виде.` }),
+        h('p', { class: 'card-sub', text: `Своя картинка — в своём разрешении, до ${LOOK.textures.maxSide} × ${LOOK.textures.maxSide} точек. Её можно дать в руку, надеть на голову или поставить блоком. До ${max} картинок в каждом виде.` }),
         !A && notice('Картинки сохранятся, но увидеть их на персонаже можно будет, когда на странице появится каталог Minecraft — он рисует предметы и блоки.'),
         rows.length ? h('ul', { class: 'studio__texs' }, rows) : h('p', { class: 'field__hint', text: 'Своих картинок пока нет.' }),
         h('div', { class: 'actions-row' }, input, upload),
-        h('p', { class: 'field__hint', text: 'PNG, JPG, WebP или GIF до 8 МБ. После загрузки выберите квадрат — он сожмётся до 16 × 16.' }),
+        h('p', { class: 'field__hint', text: 'PNG, JPG, WebP или GIF до 8 МБ. После загрузки выберите квадрат и размер: «как есть» — без потери чёткости, меньше — для пиксель-арта.' }),
       ]);
     }
 
