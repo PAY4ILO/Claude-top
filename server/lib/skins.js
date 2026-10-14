@@ -198,6 +198,10 @@ export function createSkins({ db, dir, origin, defaultTexture = null, timeoutMs 
           .all()
           .map((r) => r.skin_hash)
       );
+      // Головы игроков и игроки на сцене студии (player_cards.looks → skin).
+      for (const r of db.prepare(`SELECT looks FROM player_cards WHERE looks LIKE '%"skin":"%'`).all()) {
+        for (const m of String(r.looks).matchAll(/"skin":"([0-9a-f]{64})"/g)) used.add(m[1]);
+      }
       if (defaultHash) used.add(defaultHash);
       const old = Date.now() - 24 * 3600 * 1000;
       for (const name of names) {

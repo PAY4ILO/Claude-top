@@ -11,10 +11,15 @@
  *   McArt.list()               → { blocks: [id], items: [id] }
  *   McArt.label(id)            — название (английское, из игры; до loadNames() — из id)
  *   McArt.loadNames()          → Promise: названия загружены
- *   McArt.model(id, onReady, textures, flat) → готовая модель или null (тогда грузится, по готовности — onReady()):
- *        { kind: 'block', parts: [{ elements, x, y }], display }
+ *   McArt.model(id, onReady, textures, flat, asBlock) → готовая модель или null (тогда грузится, по готовности — onReady()):
+ *     asBlock — модель блока, даже если у него есть плоский предмет (дверь, цветок, фонарь поставили на землю);
+ *        { kind: 'block', parts: [{ elements, x, y, when, off }], display }
+ *          when — условие части (заборы, стены, стёкла: { north: 'true' } …), off — сдвиг [x, y, z] второй половины
+ *          (верх двери, изголовье кровати); какие части рисовать, решает Skin3D по соседним блокам
  *        { kind: 'item', layers: [{ tex, tint }], display, handheld }
  *     id 'tex1'…'tex3' — своя картинка игрока (textures[0…2], data:image/png): flat — плоский предмет, иначе куб.
+ *   McArt.entityTexture(name, onReady) → <canvas> текстуры моба целиком ('zombie/zombie') или null (грузится)
+ *   McArt.display(model, onReady) → display модели предмета ('item/template_skull') или null (грузится)
  *   McArt.prepared(tex, tint, shade) — текстура с оттенком и затенением (кешируется)
  *   McArt.icon(id, px, onReady, textures) → <canvas> для палитры (дорисуется сам, когда загрузится)
  */
@@ -39,7 +44,7 @@
         })
         .then((ix) => {
           index = ix;
-          for (const [id, ...parts] of ix.blocks) blockIds.set(id, parts.map(([m, x = 0, y = 0]) => ({ model: m, x, y })));
+          for (const [id, ...parts] of ix.blocks) blockIds.set(id, parts.map(([m, x = 0, y = 0, extra]) => ({ model: m, x, y, when: (extra && extra.w) || null, off: (extra && extra.o) || null })));
           for (const [id, m, tints] of ix.items) itemIds.set(id, { model: m, tints: tints || [] });
           return ix;
         })
@@ -341,10 +346,10 @@
             return { dir: d, tex: loaded.get(texRef(r.textures, f.texture)) || null, uv: f.uv || defaultUv(d, e.from, e.to), rotation: f.rotation || 0, tint: tinted ? tint : null };
           }),
         }));
-        return { elements, x: p.x, y: p.y, display: r.display };
+        return { elements, x: p.x, y: p.y, when: p.when, off: p.off, display: r.display };
       })
     );
-    return { kind: 'block', parts: built.map(({ elements, x, y }) => ({ elements, x, y })), display: built[0].display };
+    return { kind: 'block', parts: built.map(({ elements, x, y, when, off }) => ({ elements, x, y, when, off })), display: built[0].display };
   }
 
   async function buildItem(id) {
@@ -380,14 +385,16 @@
    * Готовая модель или null (начнёт грузить и вызовет onReady). Не загрузилась (нет сети, Mojang недоступен) —
    * так и останется null, без повторов до перезагрузки страницы.
    */
-  function model(id, onReady, list, flat) {
-    const key = isTex(id) ? `${id}|${flat ? 1 : 0}|${list && list[Number(id.slice(3)) - 1]}` : id;
+  function model(id, onReady, list, flat, asBlock) {
+    // asBlock — поставить блоком: у дверей, цветов, фонарей есть и плоский предмет, но на земле нужна модель блока.
+    const block = !!asBlock && blockIds.has(id);
+    const key = isTex(id) ? `${id}|${flat ? 1 : 0}|${list && list[Number(id.slice(3)) - 1]}` : block ? id + '|block' : id;
     let m = models.get(key);
     if (!m) {
       m = { value: null, waiting: [] };
       models.set(key, m);
       m.promise = load()
-        .then(() => (isTex(id) ? buildCustom(id, list, flat) : itemIds.has(id) ? buildItem(id) : blockIds.has(id) ? buildBlock(id) : Promise.reject(new Error('нет ' + id))))
+        .then(() => (isTex(id) ? buildCustom(id, list, flat) : !block && itemIds.has(id) ? buildItem(id) : blockIds.has(id) ? buildBlock(id) : Promise.reject(new Error('нет ' + id))))
         .then((v) => {
           m.value = v;
           m.waiting.splice(0).forEach((f) => f());
@@ -399,6 +406,53 @@
     }
     if (!m.value && onReady && !m.waiting.includes(onReady)) m.waiting.push(onReady);
     return m.value;
+  }
+
+  /** Готовое значение или null: начинает грузить и по готовности зовёт onReady (как model()). */
+  function lazy(map, key, make, onReady) {
+    let m = map.get(key);
+    if (!m) {
+      m = { value: null, waiting: [] };
+      map.set(key, m);
+      load()
+        .then(make)
+        .then((v) => {
+          m.value = v;
+          m.waiting.splice(0).forEach((f) => f());
+        })
+        .catch((e) => {
+          m.waiting.length = 0;
+          console.warn('McArt:', key, e && e.message);
+        });
+    }
+    if (!m.value && onReady && !m.waiting.includes(onReady)) m.waiting.push(onReady);
+    return m.value;
+  }
+
+  const entityTextures = new Map();
+  /** Текстура моба или игрока по умолчанию целиком (без обрезки кадров): 'zombie/zombie', 'player/wide/steve'. */
+  function entityTexture(name, onReady) {
+    return lazy(
+      entityTextures,
+      name,
+      () =>
+        file(`textures/entity/${name}.png`)
+          .then((bytes) => createImageBitmap(new Blob([bytes], { type: 'image/png' })))
+          .then((bmp) => {
+            const c = document.createElement('canvas');
+            c.width = bmp.width;
+            c.height = bmp.height;
+            c.getContext('2d').drawImage(bmp, 0, 0);
+            return c;
+          }),
+      onReady
+    );
+  }
+
+  const displays = new Map();
+  /** display модели предмета с родителями ('item/template_skull'). */
+  function display(name, onReady) {
+    return lazy(displays, name, () => resolveModel(name).then((r) => r.display), onReady);
   }
 
   /* ------------------------------------------------------------ названия */
@@ -460,6 +514,8 @@
     list: () => ({ blocks: [...blockIds.keys()], items: [...itemIds.keys()] }),
     label,
     model,
+    entityTexture,
+    display,
     prepared,
     icon,
     get ready() {

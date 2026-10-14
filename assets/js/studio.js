@@ -2,11 +2,15 @@
  * Студия персонажа (кабинет, #/studio): как стоит персонаж на карточках — отдельно на маленькой карточке (card)
  * и в окне игрока (detail).
  *   Слева — рабочая сцена (Skin3D.poser в режиме scene): тянуть пустое место — повернуть камеру, колёсико — приблизить,
- *     правая кнопка — сдвинуть кадр; нажать на часть тела, предмет или блок — появятся кольца.
+ *     правая кнопка — сдвинуть кадр; нажать на часть тела, предмет, блок или моба — появятся ручки; двойное нажатие
+ *     на персонажа — выбрать его целиком (двигать по сцене, вращать, менять размер).
+ *     Кнопка «Камера карточки» — сцена через камеру вида в рамке размера карточки: так её и увидят; тянуть — повернуть,
+ *     колёсико — приблизить, правая кнопка — сдвинуть кадр (это сохраняется в look.camera / scale / offset).
  *   В середине — как это увидят другие: маленькая карточка и окно игрока (рисует players.js). Нажатие — править этот вид.
- *   Справа — инструменты: «Поза», «Предметы», «Блоки», «Свои картинки».
- * Предметы и блоки — модели самой игры (McArt, assets/js/mc-art.js). Если McArt на странице нет, поза, размер,
- * поворот и сдвиг работают, а во вкладках предметов и блоков — пояснение, что каталог Minecraft не загружен.
+ *   Справа — инструменты: «Поза», «Предметы», «Блоки», «Мобы», «Камера», «Свои картинки».
+ * Предметы, блоки, головы и мобы — модели самой игры (McArt, assets/js/mc-art.js; McMobs, assets/js/mc-mobs.js).
+ * Если McArt на странице нет, поза и камера работают, а во вкладках предметов, блоков и мобов — пояснение,
+ * что каталог Minecraft не загружен.
  * Сохраняется по кнопке: «Сохранить» — открытый вид, «Сохранить обе» — оба. Ctrl+Z / Ctrl+Y — отменить / вернуть.
  *
  *   Studio.mount(root) → { destroy(), dirty() }
@@ -35,19 +39,29 @@
   };
   const SLOTS = { rightHand: 'Правая рука', leftHand: 'Левая рука', head: 'Голова' };
   const SLOT_TO = { rightHand: 'в правую руку', leftHand: 'в левую руку', head: 'на голову' };
-  const TABS = { pose: 'Поза', items: 'Предметы', blocks: 'Блоки', textures: 'Свои картинки' };
-  const TOOLS = { select: 'Выбрать', place: 'Ставить', break: 'Ломать' };
+  const TABS = { pose: 'Поза', items: 'Предметы', blocks: 'Блоки', mobs: 'Мобы', camera: 'Камера', textures: 'Свои картинки' };
+  const TOOLS = { select: 'Выбрать', place: 'Ставить', break: 'Убрать' };
   // Ручки на сцене, как в Blockbench: [подпись, клавиша, значок].
   const MODES = { move: ['Двигать', 'V', 'move'], rotate: ['Вращать', 'R', 'retry'], scale: ['Растянуть', 'S', 'scale'] };
   const PART_LABEL = Object.fromEntries(Skin3D.PARTS.map((p) => [p.key, p.label]));
   const PART_KEYS = new Set(Object.keys(PART_LABEL));
+  const mobs = () => window.McMobs || null;
 
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const round = (x, k = 1) => Math.round(x * k) / k;
   const isTex = (id) => /^tex[1-3]$/.test(id);
+  const isHead = (id) => LOOK.heads.includes(id);
   const art = () => (window.McArt && typeof window.McArt.model === 'function' ? window.McArt : null);
-  const kindOf = (key) => (!key ? null : PART_KEYS.has(key) ? 'part' : key.startsWith('held:') ? 'held' : key.startsWith('block:') ? 'block' : null);
+  // Ключи выбранного — как в Skin3D.poser: часть тела, 'figure', 'held:<слот>', 'block:<i>', 'mob:<i>', 'mob:<i>:<часть>'.
+  const kindOf = (key) =>
+    !key ? null : PART_KEYS.has(key) ? 'part' : key === 'figure' ? 'figure' : key.startsWith('held:') ? 'held' : key.startsWith('block:') ? 'block' : key.startsWith('mob:') ? (key.split(':').length === 3 ? 'mobpart' : 'mob') : null;
+  /** Номер моба в ключе 'mob:<i>' и 'mob:<i>:<часть>'. */
+  const mobIndex = (key) => Number(key.split(':')[1]);
+  const mobLabel = (type) => {
+    const t = mobs() && mobs().TYPES.find((x) => x.key === type);
+    return t ? t.label : type;
+  };
   /** 12,5 — с запятой, без лишних нулей. */
   const num = (v) => String(round(v, 10)).replace('.', ',').replace('-', '−');
 
@@ -59,46 +73,71 @@
   /** Как server/lib/validate.js → normalizeLook: округлить, лишнее выбросить (тот же порядок ключей). */
   function normalize(v) {
     const out = { pose: v.pose, scale: v.scale === undefined ? 1 : round(v.scale, 100), turn: v.turn === undefined ? 0 : round(v.turn) };
-    if (v.pose === 'custom') {
-      const a = v.angles || Skin3D.poseAngles('stand');
-      out.angles = { lift: a.lift === undefined ? 0 : round(a.lift) };
-      for (const part of LOOK.parts) out.angles[part] = (a[part] || [0, 0, 0]).map((x) => round(x));
-      const move = {};
-      for (const part of LOOK.parts) {
-        const m = a.move && a.move[part];
-        if (m && m.some((x) => round(x, 10))) move[part] = m.map((x) => round(x, 10));
-      }
-      if (Object.keys(move).length) out.angles.move = move;
-      const stretch = {};
-      for (const part of LOOK.parts) {
-        const k = a.stretch && a.stretch[part];
-        if (k && k.some((x) => round(x, 100) !== 1)) stretch[part] = k.map((x) => round(x, 100));
-      }
-      if (Object.keys(stretch).length) out.angles.stretch = stretch;
-    }
+    if (v.pose === 'custom') out.angles = normAngles(v.angles);
     const offset = v.offset ? v.offset.map((x) => round(x, 10)) : null;
     if (offset && offset.some((x) => x)) out.offset = offset;
+    if (v.camera) out.camera = { yaw: round(v.camera.yaw), pitch: round(v.camera.pitch) };
+    const pos = v.pos ? v.pos.map((x) => round(x, 10)) : null;
+    if (pos && pos.some((x) => x)) out.pos = pos;
+    if (v.size !== undefined && round(v.size, 100) !== 1) out.size = round(v.size, 100);
     if (v.textures && v.textures.length) out.textures = [...v.textures];
+    const withSkin = (o, e) => (typeof e.skin === 'string' ? { ...o, skin: e.skin } : o);
     if (v.held) {
       const held = {};
       for (const slot of LOOK.slots) {
         const e = v.held[slot];
         if (!e) continue;
-        held[slot] = { id: e.id, rot: (e.rot || [0, 0, 0]).map((x) => round(x)), size: e.size === undefined ? 1 : round(e.size, 100), at: (e.at || [0, 0, 0]).map((x) => round(x, 10)) };
+        held[slot] = withSkin({ id: e.id, rot: (e.rot || [0, 0, 0]).map((x) => round(x)), size: e.size === undefined ? 1 : round(e.size, 100), at: (e.at || [0, 0, 0]).map((x) => round(x, 10)) }, e);
       }
       if (Object.keys(held).length) out.held = held;
     }
-    if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => ({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: b.rot === undefined ? 0 : round(b.rot), size: b.size === undefined ? 1 : round(b.size, 100) }));
+    if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => withSkin({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: b.rot === undefined ? 0 : round(b.rot), size: b.size === undefined ? 1 : round(b.size, 100) }, b));
+    if (v.mobs && v.mobs.length) {
+      out.mobs = v.mobs.map((m) => {
+        let o = withSkin({ type: m.type, at: m.at.map((x) => round(x, 10)), rot: m.rot === undefined ? 0 : round(m.rot), size: m.size === undefined ? 1 : round(m.size, 100), pose: m.pose || 'stand' }, m);
+        if (m.type === 'player' && m.slim) o = { ...o, slim: true };
+        if (m.pose === 'custom') o.angles = normAngles(m.angles);
+        return o;
+      });
+    }
+    return out;
+  }
+
+  /** Углы своей позы — как normalizeAngles в server/lib/validate.js. */
+  function normAngles(src) {
+    const a = src || Skin3D.poseAngles('stand');
+    const out = { lift: a.lift === undefined ? 0 : round(a.lift) };
+    for (const part of LOOK.parts) out[part] = (a[part] || [0, 0, 0]).map((x) => round(x));
+    const move = {};
+    for (const part of LOOK.parts) {
+      const m = a.move && a.move[part];
+      if (m && m.some((x) => round(x, 10))) move[part] = m.map((x) => round(x, 10));
+    }
+    if (Object.keys(move).length) out.move = move;
+    const stretch = {};
+    for (const part of LOOK.parts) {
+      const k = a.stretch && a.stretch[part];
+      if (k && k.some((x) => round(x, 100) !== 1)) stretch[part] = k.map((x) => round(x, 100));
+    }
+    if (Object.keys(stretch).length) out.stretch = stretch;
     return out;
   }
   const keyOf = (look) => JSON.stringify(normalize(look));
 
-  /** Рабочая копия вида: всё, что нужно редактору, на месте. */
-  function prepare(look) {
+  /**
+   * Рабочая копия вида: всё, что нужно редактору, на месте. У старых видов (без camera) поворот turn крутил камеру —
+   * переводим в свою камеру вида с тем же углом, а фигура больше не повёрнута: картинка та же.
+   */
+  function prepare(look, view) {
     const l = clone(look || { pose: 'stand' });
     if (l.pose !== 'custom' && !Object.hasOwn(Api.CARD_POSES, l.pose)) l.pose = 'stand';
     if (typeof l.scale !== 'number') l.scale = 1;
     if (typeof l.turn !== 'number') l.turn = 0;
+    if (!l.camera || typeof l.camera !== 'object') {
+      const base = CAMERA[view] || CAMERA.card;
+      l.camera = { yaw: round(((((base.yaw + l.turn + 180) % 360) + 360) % 360) - 180), pitch: base.pitch };
+      l.turn = 0;
+    }
     if (l.pose === 'custom' && !l.angles) l.angles = Skin3D.poseAngles('stand');
     if (l.angles && typeof l.angles.lift !== 'number') l.angles.lift = 0;
     if (l.pose !== 'custom') delete l.angles;
@@ -300,10 +339,19 @@
       slot: 'rightHand',
       brush: null,
       brushSize: 1,
+      // Голова игрока, которую ставят блоком, — чья (skin), и кого ставят на сцену во вкладке «Мобы».
+      brushSkin: null,
+      mob: 'zombie',
+      mobSkin: null,
+      mobSlim: false,
       grid: true,
+      cameraMode: false,
       saving: false,
       pal: { items: { query: '', kind: 'all', page: 0 }, blocks: { query: '', page: 0 } },
     };
+    // Чей это скин (sha256 → ник): для подписей у голов и игроков на сцене.
+    const skinNames = new Map();
+    let lwlPlayers = null;
     const undoStack = [];
     const redoStack = [];
     let lastGroup = null;
@@ -318,6 +366,7 @@
     let bar = null;
     let previewEls = [];
     let selectionEl = null;
+    let hintEl = null;
     let toolBadge = null;
     let modesEl = null;
     let resize = null;
@@ -331,8 +380,14 @@
     const anyDirty = () => !!S.looks && VIEWS.some(isDirty);
     const blocksOf = () => cur().blocks || [];
     const blockAt = (key) => blocksOf()[Number(key.slice(6))] || null;
+    const mobsOf = () => cur().mobs || [];
+    const mobAt = (key) => mobsOf()[mobIndex(key)] || null;
     const heldIn = (slot) => (cur().held && cur().held[slot]) || null;
-    const labelOf = (id) => (isTex(id) ? `Своя картинка ${id.slice(3)}` : art() ? art().label(id) : id);
+    const headLabel = (id) => ((mobs() && mobs().HEADS.find((x) => x.id === id)) || {}).label || id;
+    const labelOf = (id) => (isTex(id) ? `Своя картинка ${id.slice(3)}` : isHead(id) ? headLabel(id) : art() ? art().label(id) : id);
+    /** Чей скин: «Стив», ник игрока LWL или лицензии, иначе «скин игрока». */
+    const skinLabel = (skin) => (!skin ? 'Стив' : /^(wide|slim)\//.test(skin) ? (mobs() ? mobs().skinLabel(skin) : skin) : skinNames.get(skin) || 'скин игрока');
+    const entryLabel = (e) => (e.id === 'player_head' ? `Голова: ${skinLabel(e.skin)}` : labelOf(e.id));
 
     function stateBlock({ iconName, title, text, action, error }) {
       return h(
@@ -362,7 +417,7 @@
         return;
       }
       S.data = d;
-      S.looks = { card: prepare(d.looks.card), detail: prepare(d.looks.detail) };
+      S.looks = { card: prepare(d.looks.card, 'card'), detail: prepare(d.looks.detail, 'detail') };
       for (const v of VIEWS) S.saved[v] = keyOf(S.looks[v]);
       // Ушли со студии, не сохранив, а на сервере с тех пор ничего не менялось — возвращаем правки.
       let restored = false;
@@ -380,7 +435,7 @@
             label: 'Отбросить',
             onClick: () => {
               begin(null);
-              for (const v of VIEWS) S.looks[v] = prepare(S.data.looks[v]);
+              for (const v of VIEWS) S.looks[v] = prepare(S.data.looks[v], v);
               refreshAll();
             },
           },
@@ -457,6 +512,8 @@
     function validSel(key) {
       const kind = kindOf(key);
       if (kind === 'block') return blockAt(key) ? key : null;
+      if (kind === 'mob') return mobAt(key) ? key : null;
+      if (kind === 'mobpart') return mobAt(key) && mobAt(key).type === 'player' ? key : null;
       if (kind === 'held') return heldIn(key.slice(5)) ? key : null;
       return key;
     }
@@ -483,13 +540,14 @@
     function select(key, fromScene) {
       S.sel = key;
       const kind = kindOf(key);
-      if (kind === 'part') {
+      if (kind === 'part' || kind === 'figure') {
         S.part = key;
         if (fromScene) S.tab = 'pose';
       } else if (kind === 'held') {
         S.slot = key.slice(5);
         if (fromScene) S.tab = 'items';
       } else if (kind === 'block' && fromScene) S.tab = 'blocks';
+      else if ((kind === 'mob' || kind === 'mobpart') && fromScene) S.tab = 'mobs';
       if (!fromScene) poser.set({ part: key });
       renderTools();
       syncSelection();
@@ -499,6 +557,7 @@
     function setMode(mode) {
       S.mode = mode;
       if (S.tool !== 'select') setTool('select');
+      if (S.cameraMode) setCameraMode(false);
       if (poser) poser.set({ mode });
       if (modesEl) modesEl.querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
     }
@@ -506,9 +565,35 @@
     function setTool(tool) {
       if (!art() && tool !== 'select') return;
       S.tool = tool;
+      S.toolTab = tool === 'select' ? null : S.tab;
+      if (tool !== 'select' && S.cameraMode) setCameraMode(false);
       if (poser) poser.set({ tool });
       if (panel) panel.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
       syncSelection();
+    }
+
+    /** «Камера карточки»: сцена через камеру открытого вида, в рамке размера карточки. */
+    function setCameraMode(on) {
+      S.cameraMode = !!on;
+      if (on && S.tool !== 'select') {
+        S.tool = 'select';
+        if (poser) poser.set({ tool: 'select' });
+      }
+      if (poser) {
+        poser.set({ cameraMode: S.cameraMode });
+        const stage = poser.el.closest('.studio__stage');
+        if (stage) stage.classList.toggle('is-camera', S.cameraMode);
+      }
+      document.querySelectorAll('[data-camera-toggle]').forEach((b) => b.setAttribute('aria-pressed', String(S.cameraMode)));
+      syncSelection();
+    }
+
+    /** Рамка карточки для режима камеры: пропорции и приближение — как у настоящей карточки и окна игрока. */
+    function frameOf() {
+      if (S.view === 'card') return { aspect: 320 / 270, viewZoom: 190 / 270, ...CAMERA.card };
+      const c = viewer && viewer.canvas;
+      const aspect = c && c.clientWidth && c.clientHeight ? c.clientWidth / c.clientHeight : 1.4;
+      return { aspect, viewZoom: 1, ...CAMERA.detail };
     }
 
     /* ---------------------------------------------------- действия */
@@ -535,12 +620,15 @@
       look.pose = 'custom';
     }
 
-    function assignHeld(slot, id) {
+    function assignHeld(slot, id, skin) {
       begin(null);
       const look = cur();
       look.held = look.held || {};
       const prev = look.held[slot];
       look.held[slot] = { id, rot: prev ? prev.rot.slice() : [0, 0, 0], size: prev ? prev.size : 1, at: prev ? prev.at.slice() : [0, 0, 0] };
+      // Голова игрока: чья — переданная или та же, что была.
+      const s = skin !== undefined ? skin : prev && prev.id === 'player_head' ? prev.skin : null;
+      if (id === 'player_head' && s) look.held[slot].skin = s;
       S.slot = slot;
       S.sel = 'held:' + slot;
       poser.set({ look, part: S.sel });
@@ -587,8 +675,67 @@
       changed();
     }
 
-    /** Где встанет новый блок: на грани блока под мышью или на полу. null — некуда. */
+    function addMob(m) {
+      const look = cur();
+      if (mobsOf().length >= LOOK.mobs.max) {
+        UI.toast(`Больше ${LOOK.mobs.max} мобов поставить нельзя.`, { type: 'error' });
+        return false;
+      }
+      begin(null);
+      look.mobs = look.mobs || [];
+      look.mobs.push(m);
+      S.sel = 'mob:' + (look.mobs.length - 1);
+      poser.set({ look, part: S.sel });
+      changed();
+      return true;
+    }
+
+    function removeMob(i) {
+      const look = cur();
+      if (!look.mobs || !look.mobs[i]) return;
+      begin(null);
+      look.mobs.splice(i, 1);
+      if (!look.mobs.length) delete look.mobs;
+      if (kindOf(S.sel) === 'mob' || kindOf(S.sel) === 'mobpart') {
+        const j = mobIndex(S.sel);
+        S.sel = j === i ? null : j > i ? S.sel.replace(/^mob:d+/, 'mob:' + (j - 1)) : S.sel;
+      }
+      poser.set({ look, part: S.sel });
+      changed();
+    }
+
+    /** Новый моб — кого и в какой позе (у человекоподобных по умолчанию — как в игре: зомби руки вперёд). */
+    function newMob(at, rot) {
+      const def = mobs() && mobs().mob(S.mob);
+      const m = { type: S.mob, at, rot, size: 1, pose: (def && def.pose) || 'stand' };
+      if (S.mob === 'player') {
+        if (S.mobSkin) m.skin = S.mobSkin;
+        if (S.mobSlim || /^slim\//.test(S.mobSkin || '')) m.slim = true;
+      }
+      return m;
+    }
+
+    /** Где встанет новый моб: на верх блока под мышью или на пол (по сетке — в середину клетки). */
+    function mobTarget(u) {
+      if (mobsOf().length >= LOOK.mobs.max || !u) return null;
+      let at;
+      if (kindOf(u.key) === 'block' && u.normal && u.normal[1] > 0.7) {
+        const b = blockAt(u.key);
+        if (!b) return null;
+        at = [b.at[0], b.at[1] + 16 * (b.size || 1), b.at[2]];
+      } else if (u.ground) {
+        const step = S.grid ? 16 : 1;
+        at = [Math.round(u.ground[0] / step) * step, 0, Math.round(u.ground[2] / step) * step];
+      } else return null;
+      at = at.map((x) => round(x, 10) || 0);
+      const M = LOOK.mobs;
+      if (Math.abs(at[0]) > M.side || Math.abs(at[2]) > M.side || at[1] < M.y[0] || at[1] > M.y[1]) return null;
+      return { at, rot: 0, size: 1, mob: true };
+    }
+
+    /** Где встанет новый блок: на грани блока под мышью или на полу. null — некуда. Во вкладке «Мобы» — моб. */
     function placeTarget(u) {
+      if (S.tab === 'mobs') return mobTarget(u);
       const blocks = blocksOf();
       if (!S.brush || blocks.length >= LOOK.blocks.max || !u) return null;
       const size = S.brushSize;
@@ -623,20 +770,33 @@
         if (kindOf(u.key) === 'block') {
           removeBlock(Number(u.key.slice(6)));
           renderTools();
+        } else if (kindOf(u.key) === 'mob' || kindOf(u.key) === 'mobpart') {
+          removeMob(mobIndex(u.key));
+          renderTools();
         }
         return;
       }
       if (S.tool !== 'place') return;
+      if (S.tab === 'mobs') {
+        if (mobsOf().length >= LOOK.mobs.max) return UI.toast(`Больше ${LOOK.mobs.max} мобов поставить нельзя.`, { type: 'error' });
+        const t = mobTarget(u);
+        if (!t) return UI.toast('Сюда не поставить: слишком далеко.');
+        if (addMob(newMob(t.at, t.rot))) renderTools();
+        return;
+      }
       if (!S.brush) return UI.toast('Сначала выберите блок в палитре.');
       if (blocksOf().length >= LOOK.blocks.max) return UI.toast(`Больше ${LOOK.blocks.max} блоков поставить нельзя.`, { type: 'error' });
       const t = placeTarget(u);
       if (!t) return UI.toast('Сюда не поставить: слишком далеко от персонажа.');
-      if (addBlock({ id: S.brush, at: t.at, rot: t.rot, size: t.size })) renderTools();
+      const b = { id: S.brush, at: t.at, rot: t.rot, size: t.size };
+      if (S.brush === 'player_head' && S.brushSkin) b.skin = S.brushSkin;
+      if (addBlock(b)) renderTools();
     }
 
     function removeSelected() {
       const kind = kindOf(S.sel);
       if (kind === 'block') removeBlock(Number(S.sel.slice(6)));
+      else if (kind === 'mob' || kind === 'mobpart') removeMob(mobIndex(S.sel));
       else if (kind === 'held') removeHeld(S.sel.slice(5));
       else return false;
       renderTools();
@@ -735,7 +895,7 @@
         const d = await Api.players.updateMyCard({ looks });
         if (!alive) return;
         S.data = d;
-        for (const v of todo) S.saved[v] = keyOf(prepare(d.looks[v]));
+        for (const v of todo) S.saved[v] = keyOf(prepare(d.looks[v], v));
         showError('');
         UI.toast(todo.length > 1 ? 'Сохранено: карточка и окно игрока' : `Сохранено: ${LOOK.views[todo[0]].toLowerCase()}`, { type: 'success' });
       } catch (err) {
@@ -788,10 +948,12 @@
         zoom: SCENE_ZOOM,
         label: 'Сцена студии',
         snap: (key) => {
+          if (kindOf(key) === 'mob') return S.grid ? 16 : 1;
           const b = blockAt(key);
           return S.grid ? 16 * ((b && b.size) || 1) : 1;
         },
         target: placeTarget,
+        frame: frameOf,
         onSelect: (key) => select(key, true),
         onStart: () => begin(null),
         onChange: () => changed(),
@@ -820,20 +982,24 @@
           { class: 'studio__zoom' },
           zoomBtn('minus', 'Отдалить', 1 / 1.25),
           zoomBtn('plus', 'Приблизить', 1.25),
-          h('button', { class: 'btn btn--sm btn--ghost studio__camera', type: 'button', text: 'Камера как в виде', onclick: () => poser.resetCamera() })
+          h('button', { class: 'btn btn--sm btn--ghost studio__camera', type: 'button', title: 'Камера студии — как камера открытого вида', text: 'Вид как на карточке', onclick: () => poser.resetCamera() }),
+          h(
+            'button',
+            { class: 'btn btn--sm studio__cam-toggle', type: 'button', 'aria-pressed': String(S.cameraMode), dataset: { cameraToggle: '' }, title: 'Двигать камеру карточки (C)', onclick: () => setCameraMode(!S.cameraMode) },
+            icon('camera'),
+            h('span', { text: 'Камера карточки' })
+          )
         ),
         toolBadge
       );
       selectionEl = h('p', { class: 'studio__selection', 'aria-live': 'polite' });
+      hintEl = h('p', { class: 'studio__hint' });
       const work = h(
         'section',
         { class: 'card studio__work', 'aria-label': 'Просмотр персонажа' },
         h('div', { class: 'studio__work-head' }, h('h2', { class: 'studio__heading', text: 'Просмотр персонажа' }), selectionEl),
         stage,
-        h('p', {
-          class: 'studio__hint',
-          text: 'Нажмите на часть тела, предмет или блок и тяните ручки: V — стрелки (двигать), R — кольца (вращать), S — кубики (растянуть; квадрат в середине — всё сразу). Shift — крупный шаг. Пустое место — повернуть камеру, колёсико — приблизить, правая кнопка — сдвинуть кадр. Delete — убрать предмет или блок.',
-        })
+        hintEl
       );
       resize = new ResizeObserver(() => poser && poser.set({}));
       resize.observe(stage);
@@ -930,13 +1096,27 @@
       const kind = kindOf(key);
       let text = 'Ничего не выбрано — нажмите на персонажа';
       if (kind === 'part') text = `Выбрано: ${PART_LABEL[key].toLowerCase()}`;
-      else if (kind === 'held' && heldIn(key.slice(5))) text = `Предмет: ${labelOf(heldIn(key.slice(5)).id)} — ${SLOTS[key.slice(5)].toLowerCase()}`;
-      else if (kind === 'block' && blockAt(key)) text = `Блок ${Number(key.slice(6)) + 1}: ${labelOf(blockAt(key).id)}`;
+      else if (kind === 'figure') text = 'Выбран весь персонаж';
+      else if (kind === 'held' && heldIn(key.slice(5))) text = `Предмет: ${entryLabel(heldIn(key.slice(5)))} — ${SLOTS[key.slice(5)].toLowerCase()}`;
+      else if (kind === 'block' && blockAt(key)) text = `Блок ${Number(key.slice(6)) + 1}: ${entryLabel(blockAt(key))}`;
+      else if ((kind === 'mob' || kind === 'mobpart') && mobAt(key)) text = `Моб ${mobIndex(key) + 1}: ${mobLabel(mobAt(key).type)}${mobAt(key).type === 'player' ? ` (${skinLabel(mobAt(key).skin)})` : ''}${kind === 'mobpart' ? ' — ' + PART_LABEL[key.split(':')[2]].toLowerCase() : ''}`;
+      if (S.cameraMode) text = `Камера: ${LOOK.views[S.view].toLowerCase()}`;
       selectionEl.textContent = text;
       if (toolBadge) {
-        toolBadge.hidden = S.tool === 'select';
-        toolBadge.textContent =
-          S.tool === 'place' ? (S.brush ? `Ставить: ${labelOf(S.brush)} · Esc — выбор` : 'Ставить: выберите блок в палитре · Esc — выбор') : S.tool === 'break' ? 'Ломать: нажмите на блок · Esc — выбор' : '';
+        const what = S.tab === 'mobs' ? `Ставить: ${mobLabel(S.mob)}` : S.brush ? `Ставить: ${S.brush === 'player_head' ? `голова (${skinLabel(S.brushSkin)})` : labelOf(S.brush)}` : 'Ставить: выберите блок в палитре';
+        toolBadge.hidden = S.tool === 'select' && !S.cameraMode;
+        toolBadge.textContent = S.cameraMode
+          ? 'Камера карточки: тяните — повернуть, колёсико — приблизить, правая кнопка — сдвинуть · C — выйти'
+          : S.tool === 'place'
+            ? `${what} · Esc — выбор`
+            : S.tool === 'break'
+              ? 'Убрать: нажмите на блок или моба · Esc — выбор'
+              : '';
+      }
+      if (hintEl) {
+        hintEl.textContent = S.cameraMode
+          ? 'Рамка — ровно то, что попадёт на карточку. Тяните — повернуть камеру, колёсико — приблизить, правая кнопка — сдвинуть кадр, стрелки — повернуть по шагам. Точные значения — во вкладке «Камера».'
+          : 'Нажмите на часть тела, предмет, блок или моба и тяните ручки: V — стрелки (двигать), R — кольца (вращать), S — кубики (растянуть; квадрат в середине — всё сразу). Двойное нажатие на персонажа — выбрать его целиком. Shift — крупный шаг. Пустое место — повернуть камеру, колёсико — приблизить, правая кнопка — сдвинуть кадр. C — камера карточки, Delete — убрать выбранное.';
       }
     }
 
@@ -951,11 +1131,11 @@
         t.setAttribute('aria-selected', String(on));
         t.tabIndex = on ? 0 : -1;
       }
-      // «Ставить» и «Ломать» — только пока открыты блоки.
-      if (S.tab !== 'blocks' && S.tool !== 'select') setTool('select');
+      // «Ставить» и «Убрать» — только пока открыты блоки или мобы (инструмент свой у каждой вкладки).
+      if (S.tool !== 'select' && S.tab !== S.toolTab) setTool('select');
       panel.setAttribute('aria-labelledby', 'studio-tab-' + S.tab);
       clear(panel);
-      ({ pose: renderPose, items: renderItems, blocks: renderBlocks, textures: renderTextures })[S.tab]();
+      ({ pose: renderPose, items: renderItems, blocks: renderBlocks, mobs: renderMobs, camera: renderCamera, textures: renderTextures })[S.tab]();
       if (focus) {
         const el = panel.querySelector(focus);
         if (el) el.focus();
@@ -963,16 +1143,21 @@
     }
     /** После движения на сцене: списки и подписи (без потери фокуса — он на сцене). */
     const renderToolsSoft = () => {
-      if (S.tab === 'blocks' || S.tab === 'items') renderTools();
+      if (S.tab === 'blocks' || S.tab === 'items' || S.tab === 'mobs') renderTools();
     };
 
-    /** Ползунок как в профиле (look__slider); read — откуда взять значение, когда его поменяли на сцене. */
-    function slider({ label, min, max, step = 1, value, unit = '', axis, read, onInput, group, format, history = true }) {
+    /**
+     * Ползунок как в профиле (look__slider); read — откуда взять значение, когда его поменяли на сцене.
+     * log — размеры (от 5 % до 2000 %): ползунок по логарифму, чтобы и мелкие, и огромные было удобно выбрать.
+     * Значение за пределами ползунка (сцена позволяет больше) — ползунок у края, подпись — настоящее число.
+     */
+    function slider({ label, min, max, step = 1, value, unit = '', axis, read, onInput, group, format, history = true, log = false }) {
       const fmt = format || ((v) => v + unit);
+      const toIn = (v) => (log ? Math.log(Math.max(Number(v) || 0, 1e-6)) : v);
       const out = h('output', { class: 'look__value', text: fmt(value) });
-      const input = h('input', { class: 'look__range', type: 'range', min: String(min), max: String(max), step: String(step), value: String(value), 'aria-label': label });
+      const input = h('input', { class: 'look__range', type: 'range', min: String(toIn(min)), max: String(toIn(max)), step: log ? '0.001' : String(step), value: String(toIn(value)), 'aria-label': label });
       input.addEventListener('input', () => {
-        const v = Number(input.value);
+        const v = log ? Math.round(Math.exp(Number(input.value)) / step) * step : Number(input.value);
         out.textContent = fmt(v);
         // history: false — настройка инструмента, а не вида персонажа: в историю и «не сохранено» не попадает.
         if (history) begin(group || label);
@@ -984,7 +1169,7 @@
         sync.push(() => {
           const v = read();
           if (v === undefined || v === null) return;
-          input.value = String(v);
+          input.value = String(toIn(v));
           out.textContent = fmt(v);
         });
       }
@@ -1003,43 +1188,14 @@
       return h('div', { class: 'callout callout--warning studio__notice' }, icon('info'), h('div', {}, h('p', { class: 'callout__title', text: 'Каталог Minecraft не загружен' }), h('p', { text }), action));
     }
 
-    /* «Поза» */
-    function renderPose() {
-      const angles = () => (cur().pose === 'custom' ? cur().angles : Skin3D.poseAngles(cur().pose));
-      const chips = h(
-        'div',
-        { class: 'chips', role: 'radiogroup', 'aria-label': 'Поза' },
-        [...Object.entries(Api.CARD_POSES), ['custom', 'Своя поза']].map(([key, label]) =>
-          h('button', { class: 'chip', type: 'button', role: 'radio', 'aria-checked': String(key === cur().pose), dataset: { pose: key }, text: label, onclick: () => pickPose(key) })
-        )
-      );
-      syncPoseChips = () => chips.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-checked', String(c.dataset.pose === cur().pose)));
-
-      const part = S.part;
-      const parts = h(
-        'div',
-        { class: 'chips chips--sm', role: 'radiogroup', 'aria-label': 'Часть тела' },
-        Skin3D.PARTS.map(({ key, label }) =>
-          h('button', {
-            class: 'chip',
-            type: 'button',
-            role: 'radio',
-            'aria-checked': String(key === part),
-            dataset: { part: key },
-            text: label,
-            onclick: () => {
-              S.part = key;
-              select(key, false);
-              renderTools(`[data-part="${key}"]`);
-            },
-          })
-        )
-      );
-      const custom = h(
-        'div',
-        { class: 'look__custom' },
-        h('p', { class: 'field__label', text: 'Что двигаем' }),
-        parts,
+    /**
+     * Ползунки одной части тела: поворот, сдвиг, размер, «Присесть» — у персонажа и у игрока на сцене.
+     * read() — углы позы сейчас (у готовой — её углы), edit() — сделать позу своей и вернуть её углы (меняются на месте),
+     * key — начало ключа для «Отменить» (у каждого игрока на сцене своё).
+     */
+    function limbSliders({ part, read, edit, key = '' }) {
+      const angles = read;
+      return [
         h('p', { class: 'studio__sub', text: 'Поворот' }),
         AXES[part].map(([label, sign], i) => {
           const read = () => sign * angles()[part][i] || 0;
@@ -1051,10 +1207,9 @@
             max: LOOK.angle,
             value: read(),
             unit: '°',
-            group: `angle:${part}:${i}`,
+            group: `${key}angle:${part}:${i}`,
             onInput: (v) => {
-              ensureCustom();
-              cur().angles[part][i] = sign * v;
+              edit()[part][i] = sign * v;
             },
           });
         }),
@@ -1067,14 +1222,14 @@
           return slider({
             label,
             read,
-            min: -LOOK.move,
-            max: LOOK.move,
+            min: -64,
+            max: 64,
             step: 0.5,
             value: read(),
-            group: `move:${part}:${i}`,
+            format: num,
+            group: `${key}move:${part}:${i}`,
             onInput: (v) => {
-              ensureCustom();
-              const a = cur().angles;
+              const a = edit();
               a.move = a.move || {};
               const m = (a.move[part] || [0, 0, 0]).slice();
               m[i] = v;
@@ -1091,15 +1246,15 @@
           return slider({
             label,
             read,
+            log: true,
             min: Math.round(LOOK.stretch[0] * 100),
             max: Math.round(LOOK.stretch[1] * 100),
-            step: 5,
+            step: 1,
             value: read(),
             unit: '%',
-            group: `stretch:${part}:${i}`,
+            group: `${key}stretch:${part}:${i}`,
             onInput: (v) => {
-              ensureCustom();
-              const a = cur().angles;
+              const a = edit();
               a.stretch = a.stretch || {};
               const k = (a.stretch[part] || [1, 1, 1]).slice();
               k[i] = v / 100;
@@ -1116,8 +1271,7 @@
             text: `Сбросить: ${PART_LABEL[part].toLowerCase()}`,
             onclick: () => {
               begin(null);
-              ensureCustom();
-              const a = cur().angles;
+              const a = edit();
               a[part] = [0, 0, 0];
               if (a.move) delete a.move[part];
               if (a.stretch) delete a.stretch[part];
@@ -1129,35 +1283,94 @@
         slider({
           label: 'Присесть',
           read: () => -angles().lift || 0,
-          min: 0,
+          min: -LOOK.lift[1],
           max: -LOOK.lift[0],
           value: -angles().lift || 0,
-          group: 'lift',
+          group: key + 'lift',
           onInput: (v) => {
-            ensureCustom();
-            cur().angles.lift = -v || 0;
+            edit().lift = -v || 0;
           },
         }),
         h('p', { class: 'field__hint', text: 'Готовая поза станет своей, как только повернёте, сдвинете или растянете часть тела. На сцене то же делают ручки: V — двигать, R — вращать, S — растянуть.' })
+      ];
+    }
+
+    /* «Поза» */
+    function renderPose() {
+      const angles = () => (cur().pose === 'custom' ? cur().angles : Skin3D.poseAngles(cur().pose));
+      const chips = h(
+        'div',
+        { class: 'chips', role: 'radiogroup', 'aria-label': 'Поза' },
+        [...Object.entries(Api.CARD_POSES), ['custom', 'Своя поза']].map(([key, label]) =>
+          h('button', { class: 'chip', type: 'button', role: 'radio', 'aria-checked': String(key === cur().pose), dataset: { pose: key }, text: label, onclick: () => pickPose(key) })
+        )
+      );
+      syncPoseChips = () => chips.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-checked', String(c.dataset.pose === cur().pose)));
+
+      const part = S.part;
+      const parts = h(
+        'div',
+        { class: 'chips chips--sm', role: 'radiogroup', 'aria-label': 'Часть тела' },
+        [{ key: 'figure', label: 'Весь персонаж' }, ...Skin3D.PARTS].map(({ key, label }) =>
+          h('button', {
+            class: 'chip' + (key === 'figure' ? ' chip--strong' : ''),
+            type: 'button',
+            role: 'radio',
+            'aria-checked': String(key === part),
+            dataset: { part: key },
+            text: label,
+            onclick: () => {
+              S.part = key;
+              select(key, false);
+              renderTools(`[data-part="${key}"]`);
+            },
+          })
+        )
       );
 
-      const offset = (i) => (cur().offset ? cur().offset[i] : 0);
-      const setOffset = (i, v) => {
-        const o = cur().offset ? cur().offset.slice() : [0, 0];
-        o[i] = v;
-        cur().offset = o;
+      // Весь персонаж: где стоит, какого размера, куда повёрнут. Блоки и мобы вокруг не меняются.
+      const posOf = (i) => (cur().pos ? cur().pos[i] : 0);
+      const setPos = (i, v) => {
+        const p = cur().pos ? cur().pos.slice() : [0, 0, 0];
+        p[i] = v;
+        cur().pos = p;
       };
+      const W = LOOK.world;
+      const figure = group(
+        'Персонаж на сцене',
+        slider({ label: 'Размер', log: true, min: Math.round(LOOK.size[0] * 100), max: Math.round(LOOK.size[1] * 100), value: Math.round((cur().size || 1) * 100), unit: '%', group: 'fig-size', read: () => Math.round((cur().size || 1) * 100), onInput: (v) => (cur().size = v / 100) }),
+        slider({ label: 'Поворот', axis: 1, min: -LOOK.turn, max: LOOK.turn, value: cur().turn, unit: '°', group: 'fig-turn', read: () => cur().turn, onInput: (v) => (cur().turn = v) }),
+        ['Вбок (X)', 'Вверх (Y)', 'Вперёд (Z)'].map((label, i) =>
+          slider({ label, axis: i, min: i === 1 ? -128 : -256, max: i === 1 ? 256 : 256, step: 0.5, value: posOf(i), format: num, group: `fig-pos:${i}`, read: () => posOf(i), onInput: (v) => setPos(i, clamp(v, i === 1 ? W.y[0] : -W.side, i === 1 ? W.y[1] : W.side)) })
+        ),
+        h('p', { class: 'field__hint', text: '16 — один блок. На сцене персонажа можно взять целиком: двойное нажатие по нему, дальше V — двигать, R — вращать, S — размер. Ручками можно дальше, чем ползунками.' }),
+        h(
+          'div',
+          { class: 'actions-row' },
+          h('button', {
+            class: 'btn btn--sm btn--ghost',
+            type: 'button',
+            text: 'Персонаж на место',
+            onclick: () => {
+              begin(null);
+              cur().size = 1;
+              cur().turn = 0;
+              delete cur().pos;
+              changed();
+            },
+          })
+        )
+      );
+
+      const custom =
+        part === 'figure'
+          ? h('div', { class: 'look__custom' }, h('p', { class: 'field__label', text: 'Что двигаем' }), parts)
+          : h('div', { class: 'look__custom' }, h('p', { class: 'field__label', text: 'Что двигаем' }), parts, limbSliders({ part, read: angles, edit: () => (ensureCustom(), cur().angles) }));
+
       UI.append(panel, [
         group('Поза', chips),
         custom,
-        group(
-          'Фигура в кадре',
-          slider({ label: 'Размер', min: Math.round(LOOK.scale[0] * 100), max: Math.round(LOOK.scale[1] * 100), value: Math.round(cur().scale * 100), unit: '%', read: () => Math.round(cur().scale * 100), onInput: (v) => (cur().scale = v / 100) }),
-          slider({ label: 'Поворот фигуры', min: -LOOK.turn, max: LOOK.turn, value: cur().turn, unit: '°', read: () => cur().turn, onInput: (v) => (cur().turn = v) }),
-          slider({ label: 'Сдвиг вбок', min: -LOOK.offset, max: LOOK.offset, value: offset(0), read: () => offset(0), onInput: (v) => setOffset(0, v) }),
-          slider({ label: 'Сдвиг вверх', min: -LOOK.offset, max: LOOK.offset, value: offset(1), read: () => offset(1), onInput: (v) => setOffset(1, v) }),
-          h('p', { class: 'field__hint', text: 'Размер и сдвиг видны в превью: на сцене персонаж всегда в середине.' })
-        ),
+        figure,
         h(
           'div',
           { class: 'actions-row' },
@@ -1176,26 +1389,75 @@
           h('button', {
             class: 'btn btn--sm btn--ghost',
             type: 'button',
-            text: 'Размер и сдвиг как были',
+            text: 'Сбросить всё',
+            onclick: async () => {
+              const ok = await UI.confirm({ title: 'Сбросить всё?', text: `В виде «${LOOK.views[S.view]}» персонаж встанет как обычно, без предметов, блоков, мобов и своих картинок, камера — как была. Это можно отменить (Ctrl+Z).`, confirmText: 'Сбросить', danger: true });
+              if (!ok || !alive) return;
+              begin(null);
+              S.looks[S.view] = prepare({ pose: 'stand', scale: 1, turn: 0 }, S.view);
+              S.sel = PART_KEYS.has(S.part) ? S.part : 'rightArm';
+              refreshAll();
+            },
+          })
+        ),
+      ]);
+    }
+
+    /* «Камера»: как вид снят — для карточки и для окна игрока своя. */
+    function renderCamera() {
+      const cam = () => cur().camera || { yaw: CAMERA[S.view].yaw, pitch: CAMERA[S.view].pitch };
+      const setCam = (k, v) => (cur().camera = { ...cam(), [k]: v });
+      const off = (i) => (cur().offset ? cur().offset[i] : 0);
+      const setOff = (i, v) => {
+        const o = cur().offset ? cur().offset.slice() : [0, 0];
+        o[i] = v;
+        cur().offset = o;
+      };
+      const toggle = h(
+        'button',
+        { class: 'btn studio__cam-big', type: 'button', 'aria-pressed': String(S.cameraMode), dataset: { cameraToggle: '' }, onclick: () => setCameraMode(!S.cameraMode) },
+        icon('camera'),
+        h('span', { text: 'Двигать камеру на сцене' })
+      );
+      UI.append(panel, [
+        h('p', { class: 'card-sub', text: `Камера вида «${LOOK.views[S.view]}»: откуда смотрим на сцену и насколько близко. У карточки и окна игрока камеры разные.` }),
+        h('div', { class: 'studio__group' }, toggle, h('p', { class: 'field__hint', text: 'На сцене появится рамка — ровно то, что увидят на карточке. Тяните — повернуть, колёсико — приблизить, правая кнопка — сдвинуть кадр. Клавиша C — включить и выключить.' })),
+        group(
+          'Поворот камеры',
+          slider({ label: 'Вокруг', axis: 1, min: -180, max: 180, value: cam().yaw, unit: '°', group: 'cam-yaw', read: () => cam().yaw, onInput: (v) => setCam('yaw', v) }),
+          slider({ label: 'Сверху — снизу', axis: 0, min: -LOOK.pitch + 1, max: LOOK.pitch - 1, value: cam().pitch, unit: '°', group: 'cam-pitch', read: () => cam().pitch, onInput: (v) => setCam('pitch', v) })
+        ),
+        group(
+          'Кадр',
+          slider({ label: 'Приближение', log: true, min: Math.round(LOOK.scale[0] * 100), max: Math.round(LOOK.scale[1] * 100), value: Math.round(cur().scale * 100), unit: '%', group: 'cam-zoom', read: () => Math.round(cur().scale * 100), onInput: (v) => (cur().scale = v / 100) }),
+          slider({ label: 'Сдвиг вбок', min: -400, max: 400, step: 0.5, value: off(0), format: num, group: 'cam-x', read: () => off(0), onInput: (v) => setOff(0, v) }),
+          slider({ label: 'Сдвиг вверх', min: -400, max: 400, step: 0.5, value: off(1), format: num, group: 'cam-y', read: () => off(1), onInput: (v) => setOff(1, v) })
+        ),
+        h(
+          'div',
+          { class: 'actions-row' },
+          h('button', {
+            class: 'btn btn--sm btn--secondary',
+            type: 'button',
+            title: 'Поворот и наклон — как сейчас у камеры студии',
+            text: 'Снять с вида студии',
             onclick: () => {
               begin(null);
-              cur().scale = 1;
-              cur().turn = 0;
-              delete cur().offset;
+              cur().camera = poser.view;
               changed();
+              UI.toast('Камера вида — как сейчас на сцене');
             },
           }),
           h('button', {
             class: 'btn btn--sm btn--ghost',
             type: 'button',
-            text: 'Сбросить всё',
-            onclick: async () => {
-              const ok = await UI.confirm({ title: 'Сбросить всё?', text: `В виде «${LOOK.views[S.view]}» персонаж встанет как обычно, без предметов, блоков и своих картинок. Это можно отменить (Ctrl+Z).`, confirmText: 'Сбросить', danger: true });
-              if (!ok || !alive) return;
+            text: 'Камера как была',
+            onclick: () => {
               begin(null);
-              S.looks[S.view] = prepare({ pose: 'stand', scale: 1, turn: 0 });
-              S.sel = S.part;
-              refreshAll();
+              cur().camera = { yaw: CAMERA[S.view].yaw, pitch: CAMERA[S.view].pitch };
+              cur().scale = 1;
+              delete cur().offset;
+              changed();
             },
           })
         ),
@@ -1210,6 +1472,9 @@
       const seen = new Set();
       const out = [];
       const add = (ids) => ids.forEach((id) => !seen.has(id) && (seen.add(id), out.push(id)));
+      // Головы мобов и игроков — первыми: их не найти в длинном списке английских названий.
+      if (kind !== 'items' && mobs()) add(mobs().HEADS.map((x) => x.id));
+      if (kind === 'heads') return (lists[kind] = out);
       if (kind !== 'blocks') add(all.items);
       if (kind !== 'items') add(all.blocks);
       lists[kind] = out;
@@ -1243,7 +1508,7 @@
       const kinds = !blocksOnly && h(
         'div',
         { class: 'segmented segmented--sm studio__kinds', role: 'group', 'aria-label': 'Что показать' },
-        [['all', 'Всё'], ['items', 'Предметы'], ['blocks', 'Блоки']].map(([k, label]) =>
+        [['all', 'Всё'], ['items', 'Предметы'], ['blocks', 'Блоки'], ['heads', 'Головы']].map(([k, label]) =>
           h('button', {
             type: 'button',
             'aria-pressed': String(st.kind === k),
@@ -1262,7 +1527,7 @@
       const count = h('p', { class: 'studio__count' });
 
       function filtered() {
-        const textures = (cur().textures || []).map((_, i) => 'tex' + (i + 1));
+        const textures = !blocksOnly && st.kind === 'heads' ? [] : (cur().textures || []).map((_, i) => 'tex' + (i + 1));
         const ids = [...textures, ...idsFor(blocksOnly ? 'blocks' : st.kind)];
         const q = st.query.trim().toLowerCase();
         if (!q) return ids;
@@ -1272,14 +1537,13 @@
         const ids = filtered();
         const pages = Math.max(1, Math.ceil(ids.length / PAGE_SIZE));
         st.page = clamp(st.page, 0, pages - 1);
-        const textures = cur().textures || [];
         clear(grid);
         grid.append(
           ...ids.slice(st.page * PAGE_SIZE, (st.page + 1) * PAGE_SIZE).map((id) =>
             h(
               'button',
               { class: 'studio__tile', type: 'button', role: 'listitem', title: `${labelOf(id)} (${id})`, 'aria-label': labelOf(id), 'aria-pressed': String(id === picked), dataset: { id }, onclick: () => onPick(id) },
-              A.icon(id, 32, null, textures)
+              iconOf(id, 32)
             )
           )
         );
@@ -1304,12 +1568,112 @@
       return box;
     }
 
-    /** Значок блока или предмета (или своя картинка без каталога). */
-    function iconOf(id, px = 32) {
+    /** Значок головы: как в инвентаре игры (у головы игрока — его скин). */
+    function headIcon(id, px, skin) {
+      const c = document.createElement('canvas');
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      c.width = c.height = Math.round(px * dpr);
+      c.className = 'mc-icon';
+      const paint = () => {
+        const m = Skin3D.headModel(id, skin, paint);
+        if (m) Skin3D.drawIcon(c, m);
+      };
+      paint();
+      return c;
+    }
+
+    /** Значок моба для палитры и списка. */
+    function mobIcon(type, px, skin, slim) {
+      const c = document.createElement('canvas');
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      c.width = c.height = Math.round(px * dpr);
+      c.className = 'mc-icon mc-icon--mob';
+      const paint = () => Skin3D.drawMob(c, type, { skin, slim, onReady: paint });
+      paint();
+      return c;
+    }
+
+    /** Значок блока, предмета или головы (или своя картинка без каталога). skin — чья голова игрока. */
+    function iconOf(id, px = 32, skin) {
       const A = art();
+      if (A && isHead(id)) return headIcon(id, px, skin);
       if (A) return A.icon(id, px, null, cur().textures || []);
       if (isTex(id) && cur().textures && cur().textures[Number(id.slice(3)) - 1]) return h('img', { class: 'studio__tex-img', src: cur().textures[Number(id.slice(3)) - 1], alt: '', width: String(px), height: String(px) });
       return h('span', { class: 'studio__no-icon', 'aria-hidden': 'true' });
+    }
+
+    /**
+     * Чей скин — для головы игрока и игрока на сцене: стандартные скины игры, игроки LWL (их скины уже на сайте)
+     * или любая лицензия по нику (сайт скачает скин у Mojang). onPick(skin, slim) — skin: sha256 или 'wide/steve'.
+     */
+    function skinPicker({ value, onPick, label = 'Чей скин' }) {
+      const box = h('div', { class: 'studio__skins' });
+      const now = h('p', { class: 'studio__current-id', text: `Сейчас: ${skinLabel(value)}` });
+      const std = h(
+        'div',
+        { class: 'chips chips--sm', role: 'radiogroup', 'aria-label': 'Стандартные скины' },
+        (mobs() ? mobs().SKINS : []).filter((s) => s.startsWith('wide/') || s === 'slim/alex').filter((s) => s !== 'wide/alex').map((skin) =>
+          h('button', { class: 'chip', type: 'button', role: 'radio', 'aria-checked': String(skin === (value || 'wide/steve')), text: mobs().skinLabel(skin).replace(' (тонкие руки)', ''), onclick: () => onPick(skin, skin.startsWith('slim/')) })
+        )
+      );
+      const players = h('div', { class: 'chips chips--sm studio__skin-players', role: 'radiogroup', 'aria-label': 'Игроки LWL' }, h('span', { class: 'studio__loading', text: 'Загружаю игроков…' }));
+      const fillPlayers = (list) => {
+        clear(players);
+        const withSkin = list.filter((p) => p.hash);
+        if (!withSkin.length) players.append(h('span', { class: 'field__hint', text: 'У игроков сервера пока нет своих скинов.' }));
+        for (const p of withSkin)
+          players.append(h('button', { class: 'chip', type: 'button', role: 'radio', 'aria-checked': String(p.hash === value), text: p.nickname, onclick: () => onPick(p.hash, p.slim) }));
+      };
+      if (lwlPlayers) fillPlayers(lwlPlayers);
+      else
+        Api.players
+          .list({ sort: 'recent' })
+          .then((d) => {
+            lwlPlayers = (d.players || []).map((p) => {
+              const m = /\/api\/skins\/([0-9a-f]{64})\.png/.exec(p.skinUrl || '');
+              const hash = m && !p.skinDefault ? m[1] : null;
+              if (hash) skinNames.set(hash, p.nickname);
+              return { nickname: p.nickname, hash, slim: !!p.skinSlim };
+            });
+            if (alive && players.isConnected) fillPlayers(lwlPlayers);
+          })
+          .catch(() => {
+            clear(players).append(h('span', { class: 'field__hint', text: 'Не получилось загрузить игроков.' }));
+          });
+      const nick = h('input', { class: 'input', type: 'text', placeholder: 'Ник лицензии', 'aria-label': 'Ник лицензии Minecraft', autocomplete: 'off', spellcheck: 'false', maxlength: '16' });
+      const find = h('button', { class: 'btn btn--sm btn--secondary', type: 'button', text: 'Найти' });
+      const findSkin = async () => {
+        find.disabled = true;
+        try {
+          const d = await Api.players.findSkin(nick.value);
+          if (!alive) return;
+          if (/^[0-9a-f]{64}$/.test(d.skin)) skinNames.set(d.skin, d.nickname);
+          onPick(d.skin, d.slim);
+          UI.toast(/^[0-9a-f]{64}$/.test(d.skin) ? `Скин ${d.nickname} найден` : `У ${d.nickname} стандартный скин`, { type: 'success' });
+        } catch (err) {
+          UI.toast(err.fields ? Object.values(err.fields)[0] : err.message, { type: 'error' });
+        } finally {
+          find.disabled = false;
+        }
+      };
+      find.addEventListener('click', findSkin);
+      nick.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          findSkin();
+        }
+      });
+      UI.append(box, [
+        h('p', { class: 'field__label', text: label }),
+        now,
+        h('p', { class: 'studio__sub', text: 'Стандартные' }),
+        std,
+        h('p', { class: 'studio__sub', text: 'Игроки сервера' }),
+        players,
+        h('p', { class: 'studio__sub', text: 'Любая лицензия' }),
+        h('div', { class: 'studio__skin-find' }, nick, find),
+      ]);
+      return box;
     }
 
     /* «Предметы» */
@@ -1362,11 +1726,11 @@
         ? h(
             'div',
             { class: 'studio__current' },
-            iconOf(e.id, 40),
-            h('div', { class: 'studio__current-text' }, h('p', { class: 'studio__current-name', text: labelOf(e.id) }), h('p', { class: 'studio__current-id', text: e.id })),
+            iconOf(e.id, 40, e.skin),
+            h('div', { class: 'studio__current-text' }, h('p', { class: 'studio__current-name', text: entryLabel(e) }), h('p', { class: 'studio__current-id', text: e.id })),
             h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Убрать', onclick: () => (removeHeld(slot), renderTools()) })
           )
-        : h('p', { class: 'field__hint', text: `${SLOTS[slot]}: пусто — выберите предмет или блок ниже.` });
+        : h('p', { class: 'field__hint', text: `${SLOTS[slot]}: пусто — выберите предмет, блок или голову ниже.` });
       const setRot = (i, v) => {
         const x = entry();
         x.rot = x.rot.slice();
@@ -1382,16 +1746,28 @@
         group('Куда', slots),
         current,
         e &&
+          e.id === 'player_head' &&
+          skinPicker({
+            value: e.skin,
+            label: 'Чья голова',
+            onPick: (skin) => {
+              begin(null);
+              entry().skin = skin;
+              changed();
+              renderTools();
+            },
+          }),
+        e &&
           group(
             'Как держит',
             ['Наклон', 'Поворот', 'Крен'].map((label, i) =>
               slider({ label, axis: i, min: -H.rot, max: H.rot, value: e.rot[i], unit: '°', group: `held-rot:${i}`, read: () => entry() && entry().rot[i], onInput: (v) => setRot(i, v) })
             ),
-            slider({ label: 'Размер', min: Math.round(H.size[0] * 100), max: Math.round(H.size[1] * 100), value: Math.round(e.size * 100), unit: '%', read: () => entry() && Math.round(entry().size * 100), onInput: (v) => (entry().size = v / 100) }),
+            slider({ label: 'Размер', log: true, min: Math.round(H.size[0] * 100), max: Math.round(H.size[1] * 100), value: Math.round(e.size * 100), unit: '%', group: 'held-size', read: () => entry() && Math.round(entry().size * 100), onInput: (v) => (entry().size = v / 100) }),
             ['Сдвиг вбок', 'Сдвиг вверх', 'Сдвиг вперёд'].map((label, i) =>
-              slider({ label, min: -H.at, max: H.at, step: 0.5, value: e.at[i], format: num, group: `held-at:${i}`, read: () => entry() && entry().at[i], onInput: (v) => setAt(i, v) })
+              slider({ label, min: -32, max: 32, step: 0.5, value: e.at[i], format: num, group: `held-at:${i}`, read: () => entry() && entry().at[i], onInput: (v) => setAt(i, v) })
             ),
-            h('p', { class: 'field__hint', text: 'Или нажмите на предмет на сцене и тяните кольца.' })
+            h('p', { class: 'field__hint', text: 'Предмет держится в кулаке, как в игре. Или нажмите на него на сцене и тяните кольца и стрелки — так можно и дальше от руки.' })
           ),
         group(
           `Палитра — ${SLOT_TO[slot]}`,
@@ -1413,8 +1789,8 @@
               h(
                 'li',
                 { class: 'studio__row' + (S.sel === 'block:' + i ? ' is-selected' : '') },
-                A && iconOf(b.id, 24),
-                h('button', { class: 'studio__row-pick', type: 'button', 'aria-pressed': String(S.sel === 'block:' + i), text: `${i + 1}. ${labelOf(b.id)}`, onclick: () => (setTool('select'), select('block:' + i, false)) }),
+                A && iconOf(b.id, 24, b.skin),
+                h('button', { class: 'studio__row-pick', type: 'button', 'aria-pressed': String(S.sel === 'block:' + i), text: `${i + 1}. ${entryLabel(b)}`, onclick: () => (setTool('select'), select('block:' + i, false)) }),
                 h('button', { class: 'icon-btn studio__row-del', type: 'button', 'aria-label': `Убрать блок ${i + 1}`, title: 'Убрать', onclick: () => (removeBlock(i), renderTools()) }, icon('trash'))
               )
             )
@@ -1449,8 +1825,13 @@
       );
       const gridBox = h('label', { class: 'checkbox' }, h('input', { type: 'checkbox', checked: S.grid, onchange: (e) => (S.grid = e.target.checked) }), h('span', { text: 'По сетке (Shift — наоборот)' }));
       const brush = S.brush
-        ? h('div', { class: 'studio__current' }, iconOf(S.brush, 32), h('div', { class: 'studio__current-text' }, h('p', { class: 'studio__current-name', text: labelOf(S.brush) }), h('p', { class: 'studio__current-id', text: 'Ставится этот блок' })))
-        : h('p', { class: 'field__hint', text: 'Выберите блок в палитре ниже — и ставьте его на пол или на грань другого блока.' });
+        ? h(
+            'div',
+            { class: 'studio__current' },
+            iconOf(S.brush, 32, S.brushSkin),
+            h('div', { class: 'studio__current-text' }, h('p', { class: 'studio__current-name', text: S.brush === 'player_head' ? `Голова: ${skinLabel(S.brushSkin)}` : labelOf(S.brush) }), h('p', { class: 'studio__current-id', text: 'Ставится этот блок' }))
+          )
+        : h('p', { class: 'field__hint', text: 'Выберите блок в палитре ниже — и ставьте его на пол или на грань другого блока. Заборы, стены и стёкла сами соединяются с соседями.' });
 
       // Выбранный блок: где стоит, поворот, размер.
       const sel = kindOf(S.sel) === 'block' ? S.sel : null;
@@ -1465,12 +1846,23 @@
       const selected =
         b &&
         group(
-          `Выбранный блок ${Number(sel.slice(6)) + 1}: ${labelOf(b.id)}`,
-          slider({ label: 'Вбок (X)', min: -B.side, max: B.side, value: b.at[0], format: num, group: 'block-x', read: () => bk() && bk().at[0], onInput: (v) => setAt(0, v) }),
-          slider({ label: 'Высота (Y)', min: B.y[0], max: B.y[1], value: b.at[1], format: num, group: 'block-y', read: () => bk() && bk().at[1], onInput: (v) => setAt(1, v) }),
-          slider({ label: 'Вперёд (Z)', min: -B.side, max: B.side, value: b.at[2], format: num, group: 'block-z', read: () => bk() && bk().at[2], onInput: (v) => setAt(2, v) }),
+          `Выбранный блок ${Number(sel.slice(6)) + 1}: ${entryLabel(b)}`,
+          slider({ label: 'Вбок (X)', min: -256, max: 256, value: b.at[0], format: num, group: 'block-x', read: () => bk() && bk().at[0], onInput: (v) => setAt(0, v) }),
+          slider({ label: 'Высота (Y)', min: -128, max: 256, value: b.at[1], format: num, group: 'block-y', read: () => bk() && bk().at[1], onInput: (v) => setAt(1, v) }),
+          slider({ label: 'Вперёд (Z)', min: -256, max: 256, value: b.at[2], format: num, group: 'block-z', read: () => bk() && bk().at[2], onInput: (v) => setAt(2, v) }),
           slider({ label: 'Поворот', min: -180, max: 180, value: b.rot || 0, unit: '°', axis: 1, group: 'block-rot', read: () => bk() && (bk().rot || 0), onInput: (v) => (bk().rot = v) }),
-          slider({ label: 'Размер', min: Math.round(B.size[0] * 100), max: Math.round(B.size[1] * 100), value: Math.round((b.size || 1) * 100), unit: '%', group: 'block-size', read: () => bk() && Math.round((bk().size || 1) * 100), onInput: (v) => (bk().size = v / 100) }),
+          slider({ label: 'Размер', log: true, min: Math.round(B.size[0] * 100), max: Math.round(B.size[1] * 100), value: Math.round((b.size || 1) * 100), unit: '%', group: 'block-size', read: () => bk() && Math.round((bk().size || 1) * 100), onInput: (v) => (bk().size = v / 100) }),
+          b.id === 'player_head' &&
+            skinPicker({
+              value: b.skin,
+              label: 'Чья голова',
+              onPick: (skin) => {
+                begin(null);
+                bk().skin = skin;
+                changed();
+                renderTools();
+              },
+            }),
           h(
             'div',
             { class: 'actions-row' },
@@ -1481,16 +1873,19 @@
               onclick: () => {
                 const s = b.size || 1;
                 const x = b.at[0] + 16 * s <= B.side ? b.at[0] + 16 * s : b.at[0] - 16 * s;
-                if (addBlock({ id: b.id, at: [round(x, 10), b.at[1], b.at[2]], rot: b.rot || 0, size: s })) renderTools();
+                const copy = { id: b.id, at: [round(x, 10), b.at[1], b.at[2]], rot: b.rot || 0, size: s };
+                if (b.skin) copy.skin = b.skin;
+                if (addBlock(copy)) renderTools();
               },
             }),
-            h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Брать этот блок', onclick: () => ((S.brush = b.id), renderTools()) }),
+            h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Брать этот блок', onclick: () => ((S.brush = b.id), (S.brushSkin = b.skin || null), renderTools()) }),
             h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Убрать', onclick: () => (removeBlock(Number(sel.slice(6))), renderTools()) })
           )
         );
       UI.append(panel, [
         h('div', { class: 'studio__group' }, h('div', { class: 'studio__row-between' }, toolBtns, counter), gridBox),
-        group('Ставится', brush, slider({ label: 'Размер новых', min: Math.round(B.size[0] * 100), max: Math.round(B.size[1] * 100), value: Math.round(S.brushSize * 100), unit: '%', history: false, onInput: (v) => (S.brushSize = v / 100) })),
+        group('Ставится', brush, slider({ label: 'Размер новых', log: true, min: Math.round(B.size[0] * 100), max: Math.round(B.size[1] * 100), value: Math.round(S.brushSize * 100), unit: '%', history: false, onInput: (v) => (S.brushSize = v / 100) })),
+        S.brush === 'player_head' && skinPicker({ value: S.brushSkin, label: 'Чью голову ставить', onPick: (skin) => ((S.brushSkin = skin), renderTools()) }),
         selected,
         group('Поставленные', list, h('div', { class: 'actions-row' }, clearAll)),
         group(
@@ -1506,6 +1901,235 @@
             },
           })
         ),
+      ]);
+    }
+
+    /* «Мобы»: мобы игры и другие игроки рядом с персонажем. */
+    function renderMobs() {
+      const A = art();
+      const M = mobs();
+      const list = mobsOf();
+      const counter = h('p', { class: 'studio__counter' + (list.length >= LOOK.mobs.max ? ' is-full' : ''), text: `Мобов: ${list.length} из ${LOOK.mobs.max}` });
+      const placed = list.length
+        ? h(
+            'ul',
+            { class: 'studio__list' },
+            list.map((m, i) =>
+              h(
+                'li',
+                { class: 'studio__row' + (S.sel && (S.sel === 'mob:' + i || S.sel.startsWith('mob:' + i + ':')) ? ' is-selected' : '') },
+                A && M && mobIcon(m.type, 24, m.skin, m.slim),
+                h('button', { class: 'studio__row-pick', type: 'button', 'aria-pressed': String(!!S.sel && (S.sel === 'mob:' + i || S.sel.startsWith('mob:' + i + ':'))), text: `${i + 1}. ${mobLabel(m.type)}${m.type === 'player' ? ` (${skinLabel(m.skin)})` : ''}`, onclick: () => (setTool('select'), select('mob:' + i, false)) }),
+                h('button', { class: 'icon-btn studio__row-del', type: 'button', 'aria-label': `Убрать моба ${i + 1}`, title: 'Убрать', onclick: () => (removeMob(i), renderTools()) }, icon('trash'))
+              )
+            )
+          )
+        : h('p', { class: 'field__hint', text: 'Мобов пока нет.' });
+      const clearAll =
+        list.length > 0 &&
+        h('button', {
+          class: 'btn btn--sm btn--ghost',
+          type: 'button',
+          text: 'Убрать всех мобов',
+          onclick: () => {
+            begin(null);
+            delete cur().mobs;
+            if (kindOf(S.sel) === 'mob') S.sel = null;
+            refreshAll();
+          },
+        });
+      if (!A || !M) {
+        UI.append(panel, [notice('Мобы — модели и текстуры самой игры, а на этой странице её каталог сейчас не загружен. Уже поставленные мобы сохранятся; убрать их можно здесь.'), counter, placed, h('div', { class: 'actions-row' }, clearAll)]);
+        return;
+      }
+      const toolBtns = h(
+        'div',
+        { class: 'segmented studio__tool-switch', role: 'group', 'aria-label': 'Инструмент' },
+        Object.entries(TOOLS).map(([key, label]) => h('button', { type: 'button', 'aria-pressed': String(S.tool === key), dataset: { tool: key }, text: label, onclick: () => setTool(key) }))
+      );
+      const gridBox = h('label', { class: 'checkbox' }, h('input', { type: 'checkbox', checked: S.grid, onchange: (e) => (S.grid = e.target.checked) }), h('span', { text: 'По сетке (Shift — наоборот)' }));
+      const brush = h(
+        'div',
+        { class: 'studio__current' },
+        mobIcon(S.mob, 40, S.mobSkin, S.mobSlim),
+        h(
+          'div',
+          { class: 'studio__current-text' },
+          h('p', { class: 'studio__current-name', text: mobLabel(S.mob) + (S.mob === 'player' ? ` (${skinLabel(S.mobSkin)})` : '') }),
+          h('p', { class: 'studio__current-id', text: 'Ставится этот моб: «Ставить» и нажмите на пол или на верх блока' })
+        )
+      );
+
+      // Выбранный моб: поза, место, поворот, размер; у игрока — чей скин и каждая часть тела, как у персонажа.
+      const sel = kindOf(S.sel) === 'mob' || kindOf(S.sel) === 'mobpart' ? 'mob:' + mobIndex(S.sel) : null;
+      const limb = kindOf(S.sel) === 'mobpart' ? S.sel.split(':')[2] : null;
+      const m = sel && mobAt(sel);
+      const mk = () => sel && mobAt(sel);
+      const setAt = (i, v) => {
+        const x = mk();
+        x.at = x.at.slice();
+        x.at[i] = v;
+      };
+      const def = m && M.mob(m.type, m.slim);
+      const isPlayer = m && m.type === 'player';
+      // У игрока на сцене — ещё «Своя поза»: каждая часть тела отдельно (углы как у персонажа).
+      const poseKeys = def ? [...def.poses, ...(isPlayer ? ['custom'] : [])] : [];
+      const mobAngles = () => (mk().pose === 'custom' && mk().angles ? mk().angles : Skin3D.poseAngles(mk().pose));
+      const mobEdit = () => {
+        const x = mk();
+        if (x.pose !== 'custom' || !x.angles) {
+          x.angles = Skin3D.poseAngles(x.pose);
+          x.pose = 'custom';
+        }
+        return x.angles;
+      };
+      const limbChips =
+        isPlayer &&
+        h(
+          'div',
+          { class: 'chips chips--sm', role: 'radiogroup', 'aria-label': 'Часть тела игрока' },
+          [{ key: null, label: 'Весь игрок' }, ...Skin3D.PARTS].map(({ key, label }) =>
+            h('button', {
+              class: 'chip' + (key ? '' : ' chip--strong'),
+              type: 'button',
+              role: 'radio',
+              'aria-checked': String(key === limb),
+              dataset: { mobPart: key || 'whole' },
+              text: label,
+              onclick: () => {
+                select(key ? `${sel}:${key}` : sel, false);
+                renderTools(`[data-mob-part="${key || 'whole'}"]`);
+              },
+            })
+          )
+        );
+      const poseChips =
+        poseKeys.length > 1 &&
+          h(
+            'div',
+            { class: 'chips chips--sm', role: 'radiogroup', 'aria-label': 'Поза моба' },
+            poseKeys.map((p) =>
+              h('button', {
+                class: 'chip',
+                type: 'button',
+                role: 'radio',
+                'aria-checked': String((m.pose || 'stand') === p),
+                dataset: { mobPose: p },
+                text: p === 'custom' ? 'Своя поза' : M.POSE_LABELS[p] || p,
+                onclick: () => {
+                  if ((mk().pose || 'stand') === p) return;
+                  begin(null);
+                  const x = mk();
+                  if (p === 'custom') {
+                    x.angles = Skin3D.poseAngles(x.pose);
+                    x.pose = 'custom';
+                  } else {
+                    x.pose = p;
+                    delete x.angles;
+                  }
+                  changed();
+                  renderTools();
+                },
+              })
+            )
+          );
+      // Поменяли на сцене или ползунком — «Своя поза» отмечается сразу.
+      if (poseChips) sync.push(() => mk() && poseChips.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-checked', String(c.dataset.mobPose === (mk().pose || 'stand')))));
+      const selected =
+        m &&
+        group(
+          `Выбранный моб ${mobIndex(sel) + 1}: ${mobLabel(m.type)}`,
+          poseChips,
+          isPlayer && h('p', { class: 'field__label', text: 'Что двигаем' }),
+          limbChips,
+          isPlayer && limb && h('div', { class: 'look__custom' }, limbSliders({ part: limb, read: mobAngles, edit: mobEdit, key: `mob${mobIndex(sel)}:` })),
+          !limb && slider({ label: 'Вбок (X)', axis: 0, min: -256, max: 256, step: 0.5, value: m.at[0], format: num, group: 'mob-x', read: () => mk() && mk().at[0], onInput: (v) => setAt(0, v) }),
+          !limb && slider({ label: 'Высота (Y)', axis: 1, min: -128, max: 256, step: 0.5, value: m.at[1], format: num, group: 'mob-y', read: () => mk() && mk().at[1], onInput: (v) => setAt(1, v) }),
+          !limb && slider({ label: 'Вперёд (Z)', axis: 2, min: -256, max: 256, step: 0.5, value: m.at[2], format: num, group: 'mob-z', read: () => mk() && mk().at[2], onInput: (v) => setAt(2, v) }),
+          !limb && slider({ label: 'Поворот', min: -180, max: 180, value: m.rot || 0, unit: '°', group: 'mob-rot', read: () => mk() && (mk().rot || 0), onInput: (v) => (mk().rot = v) }),
+          !limb && slider({ label: 'Размер', log: true, min: Math.round(LOOK.mobs.size[0] * 100), max: Math.round(LOOK.mobs.size[1] * 100), value: Math.round((m.size || 1) * 100), unit: '%', group: 'mob-size', read: () => mk() && Math.round((mk().size || 1) * 100), onInput: (v) => (mk().size = v / 100) }),
+          isPlayer && !limb && h('p', { class: 'field__hint', text: 'Нажмите на руку, ногу, голову или тело игрока на сцене — и тяните ручки, как у своего персонажа. Двойное нажатие по игроку — выбрать его целиком.' }),
+          isPlayer &&
+            !limb &&
+            skinPicker({
+              value: m.skin,
+              label: 'Чей скин у игрока',
+              onPick: (skin, slim) => {
+                begin(null);
+                const x = mk();
+                x.skin = skin;
+                if (slim) x.slim = true;
+                else delete x.slim;
+                changed();
+                renderTools();
+              },
+            }),
+          h(
+            'div',
+            { class: 'actions-row' },
+            h('button', {
+              class: 'btn btn--sm btn--secondary',
+              type: 'button',
+              text: 'Копия рядом',
+              onclick: () => {
+                const copy = clone(m);
+                copy.at = [round(m.at[0] + 16 <= LOOK.mobs.side ? m.at[0] + 16 : m.at[0] - 16, 10), m.at[1], m.at[2]];
+                if (addMob(copy)) renderTools();
+              },
+            }),
+            h('button', { class: 'btn btn--sm btn--ghost', type: 'button', text: 'Убрать', onclick: () => (removeMob(mobIndex(sel)), renderTools()) })
+          )
+        );
+
+      // Палитра мобов по группам.
+      const tiles = Object.entries(M.GROUPS).map(([g, title]) =>
+        h(
+          'div',
+          { class: 'studio__group' },
+          h('p', { class: 'studio__sub', text: title }),
+          h(
+            'div',
+            { class: 'studio__grid studio__grid--mobs', role: 'list' },
+            M.TYPES.filter((t) => t.group === g).map((t) =>
+              h(
+                'button',
+                {
+                  class: 'studio__tile studio__tile--mob',
+                  type: 'button',
+                  role: 'listitem',
+                  title: t.label,
+                  'aria-label': t.label,
+                  'aria-pressed': String(t.key === S.mob),
+                  dataset: { mob: t.key },
+                  onclick: () => {
+                    S.mob = t.key;
+                    setTool('place');
+                    renderTools();
+                  },
+                },
+                mobIcon(t.key, 40, t.key === 'player' ? S.mobSkin : null, t.key === 'player' && S.mobSlim),
+                h('span', { class: 'studio__tile-label', text: t.label })
+              )
+            )
+          )
+        )
+      );
+      UI.append(panel, [
+        h('div', { class: 'studio__group' }, h('div', { class: 'studio__row-between' }, toolBtns, counter), gridBox),
+        group('Ставится', brush),
+        S.mob === 'player' &&
+          skinPicker({
+            value: S.mobSkin,
+            label: 'Какого игрока ставить',
+            onPick: (skin, slim) => {
+              S.mobSkin = skin;
+              S.mobSlim = !!slim;
+              renderTools();
+            },
+          }),
+        selected,
+        group('На сцене', placed, h('div', { class: 'actions-row' }, clearAll)),
+        group('Мобы', ...tiles),
       ]);
     }
 
@@ -1616,7 +2240,15 @@
         setMode(mode);
         return;
       }
-      if (e.key === 'Escape' && S.tool !== 'select') {
+      if (e.code === 'KeyC' && !e.altKey) {
+        e.preventDefault();
+        setCameraMode(!S.cameraMode);
+        return;
+      }
+      if (e.key === 'Escape' && S.cameraMode) {
+        setCameraMode(false);
+        e.preventDefault();
+      } else if (e.key === 'Escape' && S.tool !== 'select') {
         setTool('select');
         e.preventDefault();
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && poser && t === poser.canvas) {

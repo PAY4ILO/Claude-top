@@ -1150,19 +1150,27 @@ test('карточки: своя поза для маленькой карточ
     { side: { pose: 'stand' } },
     { card: { pose: 'dab' } },
     { card: { pose: 'custom' } },
-    { card: { pose: 'stand', scale: 5 } },
+    { card: { pose: 'stand', scale: 21 } },
+    { card: { pose: 'stand', scale: 0.01 } },
     { detail: { pose: 'stand', turn: 999 } },
     { detail: { pose: 'stand', turn: '45' } },
+    { card: { pose: 'stand', camera: { yaw: 200, pitch: 0 } } },
+    { card: { pose: 'stand', camera: { yaw: 0, pitch: 95 } } },
+    { card: { pose: 'stand', camera: [0, 0] } },
+    { card: { pose: 'stand', pos: [0, 0, 2000] } },
+    { card: { pose: 'stand', pos: [0, 0] } },
+    { card: { pose: 'stand', size: 25 } },
+    { card: { pose: 'stand', size: 0 } },
     { card: { pose: 'custom', angles: { ...custom, head: [999, 0, 0] } } },
     { card: { pose: 'custom', angles: { ...custom, body: [0, 0] } } },
-    { card: { pose: 'custom', angles: { ...custom, lift: 30 } } },
-    { card: { pose: 'custom', angles: { ...custom, move: { head: [0, 33, 0] } } } },
-    { card: { pose: 'custom', angles: { ...custom, move: { body: [-33, 0, 0] } } } },
+    { card: { pose: 'custom', angles: { ...custom, lift: 65 } } },
+    { card: { pose: 'custom', angles: { ...custom, move: { head: [0, 257, 0] } } } },
+    { card: { pose: 'custom', angles: { ...custom, move: { body: [-257, 0, 0] } } } },
     { card: { pose: 'custom', angles: { ...custom, move: { tail: [1, 0, 0] } } } },
     { card: { pose: 'custom', angles: { ...custom, move: { head: [1, 0] } } } },
     { card: { pose: 'custom', angles: { ...custom, move: [1, 2, 3] } } },
-    { card: { pose: 'custom', angles: { ...custom, stretch: { head: [0.2, 1, 1] } } } },
-    { card: { pose: 'custom', angles: { ...custom, stretch: { body: [1, 3.5, 1] } } } },
+    { card: { pose: 'custom', angles: { ...custom, stretch: { head: [0.01, 1, 1] } } } },
+    { card: { pose: 'custom', angles: { ...custom, stretch: { body: [1, 21, 1] } } } },
     { card: { pose: 'custom', angles: { ...custom, stretch: { tail: [1, 1, 1] } } } },
     { card: { pose: 'custom', angles: { ...custom, stretch: [1, 1, 1] } } },
   ]) {
@@ -1188,18 +1196,23 @@ test('карточки: своя поза для маленькой карточ
   const old = await patch({ pose: 'walk' });
   assert.deepEqual(old.data.looks.card, { pose: 'walk', scale: 1, turn: 0 });
   assert.equal(old.data.looks.detail.pose, 'custom');
-  // Сдвиг частей тела: до ±32, нулевые сдвиги не хранятся.
-  const moved = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, move: { head: [0, 32, -1.24], leftArm: [-32, 0, 0], body: [0, 0, 0] } } } } });
+  // Сдвиг частей тела: до ±256, нулевые сдвиги не хранятся.
+  const moved = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, move: { head: [0, 256, -1.24], leftArm: [-32, 0, 0], body: [0, 0, 0] } } } } });
   assert.equal(moved.status, 200);
-  assert.deepEqual(moved.data.looks.detail.angles.move, { head: [0, 32, -1.2], leftArm: [-32, 0, 0] });
+  assert.deepEqual(moved.data.looks.detail.angles.move, { head: [0, 256, -1.2], leftArm: [-32, 0, 0] });
   const still = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, move: { body: [0, 0, 0] } } } } });
   assert.equal(still.data.looks.detail.angles.move, undefined, 'одни нули — сдвига нет');
-  // Растяжение частей тела: от 0,25 до 3 по каждой оси, «как есть» (1, 1, 1) не хранится.
-  const stretched = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, stretch: { body: [1.5, 0.25, 3], leftLeg: [1.004, 2, 1], head: [1, 1, 1] } } } } });
+  // Растяжение частей тела: от 0,05 до 20 по каждой оси, «как есть» (1, 1, 1) не хранится.
+  const stretched = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, stretch: { body: [1.5, 0.05, 20], leftLeg: [1.004, 2, 1], head: [1, 1, 1] } } } } });
   assert.equal(stretched.status, 200);
-  assert.deepEqual(stretched.data.looks.detail.angles.stretch, { body: [1.5, 0.25, 3], leftLeg: [1, 2, 1] });
+  assert.deepEqual(stretched.data.looks.detail.angles.stretch, { body: [1.5, 0.05, 20], leftLeg: [1, 2, 1] });
   const plain = await patch({ looks: { detail: { pose: 'custom', angles: { ...custom, stretch: { head: [1, 1, 1] } } } } });
   assert.equal(plain.data.looks.detail.angles.stretch, undefined, 'одни единицы — растяжения нет');
+  // Камера вида, место и размер фигуры: камера хранится как есть (округлённой), место без нулей, размер 1 не хранится.
+  const framed = await patch({ looks: { card: { pose: 'stand', scale: 0.05, camera: { yaw: -179.6, pitch: 89.4 }, pos: [0, 0, 0], size: 1 }, detail: { pose: 'stand', scale: 20, camera: { yaw: 25, pitch: -10 }, pos: [1024, -1024, 3.25], size: 0.05 } } });
+  assert.equal(framed.status, 200);
+  assert.deepEqual(framed.data.looks.card, { pose: 'stand', scale: 0.05, turn: 0, camera: { yaw: -180, pitch: 89 } });
+  assert.deepEqual(framed.data.looks.detail, { pose: 'stand', scale: 20, turn: 0, camera: { yaw: 25, pitch: -10 }, pos: [1024, -1024, 3.3], size: 0.05 });
   await patch({ looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } });
 });
 
@@ -1234,12 +1247,27 @@ test('карточки: предметы в руках, блоки вокруг 
     [{ held: { head: { id: 'tex1' } } }, 'Такого предмета нет.'], // своих картинок нет вовсе
     [{ blocks: [{ id: 'diamond_sword', at: [0, 0, 0] }] }, 'Такого блока нет.'], // предмет, а не блок
     [{ textures: [tex], blocks: [{ id: 'tex2', at: [0, 0, 0] }] }, 'Такого блока нет.'],
-    [{ blocks: Array(33).fill(stone) }, 'Блоков — не больше 32.'],
-    [{ blocks: [{ id: 'stone', at: [0, 200, 0] }] }, 'Блок слишком далеко.'],
+    [{ blocks: Array(65).fill(stone) }, 'Блоков — не больше 64.'],
+    [{ blocks: [{ id: 'stone', at: [0, 2000, 0] }] }, 'Блок слишком далеко.'],
     [{ blocks: [{ id: 'stone' }] }, 'Блок слишком далеко.'], // без места
-    [{ held: { head: { id: 'carved_pumpkin', size: 3 } } }, 'Размер предмета — от 0.5 до 2.'],
+    [{ held: { head: { id: 'carved_pumpkin', size: 9 } } }, 'Размер предмета — от 0.1 до 8.'],
     [{ held: { foot: { id: 'diamond_sword' } } }, 'Предмет можно держать только в руках или на голове.'],
-    [{ offset: [250, 0] }, 'Сдвиг — от −200 до 200.'],
+    [{ offset: [2500, 0] }, 'Сдвиг — от −2000 до 2000.'],
+    // Головы: только известные, скин — только у головы игрока и только такой, какой бывает.
+    [{ held: { head: { id: 'herobrine_head' } } }, 'Такого предмета нет.'],
+    [{ held: { head: { id: 'zombie_head', skin: 'wide/steve' } } }, 'Неверный скин головы.'],
+    [{ held: { head: { id: 'player_head', skin: 'https://example.com/skin.png' } } }, 'Неверный скин головы.'],
+    [{ blocks: [{ id: 'player_head', at: [0, 0, 0], skin: 'wide/herobrine' }] }, 'Неверный скин головы.'],
+    // Мобы.
+    [{ mobs: [{ type: 'herobrine', at: [0, 0, 0] }] }, 'Такого моба нет.'],
+    [{ mobs: [{ type: 'zombie' }] }, 'Моб слишком далеко.'],
+    [{ mobs: [{ type: 'zombie', at: [0, 0, 5000] }] }, 'Моб слишком далеко.'],
+    [{ mobs: [{ type: 'zombie', at: [0, 0, 0], size: 10 }] }, 'Размер моба — от 0.1 до 8.'],
+    [{ mobs: [{ type: 'zombie', at: [0, 0, 0], pose: 'dab' }] }, 'Такой позы у моба нет.'],
+    [{ mobs: [{ type: 'zombie', at: [0, 0, 0], skin: 'wide/steve' }] }, 'Неверный скин игрока.'],
+    [{ mobs: [{ type: 'zombie', at: [0, 0, 0], pose: 'custom', angles: {} }] }, 'Свою позу можно задать только игроку.'],
+    [{ mobs: [{ type: 'player', at: [0, 0, 0], pose: 'custom' }] }, 'Для своей позы нужны углы.'],
+    [{ mobs: Array(17).fill({ type: 'pig', at: [0, 0, 0] }) }, 'Мобов — не больше 16.'],
     [{ textures: ['data:image/png;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64')] }, 'Своя картинка — PNG 16×16.'],
     [{ textures: [png(17, 17)] }, 'Своя картинка — PNG 16×16.'],
     [{ textures: [tex, tex, tex, tex] }, 'Своих картинок — не больше 3.'],
@@ -1286,7 +1314,88 @@ test('карточки: предметы в руках, блоки вокруг 
     'округлено, лишнее и пустые слоты выброшены'
   );
   assert.deepEqual((await client().get('/api/players/Alice_07')).data.player.looks, r.data.looks, 'видно всем');
+
+  // Головы и мобы: стандартный скин игры, скин с сайта (sha256 файла в skins/) — только если он у нас есть.
+  const known = (await client().get('/api/players/Alice_07')).data.player.skinUrl.split('/').pop().replace(/\.png$/, '');
+  const missing = 'f'.repeat(64);
+  const withMobs = await patch({
+    looks: {
+      card: {
+        pose: 'stand',
+        held: { head: { id: 'player_head', skin: 'slim/alex' }, rightHand: { id: 'creeper_head' } },
+        blocks: [{ id: 'dragon_head', at: [0, 0, -32] }, { id: 'player_head', at: [16, 0, 0], skin: known }],
+        mobs: [
+          { type: 'zombie', at: [-24.04, 0, 0], rot: 30.4, pose: 'zombie' },
+          { type: 'player', at: [24, 0, 0], skin: known, slim: true, size: 0.5 },
+          { type: 'pig', at: [0, 16, 32], slim: false },
+        ],
+      },
+    },
+  });
+  assert.equal(withMobs.status, 200, JSON.stringify(withMobs.data));
+  assert.deepEqual(withMobs.data.looks.card.held.head, { id: 'player_head', rot: [0, 0, 0], size: 1, at: [0, 0, 0], skin: 'slim/alex' });
+  assert.deepEqual(withMobs.data.looks.card.blocks[1].skin, known);
+  assert.deepEqual(withMobs.data.looks.card.mobs, [
+    { type: 'zombie', at: [-24, 0, 0], rot: 30, size: 1, pose: 'zombie' },
+    { type: 'player', at: [24, 0, 0], rot: 0, size: 0.5, pose: 'stand', skin: known, slim: true },
+    { type: 'pig', at: [0, 16, 32], rot: 0, size: 1, pose: 'stand' },
+  ]);
+  // Игрок на сцене — своя поза, как у персонажа: углы, сдвиг и растяжение частей.
+  const limbs = { lift: -2.4, head: [10, 0, 0], body: [0, 5, 0], rightArm: [-90.4, 0, 0], leftArm: [0, 0, 40], rightLeg: [20, 0, 0], leftLeg: [-20, 0, 0], move: { head: [0, 4.04, 0], body: [0, 0, 0] }, stretch: { leftArm: [1, 2, 1], head: [1, 1, 1] } };
+  const posed = await patch({ looks: { card: { pose: 'stand', mobs: [{ type: 'player', at: [0, 0, 0], skin: 'wide/kai', pose: 'custom', angles: limbs }] } } });
+  assert.equal(posed.status, 200, JSON.stringify(posed.data));
+  assert.deepEqual(posed.data.looks.card.mobs[0], {
+    type: 'player',
+    at: [0, 0, 0],
+    rot: 0,
+    size: 1,
+    pose: 'custom',
+    skin: 'wide/kai',
+    angles: { lift: -2, head: [10, 0, 0], body: [0, 5, 0], rightArm: [-90, 0, 0], leftArm: [0, 0, 40], rightLeg: [20, 0, 0], leftLeg: [-20, 0, 0], move: { head: [0, 4, 0] }, stretch: { leftArm: [1, 2, 1] } },
+  });
+  const ghost = await patch({ looks: { card: { pose: 'stand', mobs: [{ type: 'player', at: [0, 0, 0], skin: missing }] } } });
+  assert.equal(ghost.status, 422);
+  assert.match(ghost.data.fields.looks, /Скин для головы или игрока/);
   await patch({ looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } });
+});
+
+test('карточки: скин лицензии по нику для головы и игрока на сцене (свой скин не меняется)', async () => {
+  const ip = { 'X-Real-IP': '10.88.0.4' };
+  const before = (await alice.get('/api/me/card')).data;
+  const bad = await alice.raw('POST', '/api/skins/nick', { nickname: 'a b' }, ip);
+  assert.equal(bad.status, 422);
+  assert.equal((await client().raw('POST', '/api/skins/nick', { nickname: 'Notch' }, ip)).status, 401, 'только вошедшим игрокам');
+  const none = await alice.raw('POST', '/api/skins/nick', { nickname: 'NoSuchPlayer_1' }, ip);
+  assert.equal(none.status, 422);
+  assert.match(none.data.fields.nickname, /Лицензии с ником NoSuchPlayer_1 нет/);
+  const plain = await alice.raw('POST', '/api/skins/nick', { nickname: 'PlainGuy' }, ip);
+  assert.equal(plain.status, 200);
+  assert.deepEqual(plain.data, { nickname: 'PlainGuy', skin: 'wide/steve', slim: false }, 'у лицензии стандартный скин — Стив');
+  const notch = await alice.raw('POST', '/api/skins/nick', { nickname: 'notch' }, ip);
+  assert.equal(notch.status, 200);
+  assert.equal(notch.data.nickname, 'Notch');
+  assert.equal(notch.data.slim, true);
+  assert.match(notch.data.skin, /^[0-9a-f]{64}$/);
+  assert.ok((await client().get(`/api/skins/${notch.data.skin}.png`)).data.equals(SKIN_PNG), 'скин лежит на сайте');
+  // Им можно сразу поставить голову.
+  const head = await alice.raw('PATCH', '/api/me/card', { looks: { card: { pose: 'stand', held: { head: { id: 'player_head', skin: notch.data.skin } } } } }, ip);
+  assert.equal(head.status, 200);
+  const after = (await alice.get('/api/me/card')).data;
+  assert.equal(after.card.skinUrl, before.card.skinUrl, 'свой скин тот же');
+
+  // Чистка: скин, на который ссылается только игрок на сцене, не удаляется; перестали ссылаться — удаляется.
+  const data = skinVariant(9);
+  const hash = createHash('sha256').update(data).digest('hex');
+  await app.skins.store(hash, data);
+  const file = path.join(dataDir, 'skins', hash + '.png');
+  const old = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+  fs.utimesSync(file, old, old);
+  assert.equal((await alice.raw('PATCH', '/api/me/card', { looks: { detail: { pose: 'stand', mobs: [{ type: 'player', at: [0, 0, 0], skin: hash }] } } }, ip)).status, 200);
+  app.skins.sweep();
+  assert.ok(fs.existsSync(file), 'нужен карточке — остаётся');
+  await alice.raw('PATCH', '/api/me/card', { looks: { card: { pose: 'wave' }, detail: { pose: 'wave' } } }, ip);
+  app.skins.sweep();
+  assert.ok(!fs.existsSync(file), 'никому не нужен — удалён');
 });
 
 test('карточки: свой фон — проверка, хранение, замена, модерация', async () => {

@@ -400,11 +400,6 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.pdetail__label {
-  margin-bottom: 8px;
-  color: var(--c-text-3);
-  font-size: 13px;
-}
 .pdetail__stats {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

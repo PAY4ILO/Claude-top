@@ -2,6 +2,7 @@
  * Сквозной тест сайта в браузере против настоящего сервера (server/) с временной базой.
  *   npm install && npx playwright install chromium
  *   npm test
+ *   LWL_CHROMIUM=путь/к/chrome.exe npm test   — другой Chrome/Chromium, если сборку Playwright не поставить
  * Два отдельных браузерных контекста = два человека: A — владелец (админ через LWL_ADMINS), B — новичок.
  */
 import fs from 'node:fs';
@@ -22,7 +23,7 @@ const BASE = `http://127.0.0.1:${app.server.address().port}`;
 const results = [];
 const ok = (name, cond, extra = '') => results.push(`${cond ? 'PASS' : 'FAIL'}  ${name}${extra ? ' — ' + extra : ''}`);
 
-const browser = await chromium.launch();
+const browser = await chromium.launch(process.env.LWL_CHROMIUM ? { executablePath: process.env.LWL_CHROMIUM } : {});
 const errors = [];
 function watch(p, tag) {
   p.on('pageerror', (e) => errors.push(`${tag} pageerror: ${e.message}`));
@@ -340,7 +341,7 @@ ok('звание «Шахтёр» за 10 000+ блоков', myCardText.include
 ok('вкладки сортировки и «Топы» — игроку', (await B.locator('.players__tabs:not([hidden]) .tabs__tab').count()) === 4);
 ok('скин нарисован на холсте', (await B.locator('.pcard[data-nick="__Hawker__"] canvas').count()) === 1);
 await B.click('.pcard[data-nick="__Hawker__"] .pcard__open'); await B.waitForSelector('.modal__dialog .skin3d canvas');
-ok('окно игрока: 3D-скин, позы, статистика', (await B.locator('.modal__dialog .chip').count()) === 6 && (await B.locator('.modal__dialog .pdetail__stat').count()) >= 5);
+ok('окно игрока: 3D-скин и статистика, примерять чужие позы нельзя — только своя поза игрока', (await B.locator('.modal__dialog .skin3d canvas').count()) === 1 && (await B.locator('.modal__dialog .chip').count()) === 0 && (await B.locator('.modal__dialog .pdetail__stat').count()) >= 5);
 ok('окно игрока: модель не крутится, скачать скин нельзя', (await B.locator('.modal__dialog .skin3d__canvas--fixed').count()) === 1 && (await B.locator('.modal__dialog a[download]').count()) === 0);
 await B.keyboard.press('Escape'); await B.waitForSelector('.modal__dialog', { state: 'detached' });
 ok('окно закрывается по Esc', true);
@@ -348,8 +349,8 @@ ok('окно закрывается по Esc', true);
 // Профиль: ссылка в студию персонажа; там — поза, предметы, блоки, свои картинки отдельно для карточки и окна игрока.
 await B.goto(BASE + '/lk.html#/profile'); await B.waitForSelector('.my-card a[href="#/studio"]');
 await B.click('.my-card a[href="#/studio"]'); await B.waitForSelector('.studio .poser__canvas'); await settle(B, 500);
-ok('студия: сцена, превью карточки и окна игрока, 4 вкладки инструментов',
-  (await B.locator('.studio__work .poser__canvas').count()) === 1 && (await B.locator('.studio__previews .pcard').count()) === 1 && (await B.locator('.studio__previews .pdetail__stage canvas').count()) === 1 && (await B.locator('.studio__tools [role=tab]').count()) === 4);
+ok('студия: сцена, превью карточки и окна игрока, 6 вкладок инструментов',
+  (await B.locator('.studio__work .poser__canvas').count()) === 1 && (await B.locator('.studio__previews .pcard').count()) === 1 && (await B.locator('.studio__previews .pdetail__stage canvas').count()) === 1 && (await B.locator('.studio__tools [role=tab]').count()) === 6);
 ok('студия во весь экран, «К профилю» — в полосе', await B.evaluate(() => getComputedStyle(document.querySelector('.page--studio')).position === 'fixed' && document.documentElement.scrollHeight <= innerHeight + 1) && (await B.locator('.studio__bar .studio__exit').isVisible()));
 await B.click('.studio__tools [role=tab]:has-text("Предметы")');
 await B.waitForSelector('.studio__palette .studio__tile', { timeout: 15000 }).catch(() => {});
@@ -373,7 +374,7 @@ await studioSave('.studio__save-all');
 const looks = await savedLooks();
 ok('своя поза для окна игрока, карточка — «Машет»', looks.detail.pose === 'custom' && looks.detail.angles && looks.card.pose === 'wave', JSON.stringify(looks));
 // Кольца как в Blockbench. Где на холсте кольцо, нога и стрелка — считаем той же математикой, что рисует сцена студии
-// (камера окна игрока: поворот 25°, наклон 10°, кадр отдалён до 0,6 — SCENE_ZOOM в studio.js).
+// (камера — как у окна игрока: look.camera, по умолчанию поворот 25°, наклон 10°; кадр отдалён до 0,6 — SCENE_ZOOM в studio.js).
 const poserPoints = () =>
   B.evaluate(async () => {
     const cv = document.querySelector('.studio .poser__canvas');
@@ -384,7 +385,8 @@ const poserPoints = () =>
     off.width = cv.width;
     off.height = cv.height;
     const hits = [];
-    const info = Skin3D.draw(off, await Skin3D.load(me.card.skinUrl), { slim: me.card.skinSlim, pose: 'custom', angles: look.angles, zoom: 1, viewZoom: 0.6, pan: [0, 0], floor: true, yaw: 25 + look.turn, pitch: 10, hits });
+    const cam = Skin3D.lookOpts(look, 25, 10);
+    const info = Skin3D.draw(off, await Skin3D.load(me.card.skinUrl), { slim: me.card.skinSlim, pose: 'custom', angles: look.angles, zoom: 1, viewZoom: 0.6, pan: [0, 0], floor: true, yaw: cam.yaw, pitch: cam.pitch, figTurn: cam.figTurn, hits });
     const r = cv.getBoundingClientRect();
     const toC = ([x, y]) => [r.left + (x * r.width) / cv.width, r.top + (y * r.height) / cv.height];
     const dpr = cv.width / cv.clientWidth;
@@ -396,10 +398,9 @@ const poserPoints = () =>
     const R = Math.max(44 * dpr, Math.min(cv.width, cv.height) * 0.2 * 0.6) / info.scale;
     const ring = toC(info.toScreen([c[0] + u[0] * R, c[1] + u[1] * R, c[2] + u[2] * R]));
     const area = (q) => Math.abs((q[1][0] - q[0][0]) * (q[3][1] - q[0][1]) - (q[1][1] - q[0][1]) * (q[3][0] - q[0][0]));
-    // Грань левой ноги, которую ничего не закрывает: сцена выбирает верхнюю грань под точкой.
-    const inside = (q, x, y) => { let r = false; for (let i = 0, j = q.length - 1; i < q.length; j = i++) if ((q[i][1] > y) !== (q[j][1] > y) && x < ((q[j][0] - q[i][0]) * (y - q[i][1])) / (q[j][1] - q[i][1]) + q[i][0]) r = !r; return r; };
+    // Грань левой ноги, которую ничего не закрывает: сцена выбирает ближайшую к камере видимую грань под точкой (Skin3D.topHit).
     const mid = (q) => [(q[0][0] + q[2][0]) / 2, (q[0][1] + q[2][1]) / 2];
-    const top = ([x, y]) => [...hits].reverse().find((t) => inside(t.poly, x, y));
+    const top = ([x, y]) => Skin3D.topHit(hits, x, y);
     const f = hits.filter((x) => x.key === 'leftLeg').sort((a, b) => area(b.poly) - area(a.poly)).find((t) => top(mid(t.poly)) === t).poly;
     const leg = toC(mid(f));
     const hip = info.toScreen(info.pivot('body'))[1];
@@ -438,11 +439,97 @@ ok('стрелка «присесть» у тела', (await detailOf()).angles.
 await B.keyboard.press('s');
 ok('клавиша S — ручки «Растянуть»', (await B.locator('.studio__mode[data-mode="scale"][aria-pressed="true"]').count()) === 1);
 await B.click('.look__custom .chip[data-part="leftArm"]');
-await B.locator('.look__custom .look__slider:has-text("Высота") input').fill('150');
+// Ползунки размеров — по логарифму (от 5 % до 2000 %): ставим 150 %.
+await B.locator('.look__custom .look__slider:has-text("Высота") input').evaluate((el) => {
+  el.value = String(Math.log(150));
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+});
 await studioSave();
 ok('растянуть руку — сохраняется', JSON.stringify((await detailOf()).angles.stretch) === JSON.stringify({ leftArm: [1, 1.5, 1] }), JSON.stringify((await detailOf()).angles.stretch));
 await B.keyboard.press('r');
 ok('клавиша R — снова кольца', (await B.locator('.studio__mode[data-mode="rotate"][aria-pressed="true"]').count()) === 1);
+const setRange = (sel, value) =>
+  B.locator(sel).evaluate((el, v) => {
+    el.value = String(v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, value);
+// Весь персонаж: двойное нажатие по нему — выбран целиком; сдвинуть ползунком — pos.
+pts = await poserPoints();
+await B.mouse.dblclick(...pts.leg); await settle(B, 300);
+ok('двойное нажатие — выбран весь персонаж', (await B.locator('.studio__selection').innerText()) === 'Выбран весь персонаж', await B.locator('.studio__selection').innerText());
+await setRange('.studio__panel .look__slider:has-text("Вбок (X)") input', 24);
+await studioSave();
+ok('весь персонаж сдвинут — место сохраняется', JSON.stringify((await detailOf()).pos) === '[24,0,0]', JSON.stringify((await detailOf()).pos));
+// Камера карточки: C → тянуть по сцене → камера вида поворачивается и сохраняется.
+const camBefore = (await detailOf()).camera;
+await B.focus('.studio .poser__canvas'); await B.keyboard.press('c');
+ok('C — камера карточки', (await B.locator('.studio__cam-toggle[aria-pressed="true"]').count()) === 1);
+let cvBox = await B.locator('.studio .poser__canvas').boundingBox();
+await dragBy([cvBox.x + cvBox.width / 2, cvBox.y + cvBox.height / 2], 80, 0);
+await B.keyboard.press('c');
+await studioSave();
+ok('камера карточки поворачивается и сохраняется', !!camBefore && (await detailOf()).camera.yaw !== camBefore.yaw, JSON.stringify({ camBefore, after: (await detailOf()).camera }));
+// Мобы: вкладка «Мобы» → свинья → нажать на пол.
+await B.click('.studio__tools [role=tab]:has-text("Мобы")');
+await B.waitForSelector('.studio__tile--mob[data-mob="pig"]', { timeout: 15000 });
+await B.click('.studio__tile--mob[data-mob="pig"]');
+cvBox = await B.locator('.studio .poser__canvas').boundingBox();
+await B.mouse.move(cvBox.x + cvBox.width * 0.25, cvBox.y + cvBox.height * 0.78); await settle(B, 200);
+await B.mouse.click(cvBox.x + cvBox.width * 0.25, cvBox.y + cvBox.height * 0.78); await settle(B, 300);
+await B.keyboard.press('Escape');
+await studioSave();
+ok('моб ставится мышью и сохраняется', ((await detailOf()).mobs || []).some((m) => m.type === 'pig'), JSON.stringify((await detailOf()).mobs));
+// Игрок на сцене: конечности двигаются, как у своего персонажа — нажать на его руку, повернуть, сохранить.
+await B.click('.studio__tile--mob[data-mob="player"]');
+cvBox = await B.locator('.studio .poser__canvas').boundingBox();
+await B.mouse.move(cvBox.x + cvBox.width * 0.75, cvBox.y + cvBox.height * 0.78); await settle(B, 200);
+await B.mouse.click(cvBox.x + cvBox.width * 0.75, cvBox.y + cvBox.height * 0.78); await settle(B, 300);
+await B.keyboard.press('Escape');
+await studioSave();
+const playerIndex = ((await detailOf()).mobs || []).findIndex((m) => m.type === 'player');
+const armOf = (i) =>
+  B.evaluate(async (i) => {
+    const cv = document.querySelector('.studio .poser__canvas');
+    const me = await Api.players.myCard();
+    const look = me.looks.detail;
+    const off = document.createElement('canvas');
+    off.width = cv.width;
+    off.height = cv.height;
+    const hits = [];
+    const o = Skin3D.lookOpts(look, 25, 10);
+    const skin = await Skin3D.load(me.card.skinUrl);
+    const opts = { ...o, slim: me.card.skinSlim, zoom: 1, offset: null, viewZoom: 0.6, pan: [0, 0], floor: true };
+    Skin3D.draw(off, skin, opts);
+    await new Promise((r) => setTimeout(r, 800));
+    Skin3D.draw(off, skin, { ...opts, hits });
+    const mid = (q) => [(q[0][0] + q[2][0]) / 2, (q[0][1] + q[2][1]) / 2];
+    const face = hits.filter((h) => h.key === `mob:${i}:rightArm`).find((t) => Skin3D.topHit(hits, ...mid(t.poly)) === t);
+    if (!face) return null;
+    const r = cv.getBoundingClientRect();
+    const [x, y] = mid(face.poly);
+    return [r.left + (x * r.width) / cv.width, r.top + (y * r.height) / cv.height];
+  }, i);
+// Камеру карточки мы уже повернули — камера сцены встаёт так же («Вид как на карточке»), тогда точки совпадут.
+await B.click('.studio__camera'); await settle(B, 300);
+const armPoint = playerIndex >= 0 ? await armOf(playerIndex) : null;
+if (armPoint) await B.mouse.click(...armPoint);
+await settle(B, 300);
+await settle(B, 300);
+ok('нажатие на руку игрока на сцене выбирает её', /правая рука/.test(await B.locator('.studio__selection').innerText()), await B.locator('.studio__selection').innerText());
+await setRange('.studio__panel .look__custom .look__slider[data-axis="x"] input', 90);
+await studioSave();
+const posedPlayer = ((await detailOf()).mobs || [])[playerIndex] || {};
+ok('у игрока на сцене своя поза сохраняется', posedPlayer.pose === 'custom' && posedPlayer.angles && posedPlayer.angles.rightArm[0] === -90, JSON.stringify(posedPlayer));
+// Голова игрока на голову: «Предметы» → «Головы» → голова игрока → чья — Алекс.
+await B.click('.studio__tools [role=tab]:has-text("Предметы")');
+await B.click('.studio__slots [data-slot="head"]');
+await B.click('.studio__kinds button:has-text("Головы")');
+await B.click('.studio__tile[data-id="player_head"]');
+await B.click('.studio__skins .chip:has-text("Алекс")');
+await studioSave();
+ok('голова игрока — скин Алекс', ((await detailOf()).held || {}).head?.skin === 'slim/alex', JSON.stringify((await detailOf()).held));
 // Своя картинка 16×16: загрузить → выбрать квадрат → сохранить.
 await B.click('.studio__tools [role=tab]:has-text("Свои картинки")');
 await B.setInputFiles('#studio-tex-file', path.join(HERE, '../assets/img/skin-default.png'));

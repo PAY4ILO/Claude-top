@@ -27,7 +27,7 @@ import { MojangError } from '../lib/mojang.js';
 import { rconCommand, rconConfigured } from '../lib/rcon.js';
 import { BG_MAX_BYTES, backgroundMime, checkBackground, isBackgroundName } from '../lib/backgrounds.js';
 import { SKIN_MAX_BYTES, isSkinHash, isSkinPng } from '../lib/skins.js';
-import { CARD_BACKGROUNDS, CARD_FIELDS, CARD_POSES, LIMITS, LOOK_VIEWS, SOCIALS, clean, normalizeLook, validate } from '../lib/validate.js';
+import { CARD_BACKGROUNDS, CARD_FIELDS, CARD_POSES, LIMITS, LOOK_VIEWS, SOCIALS, clean, lookSkins, normalizeLook, validate } from '../lib/validate.js';
 
 export const ONLINE_WINDOW_MS = 150 * 1000; // мод шлёт список раз в минуту; две пропущенные отправки — уже не в сети
 export const DEFAULT_SKIN = '/assets/img/skin-default.png';
@@ -268,6 +268,11 @@ export default function register(router, s) {
     // Поза по видам; старое поле pose — поза маленькой карточки.
     const nextLooks = { ...cur.looks };
     for (const view of LOOK_VIEWS) if (looks && looks[view]) nextLooks[view] = normalizeLook(looks[view]);
+    // Головы игроков и мобы-игроки: скин с сайта должен лежать у нас (его отдаёт /api/skins/<хеш>.png).
+    for (const view of LOOK_VIEWS) {
+      if (!(looks && looks[view])) continue;
+      if (lookSkins(nextLooks[view]).some((hash) => !fs.existsSync(s.skins.fileOf(hash)))) throw fail.validation({ looks: 'Скин для головы или игрока на сцене не найден — выберите его заново.' });
+    }
     if (pose !== undefined && !(looks && looks.card)) {
       // Готовая поза вместо своих углов; предметы, блоки и остальное остаются.
       const { angles, ...rest } = nextLooks.card;
@@ -434,6 +439,35 @@ export default function register(router, s) {
     db.prepare("UPDATE player_cards SET skin_hash = ?, skin_slim = ?, skin_at = ?, skin_nick = ?, skin_sync = 'off', skin_sync_note = NULL WHERE user_id = ?").run(hash, found.slim ? 1 : 0, Date.now(), found.name, user.id);
     await syncSkin(user, hash, found.slim, found.name);
     return myCard(user);
+  });
+
+  // Скин лицензии по нику — для головы игрока или игрока на сцене студии. Свой скин не меняется; скин хранится
+  // как обычно (textures.minecraft.net → LWL_DATA_DIR/skins) и не удаляется, пока на него ссылается чья-то карточка.
+  router.add('POST', '/api/skins/nick', async (ctx) => {
+    need.player(ctx);
+    need.rate(ctx, 'skin-lookup', 30, 10 * 60_000, 'Слишком часто ищете скины. Подождите несколько минут.');
+    const nickname = String(ctx.body.nickname ?? '').trim();
+    if (!NICK.test(nickname)) throw fail.validation({ nickname: 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.' });
+    let found;
+    try {
+      found = await s.mojang.skinOf(nickname);
+    } catch (e) {
+      if (e instanceof MojangError) throw fail.validation({ nickname: e.message }, e.message);
+      throw e;
+    }
+    if (!found) {
+      const msg = `Лицензии с ником ${nickname} нет. Проверьте написание.`;
+      throw fail.validation({ nickname: msg }, msg);
+    }
+    if (!found.url) return { nickname: found.name, skin: found.slim ? 'slim/alex' : 'wide/steve', slim: !!found.slim };
+    let hash;
+    try {
+      hash = await s.skins.fetchNow(found.url);
+    } catch {
+      const msg = 'Не получилось скачать скин у Mojang. Попробуйте через минуту.';
+      throw fail.validation({ nickname: msg }, msg);
+    }
+    return { nickname: found.name, skin: hash, slim: !!found.slim };
   });
 
   // Тонкие/обычные руки — тот же скин, на сервер уходит заново (у MineSkin это разные скины).

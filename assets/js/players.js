@@ -152,28 +152,9 @@
   /* ------------------------------------------------------------ подробности */
 
   function openDetails(p) {
+    // Персонаж — ровно как игрок поставил его в студии (поза, камера, предметы, блоки, мобы); примерять чужие позы нельзя.
     let look = lookOf(p, 'detail');
     const viewer = Skin3D.viewer({ url: p.skinUrl, slim: p.skinSlim, look, label: `Скин игрока ${p.nickname}`, rotate: false });
-    // Своя поза игрока — первой кнопкой, чтобы к ней можно было вернуться.
-    const options = [...(look.pose === 'custom' ? [['custom', 'Как у игрока']] : []), ...Object.entries(Api.CARD_POSES)];
-    const poses = h(
-      'div',
-      { class: 'chips', role: 'radiogroup', 'aria-label': 'Поза' },
-      options.map(([key, label]) =>
-        h('button', {
-          class: 'chip',
-          type: 'button',
-          role: 'radio',
-          'aria-checked': String(key === look.pose),
-          text: label,
-          onclick: (e) => {
-            poses.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-checked', String(c === e.currentTarget)));
-            // Другая поза — предметы, блоки, размер и сдвиг остаются, как у игрока.
-            viewer.set({ look: key === 'custom' ? look : { ...look, pose: key, angles: undefined } });
-          },
-        })
-      )
-    );
     const stage = paintBackground(
       h('div', { class: 'pdetail__stage' }, viewer.el),
       p
@@ -244,7 +225,6 @@
         h('div', { class: 'pdetail__meta' }, roleTag(p), presence(p), ranks.map((r) => h('span', { class: 'rank', title: r.hint, text: r.label }))),
         p.bio && h('p', { class: 'pdetail__bio', text: p.bio }),
         socials(p),
-        h('div', { class: 'pdetail__poses' }, h('p', { class: 'pdetail__label', text: 'Примерить позу' }), poses),
         stats.length > 0 &&
           h('dl', { class: 'pdetail__stats' }, stats.map((r) => h('div', { class: 'pdetail__stat' }, h('dt', { text: r.label }), h('dd', { text: r.format(p.stats[r.key]) })))),
         dates.length > 0 && h('dl', { class: 'pdetail__dates' }, dates.map(([k, v]) => h('div', null, h('dt', { text: k }), h('dd', { text: v })))),
@@ -481,8 +461,10 @@
       const out = [look.pose === 'custom' ? 'своя поза' : (Api.CARD_POSES[look.pose] || Api.CARD_POSES.stand).toLowerCase()];
       const held = Object.keys(look.held || {}).length;
       const blocks = (look.blocks || []).length;
+      const mobs = (look.mobs || []).length;
       if (held) out.push(`${held} ${UI.plural(held, 'предмет', 'предмета', 'предметов')}`);
       if (blocks) out.push(`${blocks} ${UI.plural(blocks, 'блок', 'блока', 'блоков')}`);
+      if (mobs) out.push(`${mobs} ${UI.plural(mobs, 'моб', 'моба', 'мобов')}`);
       return out.join(', ');
     }
 

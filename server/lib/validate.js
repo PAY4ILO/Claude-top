@@ -35,27 +35,40 @@ export const CARD_BACKGROUNDS = ['meadow', 'night', 'sunset', 'ocean', 'cave', '
  * Как стоит персонаж — отдельно на маленькой карточке (card) и в окне игрока (detail).
  * { pose: ключ позы | 'custom', angles: { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift, move?, stretch? } (только у custom;
  *   move — сдвиг частей { часть: [x, y, z] }, stretch — растяжение частей { часть: [x, y, z] }, 1 — как есть),
- *   scale — размер фигуры, turn — поворот всей фигуры в градусах,
- *   offset — сдвиг фигуры в кадре [x, y],
- *   held — что в руках и на голове: { rightHand, leftHand, head: { id, rot: [x, y, z], size, at: [x, y, z] } },
- *   blocks — блоки вокруг: [{ id, at: [x, y, z] (низ-центр, 16 = блок), rot — поворот вокруг вертикали, size }],
+ *   scale — приближение камеры карточки, offset — сдвиг кадра [x, y],
+ *   camera — камера вида { yaw, pitch } в градусах; есть она — turn поворачивает только фигуру, нет (старые виды) —
+ *     turn поворачивает камеру вокруг сцены, как было раньше,
+ *   pos — где стоит фигура [x, y, z] (16 = блок), size — размер фигуры (только её: блоки и мобы не меняются),
+ *   held — что в руках и на голове: { rightHand, leftHand, head: { id, rot: [x, y, z], size, at: [x, y, z], skin? } },
+ *   blocks — блоки вокруг: [{ id, at: [x, y, z] (низ-центр, 16 = блок), rot — поворот вокруг вертикали, size, skin? }],
+ *   mobs — мобы и другие игроки: [{ type, at, rot, size, pose?, skin?, slim? }] (модели — assets/js/mc-mobs.js),
  *   textures — свои картинки игрока 16×16 (data:image/png), в held и blocks это id tex1…tex3 }.
- * id предметов и блоков — из assets/js/mc-index.json (оглавление client.jar, собирает tools/mc-index.mjs).
+ * id предметов и блоков — из assets/js/mc-index.json (оглавление client.jar, собирает tools/mc-index.mjs), плюс головы
+ * (LOOK_HEADS). skin — у головы игрока и моба «игрок»: sha256 скина с сайта или стандартный скин игры ('wide/steve').
  * Те же правила — в assets/js/api.js (LOOK).
  */
 export const LOOK_VIEWS = ['card', 'detail'];
 export const LOOK_PARTS = ['head', 'body', 'rightArm', 'leftArm', 'rightLeg', 'leftLeg'];
 export const LOOK_HELD = ['rightHand', 'leftHand', 'head'];
+export const LOOK_HEADS = ['skeleton_skull', 'wither_skeleton_skull', 'zombie_head', 'creeper_head', 'piglin_head', 'dragon_head', 'player_head'];
+export const LOOK_MOBS = ['player', 'zombie', 'husk', 'drowned', 'skeleton', 'stray', 'wither_skeleton', 'creeper', 'enderman', 'spider', 'cave_spider', 'slime', 'piglin', 'zombified_piglin', 'witch', 'villager', 'iron_golem', 'snow_golem', 'pig', 'cow', 'sheep', 'chicken', 'wolf'];
+export const LOOK_MOB_POSES = ['stand', 'walk', 'wave', 'cheer', 'point', 'sit', 'zombie'];
+// Стандартные скины игры (client.jar, textures/entity/player/…) или скин с сайта (sha256 файла в LWL_DATA_DIR/skins).
+export const LOOK_SKIN = /^((wide|slim)\/(steve|alex|ari|efe|kai|makena|noor|sunny|zuri)|[0-9a-f]{64})$/;
 export const LOOK = {
   angle: 180,
-  lift: [-12, 0],
-  scale: [0.2, 4],
+  lift: [-64, 64],
+  scale: [0.05, 20],
   turn: 180,
-  offset: 200,
-  move: 32, // сдвиг части тела (angles.move), единицы модели
-  stretch: [0.25, 3], // растяжение части тела (angles.stretch) по каждой оси
-  held: { rot: 180, size: [0.5, 2], at: 16 },
-  blocks: { max: 32, side: 96, y: [-48, 96], size: [0.25, 2] },
+  offset: 2000,
+  pitch: 90, // наклон камеры вида
+  size: [0.05, 20], // размер фигуры
+  world: { side: 1024, y: [-1024, 1024] }, // где может стоять фигура (pos)
+  move: 256, // сдвиг части тела (angles.move), единицы модели
+  stretch: [0.05, 20], // растяжение части тела (angles.stretch) по каждой оси
+  held: { rot: 180, size: [0.1, 8], at: 128 },
+  blocks: { max: 64, side: 1024, y: [-1024, 1024], size: [0.1, 8] },
+  mobs: { max: 16, side: 1024, y: [-1024, 1024], size: [0.1, 8] },
   textures: { max: 3, chars: 4096, side: 16 },
 };
 
@@ -87,6 +100,51 @@ function textureOk(v) {
 
 const inRange = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
 
+/** Углы своей позы (персонаж и игрок на сцене): части тела, подъём, сдвиг и растяжение частей. Ошибка или ''. */
+function anglesError(a) {
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return 'Для своей позы нужны углы.';
+  for (const part of LOOK_PARTS) {
+    const r = a[part];
+    if (!Array.isArray(r) || r.length !== 3 || r.some((x) => !inRange(x, -LOOK.angle, LOOK.angle))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
+  }
+  if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
+  if (a.move !== undefined) {
+    if (!a.move || typeof a.move !== 'object' || Array.isArray(a.move)) return 'Неверный сдвиг частей тела.';
+    for (const [part, m] of Object.entries(a.move)) {
+      if (!LOOK_PARTS.includes(part)) return 'Неверный сдвиг частей тела.';
+      if (!Array.isArray(m) || m.length !== 3 || m.some((x) => !inRange(x, -LOOK.move, LOOK.move))) return `Сдвиг части тела — от −${LOOK.move} до ${LOOK.move}.`;
+    }
+  }
+  if (a.stretch !== undefined) {
+    if (!a.stretch || typeof a.stretch !== 'object' || Array.isArray(a.stretch)) return 'Неверный размер частей тела.';
+    for (const [part, k] of Object.entries(a.stretch)) {
+      if (!LOOK_PARTS.includes(part)) return 'Неверный размер частей тела.';
+      if (!Array.isArray(k) || k.length !== 3 || k.some((x) => !inRange(x, ...LOOK.stretch))) return `Размер части тела — от ${LOOK.stretch[0]} до ${LOOK.stretch[1]}.`;
+    }
+  }
+  return '';
+}
+
+/** Углы своей позы к хранимому виду: округлить, нулевые сдвиги и растяжения «как есть» выбросить. */
+function normalizeAngles(a) {
+  const round = (x, k = 1) => Math.round(x * k) / k;
+  const out = { lift: a.lift === undefined ? 0 : round(a.lift) };
+  for (const part of LOOK_PARTS) out[part] = a[part].map((x) => round(x));
+  const move = {};
+  for (const part of LOOK_PARTS) {
+    const m = a.move && a.move[part];
+    if (m && m.some((x) => round(x, 10))) move[part] = m.map((x) => round(x, 10));
+  }
+  if (Object.keys(move).length) out.move = move;
+  const stretch = {};
+  for (const part of LOOK_PARTS) {
+    const k = a.stretch && a.stretch[part];
+    if (k && k.some((x) => round(x, 100) !== 1)) stretch[part] = k.map((x) => round(x, 100));
+  }
+  if (Object.keys(stretch).length) out.stretch = stretch;
+  return out;
+}
+
 /** Ошибка в одном виде (look) или ''. */
 function lookError(v) {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return 'Нужны настройки позы.';
@@ -94,31 +152,16 @@ function lookError(v) {
   if (v.scale !== undefined && !inRange(v.scale, ...LOOK.scale)) return `Размер — от ${LOOK.scale[0]} до ${LOOK.scale[1]}.`;
   if (v.turn !== undefined && !inRange(v.turn, -LOOK.turn, LOOK.turn)) return `Поворот — от −${LOOK.turn}° до ${LOOK.turn}°.`;
   if (v.pose === 'custom') {
-    const a = v.angles;
-    if (!a || typeof a !== 'object' || Array.isArray(a)) return 'Для своей позы нужны углы.';
-    for (const part of LOOK_PARTS) {
-      const r = a[part];
-      if (!Array.isArray(r) || r.length !== 3 || r.some((x) => !inRange(x, -LOOK.angle, LOOK.angle))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
-    }
-    if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
-    if (a.move !== undefined) {
-      if (!a.move || typeof a.move !== 'object' || Array.isArray(a.move)) return 'Неверный сдвиг частей тела.';
-      for (const [part, m] of Object.entries(a.move)) {
-        if (!LOOK_PARTS.includes(part)) return 'Неверный сдвиг частей тела.';
-        if (!Array.isArray(m) || m.length !== 3 || m.some((x) => !inRange(x, -LOOK.move, LOOK.move))) return `Сдвиг части тела — от −${LOOK.move} до ${LOOK.move}.`;
-      }
-    }
-    if (a.stretch !== undefined) {
-      if (!a.stretch || typeof a.stretch !== 'object' || Array.isArray(a.stretch)) return 'Неверный размер частей тела.';
-      for (const [part, k] of Object.entries(a.stretch)) {
-        if (!LOOK_PARTS.includes(part)) return 'Неверный размер частей тела.';
-        if (!Array.isArray(k) || k.length !== 3 || k.some((x) => !inRange(x, ...LOOK.stretch))) return `Размер части тела — от ${LOOK.stretch[0]} до ${LOOK.stretch[1]}.`;
-      }
-    }
+    const err = anglesError(v.angles);
+    if (err) return err;
   }
   const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
   const vec = (x, n, check) => Array.isArray(x) && x.length === n && x.every((k, i) => check(k, i));
   if (v.offset !== undefined && !vec(v.offset, 2, (k) => inRange(k, -LOOK.offset, LOOK.offset))) return `Сдвиг — от −${LOOK.offset} до ${LOOK.offset}.`;
+  if (v.camera !== undefined && (!isObj(v.camera) || !inRange(v.camera.yaw, -180, 180) || !inRange(v.camera.pitch, -LOOK.pitch, LOOK.pitch))) return `Камера: поворот от −180° до 180°, наклон от −${LOOK.pitch}° до ${LOOK.pitch}°.`;
+  const W = LOOK.world;
+  if (v.pos !== undefined && !vec(v.pos, 3, (k, i) => (i === 1 ? inRange(k, ...W.y) : inRange(k, -W.side, W.side)))) return 'Персонаж слишком далеко.';
+  if (v.size !== undefined && !inRange(v.size, ...LOOK.size)) return `Размер персонажа — от ${LOOK.size[0]} до ${LOOK.size[1]}.`;
   if (v.textures !== undefined) {
     if (!Array.isArray(v.textures) || v.textures.length > LOOK.textures.max) return `Своих картинок — не больше ${LOOK.textures.max}.`;
     if (!v.textures.every(textureOk)) return 'Своя картинка — PNG 16×16.';
@@ -126,6 +169,9 @@ function lookError(v) {
   const known = mcKnown();
   const texCount = Array.isArray(v.textures) ? v.textures.length : 0;
   const tex = (id) => /^tex[1-3]$/.test(id) && Number(id.slice(3)) <= texCount;
+  const head = (id) => LOOK_HEADS.includes(id);
+  // Скин — только у головы игрока; без него — Стив.
+  const skinOk = (e) => e.skin === undefined || (e.id === 'player_head' && typeof e.skin === 'string' && LOOK_SKIN.test(e.skin));
   if (v.held !== undefined) {
     if (!isObj(v.held)) return 'Неверные предметы в руках.';
     const H = LOOK.held;
@@ -133,7 +179,8 @@ function lookError(v) {
       if (!LOOK_HELD.includes(slot)) return 'Предмет можно держать только в руках или на голове.';
       if (e === null) continue;
       if (!isObj(e) || typeof e.id !== 'string') return 'Неверный предмет.';
-      if (!known.items.has(e.id) && !known.blocks.has(e.id) && !tex(e.id)) return 'Такого предмета нет.';
+      if (!known.items.has(e.id) && !known.blocks.has(e.id) && !tex(e.id) && !head(e.id)) return 'Такого предмета нет.';
+      if (!skinOk(e)) return 'Неверный скин головы.';
       if (e.rot !== undefined && !vec(e.rot, 3, (k) => inRange(k, -H.rot, H.rot))) return `Поворот предмета — от −${H.rot}° до ${H.rot}°.`;
       if (e.size !== undefined && !inRange(e.size, ...H.size)) return `Размер предмета — от ${H.size[0]} до ${H.size[1]}.`;
       if (e.at !== undefined && !vec(e.at, 3, (k) => inRange(k, -H.at, H.at))) return 'Предмет слишком далеко от руки.';
@@ -143,13 +190,44 @@ function lookError(v) {
     const B = LOOK.blocks;
     if (!Array.isArray(v.blocks) || v.blocks.length > B.max) return `Блоков — не больше ${B.max}.`;
     for (const b of v.blocks) {
-      if (!isObj(b) || typeof b.id !== 'string' || (!known.blocks.has(b.id) && !tex(b.id))) return 'Такого блока нет.';
+      if (!isObj(b) || typeof b.id !== 'string' || (!known.blocks.has(b.id) && !tex(b.id) && !head(b.id))) return 'Такого блока нет.';
+      if (!skinOk(b)) return 'Неверный скин головы.';
       if (!vec(b.at, 3, (k, i) => (i === 1 ? inRange(k, ...B.y) : inRange(k, -B.side, B.side)))) return 'Блок слишком далеко.';
       if (b.rot !== undefined && !inRange(b.rot, -180, 180)) return 'Поворот блока — от −180° до 180°.';
       if (b.size !== undefined && !inRange(b.size, ...B.size)) return `Размер блока — от ${B.size[0]} до ${B.size[1]}.`;
     }
   }
+  if (v.mobs !== undefined) {
+    const M = LOOK.mobs;
+    if (!Array.isArray(v.mobs) || v.mobs.length > M.max) return `Мобов — не больше ${M.max}.`;
+    for (const m of v.mobs) {
+      if (!isObj(m) || !LOOK_MOBS.includes(m.type)) return 'Такого моба нет.';
+      if (!vec(m.at, 3, (k, i) => (i === 1 ? inRange(k, ...M.y) : inRange(k, -M.side, M.side)))) return 'Моб слишком далеко.';
+      if (m.rot !== undefined && !inRange(m.rot, -180, 180)) return 'Поворот моба — от −180° до 180°.';
+      if (m.size !== undefined && !inRange(m.size, ...M.size)) return `Размер моба — от ${M.size[0]} до ${M.size[1]}.`;
+      // Своя поза (как у персонажа: каждая часть тела) — только у игрока на сцене.
+      if (m.pose === 'custom') {
+        if (m.type !== 'player') return 'Свою позу можно задать только игроку.';
+        const err = anglesError(m.angles);
+        if (err) return err;
+      } else if (m.pose !== undefined && !LOOK_MOB_POSES.includes(m.pose)) return 'Такой позы у моба нет.';
+      if (m.skin !== undefined && (m.type !== 'player' || typeof m.skin !== 'string' || !LOOK_SKIN.test(m.skin))) return 'Неверный скин игрока.';
+      if (m.slim !== undefined && typeof m.slim !== 'boolean') return 'Неверный скин игрока.';
+    }
+  }
   return '';
+}
+
+/** Скины с сайта (sha256), на которые ссылается вид: головы игроков и мобы-игроки. */
+export function lookSkins(v) {
+  const out = new Set();
+  const add = (s) => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s) && out.add(s);
+  if (v && typeof v === 'object') {
+    for (const e of Object.values(v.held || {})) if (e) add(e.skin);
+    for (const b of v.blocks || []) if (b) add(b.skin);
+    for (const m of v.mobs || []) if (m) add(m.skin);
+  }
+  return [...out];
 }
 
 /** Привести вид к хранимому: округлить, лишнее выбросить. Неверный → null. */
@@ -157,35 +235,33 @@ export function normalizeLook(v) {
   if (lookError(v)) return null;
   const round = (x, k = 1) => Math.round(x * k) / k;
   const out = { pose: v.pose, scale: v.scale === undefined ? 1 : round(v.scale, 100), turn: v.turn === undefined ? 0 : round(v.turn) };
-  if (v.pose === 'custom') {
-    out.angles = { lift: v.angles.lift === undefined ? 0 : round(v.angles.lift) };
-    for (const part of LOOK_PARTS) out.angles[part] = v.angles[part].map((x) => round(x));
-    const move = {};
-    for (const part of LOOK_PARTS) {
-      const m = v.angles.move && v.angles.move[part];
-      if (m && m.some((x) => round(x, 10))) move[part] = m.map((x) => round(x, 10));
-    }
-    if (Object.keys(move).length) out.angles.move = move;
-    const stretch = {};
-    for (const part of LOOK_PARTS) {
-      const k = v.angles.stretch && v.angles.stretch[part];
-      if (k && k.some((x) => round(x, 100) !== 1)) stretch[part] = k.map((x) => round(x, 100));
-    }
-    if (Object.keys(stretch).length) out.angles.stretch = stretch;
-  }
+  if (v.pose === 'custom') out.angles = normalizeAngles(v.angles);
   const offset = v.offset ? v.offset.map((x) => round(x, 10)) : null;
   if (offset && offset.some((x) => x)) out.offset = offset;
+  if (v.camera) out.camera = { yaw: round(v.camera.yaw), pitch: round(v.camera.pitch) };
+  const pos = v.pos ? v.pos.map((x) => round(x, 10)) : null;
+  if (pos && pos.some((x) => x)) out.pos = pos;
+  if (v.size !== undefined && round(v.size, 100) !== 1) out.size = round(v.size, 100);
   if (v.textures && v.textures.length) out.textures = [...v.textures];
+  const withSkin = (o, e) => (typeof e.skin === 'string' ? { ...o, skin: e.skin } : o);
   if (v.held) {
     const held = {};
     for (const slot of LOOK_HELD) {
       const e = v.held[slot];
       if (!e) continue;
-      held[slot] = { id: e.id, rot: (e.rot || [0, 0, 0]).map((x) => round(x)), size: e.size === undefined ? 1 : round(e.size, 100), at: (e.at || [0, 0, 0]).map((x) => round(x, 10)) };
+      held[slot] = withSkin({ id: e.id, rot: (e.rot || [0, 0, 0]).map((x) => round(x)), size: e.size === undefined ? 1 : round(e.size, 100), at: (e.at || [0, 0, 0]).map((x) => round(x, 10)) }, e);
     }
     if (Object.keys(held).length) out.held = held;
   }
-  if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => ({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: b.rot === undefined ? 0 : round(b.rot), size: b.size === undefined ? 1 : round(b.size, 100) }));
+  if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => withSkin({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: b.rot === undefined ? 0 : round(b.rot), size: b.size === undefined ? 1 : round(b.size, 100) }, b));
+  if (v.mobs && v.mobs.length) {
+    out.mobs = v.mobs.map((m) => {
+      let o = withSkin({ type: m.type, at: m.at.map((x) => round(x, 10)), rot: m.rot === undefined ? 0 : round(m.rot), size: m.size === undefined ? 1 : round(m.size, 100), pose: m.pose || 'stand' }, m);
+      if (m.type === 'player' && m.slim) o = { ...o, slim: true };
+      if (m.pose === 'custom') o.angles = normalizeAngles(m.angles);
+      return o;
+    });
+  }
   return out;
 }
 // Соцсети на карточке: хранится только ник, ссылку собирает страница — чужой адрес в карточку не попадёт.

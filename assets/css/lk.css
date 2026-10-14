@@ -3207,6 +3207,93 @@ a.att-file:hover .att-file__icon {
   gap: 6px;
 }
 
+/* Камера карточки: кнопка на сцене и во вкладке «Камера» — нажата, пока камера двигается. */
+.studio__cam-toggle,
+.studio__cam-big {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.studio__cam-toggle svg,
+.studio__cam-big svg {
+  width: 18px;
+  height: 18px;
+}
+.studio__cam-toggle[aria-pressed='false'] {
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+.studio__cam-big {
+  justify-self: start;
+}
+.studio__cam-big[aria-pressed='false'] {
+  background: var(--c-surface-3);
+  color: var(--c-text);
+}
+.poser.is-camera .poser__canvas {
+  cursor: grab;
+}
+/* В режиме камеры ручки не нужны — их место у подписи рамки. */
+.studio__stage.is-camera .studio__modes {
+  display: none;
+}
+.poser.is-camera .poser__canvas:active {
+  cursor: grabbing;
+}
+/* «Весь персонаж» — первым в списке частей, заметнее. */
+.chip--strong {
+  font-weight: 700;
+}
+
+/* Чей скин: стандартные, игроки сервера, любая лицензия. */
+.studio__skins {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--r-md);
+  background: var(--c-field);
+}
+.studio__skin-players {
+  max-height: 132px;
+  overflow: auto;
+}
+.studio__skin-find {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.studio__skin-find .input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Палитра мобов: значок и подпись. */
+.studio__grid--mobs {
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  min-height: 0;
+}
+.studio__tile--mob {
+  aspect-ratio: auto;
+  gap: 4px;
+  padding: 8px 4px 6px;
+}
+.studio__tile .mc-icon--mob {
+  width: 40px;
+  height: 40px;
+}
+.studio__current .mc-icon--mob {
+  width: 40px;
+  height: 40px;
+}
+.studio__tile-label {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--c-text-2);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 /* Свои картинки */
 .studio__texs {
   display: grid;

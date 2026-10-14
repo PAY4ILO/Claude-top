@@ -63,27 +63,44 @@
   /**
    * Как стоит персонаж: отдельно на маленькой карточке (card) и в окне игрока (detail).
    * { pose: ключ | 'custom', angles (у custom): { head, body, rightArm, leftArm, rightLeg, leftLeg: [x, y, z], lift }, scale, turn,
-   *   offset — сдвиг фигуры в кадре [x, y],
-   *   held — что в руках и на голове: { rightHand, leftHand, head: { id, rot: [x, y, z], size, at: [x, y, z] } | null },
-   *   blocks — блоки вокруг: [{ id, at: [x, y, z] (низ-центр, 16 = блок), rot — поворот вокруг вертикали, size }],
+   *   scale — приближение камеры карточки, offset — сдвиг кадра [x, y], camera — { yaw, pitch } камеры вида
+   *     (есть — turn поворачивает только фигуру; нет, у старых видов — turn поворачивает камеру),
+   *   pos — где стоит фигура [x, y, z], size — размер фигуры,
+   *   held — что в руках и на голове: { rightHand, leftHand, head: { id, rot: [x, y, z], size, at: [x, y, z], skin? } | null },
+   *   blocks — блоки вокруг: [{ id, at: [x, y, z] (низ-центр, 16 = блок), rot — поворот вокруг вертикали, size, skin? }],
+   *   mobs — мобы и игроки на сцене: [{ type, at, rot, size, pose, skin?, slim? }],
    *   textures — свои картинки игрока 16×16 (data:image/png), в held и blocks это id tex1…tex3 }.
    * id предметов и блоков — из assets/js/mc-index.json: здесь проверяются, только если на странице есть McArt
-   * и он уже загрузил оглавление (иначе решает сервер).
-   * Пределы — как в server/lib/validate.js → LOOK (slots — там LOOK_HELD).
+   * и он уже загрузил оглавление (иначе решает сервер); головы — heads. skin — только у головы игрока и моба
+   * «игрок»: sha256 скина с сайта или стандартный скин игры ('wide/steve').
+   * Пределы — как в server/lib/validate.js → LOOK (slots — LOOK_HELD, heads — LOOK_HEADS, mobs.types — LOOK_MOBS).
    */
   const LOOK = {
     views: { card: 'Карточка', detail: 'Окно игрока' },
     parts: ['head', 'body', 'rightArm', 'leftArm', 'rightLeg', 'leftLeg'],
     slots: ['rightHand', 'leftHand', 'head'],
+    heads: ['skeleton_skull', 'wither_skeleton_skull', 'zombie_head', 'creeper_head', 'piglin_head', 'dragon_head', 'player_head'],
+    skin: /^((wide|slim)\/(steve|alex|ari|efe|kai|makena|noor|sunny|zuri)|[0-9a-f]{64})$/,
     angle: 180,
-    lift: [-12, 0],
-    scale: [0.2, 4],
+    lift: [-64, 64],
+    scale: [0.05, 20],
     turn: 180,
-    offset: 200,
-    move: 32,
-    stretch: [0.25, 3],
-    held: { rot: 180, size: [0.5, 2], at: 16 },
-    blocks: { max: 32, side: 96, y: [-48, 96], size: [0.25, 2] },
+    offset: 2000,
+    pitch: 90,
+    size: [0.05, 20],
+    world: { side: 1024, y: [-1024, 1024] },
+    move: 256,
+    stretch: [0.05, 20],
+    held: { rot: 180, size: [0.1, 8], at: 128 },
+    blocks: { max: 64, side: 1024, y: [-1024, 1024], size: [0.1, 8] },
+    mobs: {
+      max: 16,
+      side: 1024,
+      y: [-1024, 1024],
+      size: [0.1, 8],
+      types: ['player', 'zombie', 'husk', 'drowned', 'skeleton', 'stray', 'wither_skeleton', 'creeper', 'enderman', 'spider', 'cave_spider', 'slime', 'piglin', 'zombified_piglin', 'witch', 'villager', 'iron_golem', 'snow_golem', 'pig', 'cow', 'sheep', 'chicken', 'wolf'],
+      poses: ['stand', 'walk', 'wave', 'cheer', 'point', 'sit', 'zombie'],
+    },
     textures: { max: 3, chars: 4096, side: 16 },
   };
   /** Свой фон: кабинет уменьшает картинку до side точек и сжимает в WebP, чтобы файл был не больше bytes. */
@@ -182,35 +199,46 @@
 
   const inRange = (v, min, max) => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
 
+  const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+  const vec = (x, n, check) => Array.isArray(x) && x.length === n && x.every((k, i) => check(k, i));
+
+  /** Углы своей позы (персонаж и игрок на сцене) — как anglesError в server/lib/validate.js. */
+  function anglesError(a) {
+    if (!isObj(a)) return 'Для своей позы нужны углы.';
+    if (LOOK.parts.some((p) => !vec(a[p], 3, (x) => inRange(x, -LOOK.angle, LOOK.angle)))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
+    if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
+    if (a.move !== undefined) {
+      if (!isObj(a.move)) return 'Неверный сдвиг частей тела.';
+      for (const [part, m] of Object.entries(a.move)) {
+        if (!LOOK.parts.includes(part)) return 'Неверный сдвиг частей тела.';
+        if (!vec(m, 3, (x) => inRange(x, -LOOK.move, LOOK.move))) return `Сдвиг части тела — от −${LOOK.move} до ${LOOK.move}.`;
+      }
+    }
+    if (a.stretch !== undefined) {
+      if (!isObj(a.stretch)) return 'Неверный размер частей тела.';
+      for (const [part, k] of Object.entries(a.stretch)) {
+        if (!LOOK.parts.includes(part)) return 'Неверный размер частей тела.';
+        if (!vec(k, 3, (x) => inRange(x, ...LOOK.stretch))) return `Размер части тела — от ${LOOK.stretch[0]} до ${LOOK.stretch[1]}.`;
+      }
+    }
+    return '';
+  }
+
   /** Ошибка в одном виде (look) или '' — тексты и порядок проверок как в server/lib/validate.js → lookError. */
   function lookError(v) {
-    const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
-    const vec = (x, n, check) => Array.isArray(x) && x.length === n && x.every((k, i) => check(k, i));
     if (!isObj(v)) return 'Нужны настройки позы.';
     if (v.pose !== 'custom' && !Object.hasOwn(CARD_POSES, v.pose)) return 'Такой позы нет.';
     if (v.scale !== undefined && !inRange(v.scale, ...LOOK.scale)) return `Размер — от ${LOOK.scale[0]} до ${LOOK.scale[1]}.`;
     if (v.turn !== undefined && !inRange(v.turn, -LOOK.turn, LOOK.turn)) return `Поворот — от −${LOOK.turn}° до ${LOOK.turn}°.`;
     if (v.pose === 'custom') {
-      const a = v.angles;
-      if (!isObj(a)) return 'Для своей позы нужны углы.';
-      if (LOOK.parts.some((p) => !vec(a[p], 3, (x) => inRange(x, -LOOK.angle, LOOK.angle)))) return `Углы — от −${LOOK.angle}° до ${LOOK.angle}°.`;
-      if (a.lift !== undefined && !inRange(a.lift, ...LOOK.lift)) return 'Неверная высота.';
-      if (a.move !== undefined) {
-        if (!isObj(a.move)) return 'Неверный сдвиг частей тела.';
-        for (const [part, m] of Object.entries(a.move)) {
-          if (!LOOK.parts.includes(part)) return 'Неверный сдвиг частей тела.';
-          if (!vec(m, 3, (x) => inRange(x, -LOOK.move, LOOK.move))) return `Сдвиг части тела — от −${LOOK.move} до ${LOOK.move}.`;
-        }
-      }
-      if (a.stretch !== undefined) {
-        if (!isObj(a.stretch)) return 'Неверный размер частей тела.';
-        for (const [part, k] of Object.entries(a.stretch)) {
-          if (!LOOK.parts.includes(part)) return 'Неверный размер частей тела.';
-          if (!vec(k, 3, (x) => inRange(x, ...LOOK.stretch))) return `Размер части тела — от ${LOOK.stretch[0]} до ${LOOK.stretch[1]}.`;
-        }
-      }
+      const err = anglesError(v.angles);
+      if (err) return err;
     }
     if (v.offset !== undefined && !vec(v.offset, 2, (k) => inRange(k, -LOOK.offset, LOOK.offset))) return `Сдвиг — от −${LOOK.offset} до ${LOOK.offset}.`;
+    if (v.camera !== undefined && (!isObj(v.camera) || !inRange(v.camera.yaw, -180, 180) || !inRange(v.camera.pitch, -LOOK.pitch, LOOK.pitch))) return `Камера: поворот от −180° до 180°, наклон от −${LOOK.pitch}° до ${LOOK.pitch}°.`;
+    const W = LOOK.world;
+    if (v.pos !== undefined && !vec(v.pos, 3, (k, i) => (i === 1 ? inRange(k, ...W.y) : inRange(k, -W.side, W.side)))) return 'Персонаж слишком далеко.';
+    if (v.size !== undefined && !inRange(v.size, ...LOOK.size)) return `Размер персонажа — от ${LOOK.size[0]} до ${LOOK.size[1]}.`;
     if (v.textures !== undefined) {
       if (!Array.isArray(v.textures) || v.textures.length > LOOK.textures.max) return `Своих картинок — не больше ${LOOK.textures.max}.`;
       if (!v.textures.every(textureOk)) return 'Своя картинка — PNG 16×16.';
@@ -218,9 +246,11 @@
     const known = mcKnown();
     const texCount = Array.isArray(v.textures) ? v.textures.length : 0;
     const tex = (id) => /^tex[1-3]$/.test(id) && Number(id.slice(3)) <= texCount;
+    const head = (id) => LOOK.heads.includes(id);
     // tex1…tex3 — только из присланных картинок. Остальное — по оглавлению игры; пока его нет, пропускаем
     // всё похожее на id Minecraft (кроме texN), а есть ли такой блок или предмет, проверит сервер.
-    const exists = (id, kinds) => tex(id) || (known ? kinds.some((k) => known[k].has(id)) : /^[a-z0-9_./-]+$/.test(id) && !/^tex\d*$/.test(id));
+    const exists = (id, kinds) => tex(id) || head(id) || (known ? kinds.some((k) => known[k].has(id)) : /^[a-z0-9_./-]+$/.test(id) && !/^tex\d*$/.test(id));
+    const skinOk = (e) => e.skin === undefined || (e.id === 'player_head' && typeof e.skin === 'string' && LOOK.skin.test(e.skin));
     if (v.held !== undefined) {
       if (!isObj(v.held)) return 'Неверные предметы в руках.';
       const H = LOOK.held;
@@ -229,6 +259,7 @@
         if (e === null) continue;
         if (!isObj(e) || typeof e.id !== 'string') return 'Неверный предмет.';
         if (!exists(e.id, ['items', 'blocks'])) return 'Такого предмета нет.';
+        if (!skinOk(e)) return 'Неверный скин головы.';
         if (e.rot !== undefined && !vec(e.rot, 3, (k) => inRange(k, -H.rot, H.rot))) return `Поворот предмета — от −${H.rot}° до ${H.rot}°.`;
         if (e.size !== undefined && !inRange(e.size, ...H.size)) return `Размер предмета — от ${H.size[0]} до ${H.size[1]}.`;
         if (e.at !== undefined && !vec(e.at, 3, (k) => inRange(k, -H.at, H.at))) return 'Предмет слишком далеко от руки.';
@@ -239,9 +270,28 @@
       if (!Array.isArray(v.blocks) || v.blocks.length > B.max) return `Блоков — не больше ${B.max}.`;
       for (const b of v.blocks) {
         if (!isObj(b) || typeof b.id !== 'string' || !exists(b.id, ['blocks'])) return 'Такого блока нет.';
+        if (!skinOk(b)) return 'Неверный скин головы.';
         if (!vec(b.at, 3, (k, i) => (i === 1 ? inRange(k, ...B.y) : inRange(k, -B.side, B.side)))) return 'Блок слишком далеко.';
         if (b.rot !== undefined && !inRange(b.rot, -180, 180)) return 'Поворот блока — от −180° до 180°.';
         if (b.size !== undefined && !inRange(b.size, ...B.size)) return `Размер блока — от ${B.size[0]} до ${B.size[1]}.`;
+      }
+    }
+    if (v.mobs !== undefined) {
+      const M = LOOK.mobs;
+      if (!Array.isArray(v.mobs) || v.mobs.length > M.max) return `Мобов — не больше ${M.max}.`;
+      for (const m of v.mobs) {
+        if (!isObj(m) || !M.types.includes(m.type)) return 'Такого моба нет.';
+        if (!vec(m.at, 3, (k, i) => (i === 1 ? inRange(k, ...M.y) : inRange(k, -M.side, M.side)))) return 'Моб слишком далеко.';
+        if (m.rot !== undefined && !inRange(m.rot, -180, 180)) return 'Поворот моба — от −180° до 180°.';
+        if (m.size !== undefined && !inRange(m.size, ...M.size)) return `Размер моба — от ${M.size[0]} до ${M.size[1]}.`;
+        // Своя поза (как у персонажа: каждая часть тела) — только у игрока на сцене.
+        if (m.pose === 'custom') {
+          if (m.type !== 'player') return 'Свою позу можно задать только игроку.';
+          const err = anglesError(m.angles);
+          if (err) return err;
+        } else if (m.pose !== undefined && !M.poses.includes(m.pose)) return 'Такой позы у моба нет.';
+        if (m.skin !== undefined && (m.type !== 'player' || typeof m.skin !== 'string' || !LOOK.skin.test(m.skin))) return 'Неверный скин игрока.';
+        if (m.slim !== undefined && typeof m.slim !== 'boolean') return 'Неверный скин игрока.';
       }
     }
     return '';
@@ -702,6 +752,15 @@
         const nick = String(nickname || '').trim();
         if (!/^[A-Za-z0-9_]{3,16}$/.test(nick)) return Promise.reject(new ApiError('VALIDATION', 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.', { fields: { nickname: 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.' } }));
         return http('POST', '/me/skin/nick', { nickname: nick }).then((d) => (emit('players'), d));
+      },
+      /**
+       * Скин лицензии по нику — для головы игрока или игрока на сцене студии (свой скин не меняется).
+       * → { nickname, skin (sha256 или 'wide/steve' / 'slim/alex', если у лицензии стандартный), slim }
+       */
+      findSkin: (nickname) => {
+        const nick = String(nickname || '').trim();
+        if (!/^[A-Za-z0-9_]{3,16}$/.test(nick)) return Promise.reject(new ApiError('VALIDATION', 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.', { fields: { nickname: 'Ник Minecraft — латиница, цифры и _, от 3 до 16 символов.' } }));
+        return http('POST', '/skins/nick', { nickname: nick });
       },
       /**
        * Свой фон. Картинку уменьшает и сжимает браузер (WebP; где WebP не умеют сохранять — JPEG),
