@@ -164,7 +164,9 @@
   `player_head`) — особые модели игры (`McMobs.head`, рисует `Skin3D.headModel`): держать, надеть (как CustomHeadLayer —
   от шеи, в 1,1875 больше головы), поставить блоком; положение в руке — `display` из `item/template_skull` / `item/dragon_head`.
   `skin` — только у `player_head`: sha256 скина с сайта или стандартный скин игры (`wide/steve`, `slim/alex`, … — `LOOK_SKIN`).
-  **Мобы** — `mobs` до 16 `{type, at, rot, size 0.1–8, pose, skin?, slim?}` (`LOOK_MOBS`, позы `LOOK_MOB_POSES`):
+  **Мобы** — `mobs` до 16 `{type, at, rot [x,y,z] ±180, size 0.1–8, pose, skin?, slim?}` (`LOOK_MOBS`, позы `LOOK_MOB_POSES`;
+  `rot` крутит по трём осям вокруг середины моба — `mobMid`, три кольца в студии; старое число = поворот вокруг вертикали,
+  `normalizeLook` переводит его в [0, y, 0]):
   модели — `assets/js/mc-mobs.js`, коробки и развёртка взяты из классов моделей `client.jar` 26.3 (начиная с 26.x jar без
   обфускации — `javap -c` на `net/minecraft/client/model/…`); запись как в игре (y вниз, земля на 24), `McMobs.build`
   переводит в систему студии. `type: 'player'` — другой игрок: скин как у головы игрока; рисуется тем же скелетом, что

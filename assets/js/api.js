@@ -282,7 +282,7 @@
       for (const m of v.mobs) {
         if (!isObj(m) || !M.types.includes(m.type)) return 'Такого моба нет.';
         if (!vec(m.at, 3, (k, i) => (i === 1 ? inRange(k, ...M.y) : inRange(k, -M.side, M.side)))) return 'Моб слишком далеко.';
-        if (m.rot !== undefined && !inRange(m.rot, -180, 180)) return 'Поворот моба — от −180° до 180°.';
+        if (m.rot !== undefined && !(inRange(m.rot, -180, 180) || vec(m.rot, 3, (k) => inRange(k, -180, 180)))) return 'Поворот моба — от −180° до 180°.';
         if (m.size !== undefined && !inRange(m.size, ...M.size)) return `Размер моба — от ${M.size[0]} до ${M.size[1]}.`;
         // Своя поза (как у персонажа: каждая часть тела) — только у игрока на сцене.
         if (m.pose === 'custom') {

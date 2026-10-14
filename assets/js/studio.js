@@ -52,6 +52,8 @@
   const round = (x, k = 1) => Math.round(x * k) / k;
   const isTex = (id) => /^tex[1-3]$/.test(id);
   const isHead = (id) => LOOK.heads.includes(id);
+  /** Поворот моба [x, y, z]; у старых — одно число (вокруг вертикали). */
+  const rotArr = (r) => (Array.isArray(r) ? [0, 1, 2].map((i) => Number(r[i]) || 0) : [0, Number(r) || 0, 0]);
   const art = () => (window.McArt && typeof window.McArt.model === 'function' ? window.McArt : null);
   // Ключи выбранного — как в Skin3D.poser: часть тела, 'figure', 'held:<слот>', 'block:<i>', 'mob:<i>', 'mob:<i>:<часть>'.
   const kindOf = (key) =>
@@ -94,7 +96,8 @@
     if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => withSkin({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: b.rot === undefined ? 0 : round(b.rot), size: b.size === undefined ? 1 : round(b.size, 100) }, b));
     if (v.mobs && v.mobs.length) {
       out.mobs = v.mobs.map((m) => {
-        let o = withSkin({ type: m.type, at: m.at.map((x) => round(x, 10)), rot: m.rot === undefined ? 0 : round(m.rot), size: m.size === undefined ? 1 : round(m.size, 100), pose: m.pose || 'stand' }, m);
+        const rot = Array.isArray(m.rot) ? m.rot.map((x) => round(x)) : [0, m.rot === undefined ? 0 : round(m.rot), 0];
+        let o = withSkin({ type: m.type, at: m.at.map((x) => round(x, 10)), rot, size: m.size === undefined ? 1 : round(m.size, 100), pose: m.pose || 'stand' }, m);
         if (m.type === 'player' && m.slim) o = { ...o, slim: true };
         if (m.pose === 'custom') o.angles = normAngles(m.angles);
         return o;
@@ -707,7 +710,7 @@
     /** Новый моб — кого и в какой позе (у человекоподобных по умолчанию — как в игре: зомби руки вперёд). */
     function newMob(at, rot) {
       const def = mobs() && mobs().mob(S.mob);
-      const m = { type: S.mob, at, rot, size: 1, pose: (def && def.pose) || 'stand' };
+      const m = { type: S.mob, at, rot: [0, Number(rot) || 0, 0], size: 1, pose: (def && def.pose) || 'stand' };
       if (S.mob === 'player') {
         if (S.mobSkin) m.skin = S.mobSkin;
         if (S.mobSlim || /^slim\//.test(S.mobSkin || '')) m.slim = true;
@@ -1970,6 +1973,11 @@
         x.at = x.at.slice();
         x.at[i] = v;
       };
+      const setRot = (i, v) => {
+        const x = mk();
+        x.rot = rotArr(x.rot);
+        x.rot[i] = v;
+      };
       const def = m && M.mob(m.type, m.slim);
       const isPlayer = m && m.type === 'player';
       // У игрока на сцене — ещё «Своя поза»: каждая часть тела отдельно (углы как у персонажа).
@@ -2046,7 +2054,12 @@
           !limb && slider({ label: 'Вбок (X)', axis: 0, min: -256, max: 256, step: 0.5, value: m.at[0], format: num, group: 'mob-x', read: () => mk() && mk().at[0], onInput: (v) => setAt(0, v) }),
           !limb && slider({ label: 'Высота (Y)', axis: 1, min: -128, max: 256, step: 0.5, value: m.at[1], format: num, group: 'mob-y', read: () => mk() && mk().at[1], onInput: (v) => setAt(1, v) }),
           !limb && slider({ label: 'Вперёд (Z)', axis: 2, min: -256, max: 256, step: 0.5, value: m.at[2], format: num, group: 'mob-z', read: () => mk() && mk().at[2], onInput: (v) => setAt(2, v) }),
-          !limb && slider({ label: 'Поворот', min: -180, max: 180, value: m.rot || 0, unit: '°', group: 'mob-rot', read: () => mk() && (mk().rot || 0), onInput: (v) => (mk().rot = v) }),
+          // Поворот по трём осям (старое число — только вокруг вертикали): наклон вперёд, поворот, наклон вбок.
+          !limb && h('p', { class: 'studio__sub', text: 'Поворот' }),
+          !limb &&
+            ['Наклон вперёд', 'Поворот', 'Наклон вбок'].map((label, i) =>
+              slider({ label, axis: i, min: -180, max: 180, value: rotArr(m.rot)[i], unit: '°', group: `mob-rot:${i}`, read: () => mk() && rotArr(mk().rot)[i], onInput: (v) => setRot(i, v) })
+            ),
           !limb && slider({ label: 'Размер', log: true, min: Math.round(LOOK.mobs.size[0] * 100), max: Math.round(LOOK.mobs.size[1] * 100), value: Math.round((m.size || 1) * 100), unit: '%', group: 'mob-size', read: () => mk() && Math.round((mk().size || 1) * 100), onInput: (v) => (mk().size = v / 100) }),
           isPlayer && !limb && h('p', { class: 'field__hint', text: 'Нажмите на руку, ногу, голову или тело игрока на сцене — и тяните ручки, как у своего персонажа. Двойное нажатие по игроку — выбрать его целиком.' }),
           isPlayer &&

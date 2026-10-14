@@ -1264,6 +1264,8 @@ test('карточки: предметы в руках, блоки вокруг 
     [{ mobs: [{ type: 'zombie', at: [0, 0, 5000] }] }, 'Моб слишком далеко.'],
     [{ mobs: [{ type: 'zombie', at: [0, 0, 0], size: 10 }] }, 'Размер моба — от 0.1 до 8.'],
     [{ mobs: [{ type: 'zombie', at: [0, 0, 0], pose: 'dab' }] }, 'Такой позы у моба нет.'],
+    [{ mobs: [{ type: 'zombie', at: [0, 0, 0], rot: [0, 200, 0] }] }, 'Поворот моба — от −180° до 180°.'],
+    [{ mobs: [{ type: 'zombie', at: [0, 0, 0], rot: [0, 0] }] }, 'Поворот моба — от −180° до 180°.'],
     [{ mobs: [{ type: 'zombie', at: [0, 0, 0], skin: 'wide/steve' }] }, 'Неверный скин игрока.'],
     [{ mobs: [{ type: 'zombie', at: [0, 0, 0], pose: 'custom', angles: {} }] }, 'Свою позу можно задать только игроку.'],
     [{ mobs: [{ type: 'player', at: [0, 0, 0], pose: 'custom' }] }, 'Для своей позы нужны углы.'],
@@ -1328,6 +1330,7 @@ test('карточки: предметы в руках, блоки вокруг 
           { type: 'zombie', at: [-24.04, 0, 0], rot: 30.4, pose: 'zombie' },
           { type: 'player', at: [24, 0, 0], skin: known, slim: true, size: 0.5 },
           { type: 'pig', at: [0, 16, 32], slim: false },
+          { type: 'cow', at: [32, 0, 0], rot: [45.4, -90, 179.6] },
         ],
       },
     },
@@ -1336,9 +1339,10 @@ test('карточки: предметы в руках, блоки вокруг 
   assert.deepEqual(withMobs.data.looks.card.held.head, { id: 'player_head', rot: [0, 0, 0], size: 1, at: [0, 0, 0], skin: 'slim/alex' });
   assert.deepEqual(withMobs.data.looks.card.blocks[1].skin, known);
   assert.deepEqual(withMobs.data.looks.card.mobs, [
-    { type: 'zombie', at: [-24, 0, 0], rot: 30, size: 1, pose: 'zombie' },
-    { type: 'player', at: [24, 0, 0], rot: 0, size: 0.5, pose: 'stand', skin: known, slim: true },
-    { type: 'pig', at: [0, 16, 32], rot: 0, size: 1, pose: 'stand' },
+    { type: 'zombie', at: [-24, 0, 0], rot: [0, 30, 0], size: 1, pose: 'zombie' },
+    { type: 'player', at: [24, 0, 0], rot: [0, 0, 0], size: 0.5, pose: 'stand', skin: known, slim: true },
+    { type: 'pig', at: [0, 16, 32], rot: [0, 0, 0], size: 1, pose: 'stand' },
+    { type: 'cow', at: [32, 0, 0], rot: [45, -90, 180], size: 1, pose: 'stand' },
   ]);
   // Игрок на сцене — своя поза, как у персонажа: углы, сдвиг и растяжение частей.
   const limbs = { lift: -2.4, head: [10, 0, 0], body: [0, 5, 0], rightArm: [-90.4, 0, 0], leftArm: [0, 0, 40], rightLeg: [20, 0, 0], leftLeg: [-20, 0, 0], move: { head: [0, 4.04, 0], body: [0, 0, 0] }, stretch: { leftArm: [1, 2, 1], head: [1, 1, 1] } };
@@ -1347,7 +1351,7 @@ test('карточки: предметы в руках, блоки вокруг 
   assert.deepEqual(posed.data.looks.card.mobs[0], {
     type: 'player',
     at: [0, 0, 0],
-    rot: 0,
+    rot: [0, 0, 0],
     size: 1,
     pose: 'custom',
     skin: 'wide/kai',

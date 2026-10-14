@@ -207,6 +207,10 @@
     }
     return [x, y, z];
   }
+  /** Обратный к rotate(v, [rx, ry, rz]): сначала −ry, потом −rx, потом −rz. */
+  const unrotate = (v, [rx, ry, rz]) => rotate(rotate(rotate(v, [0, -ry, 0]), [-rx, 0, 0]), [0, 0, -rz]);
+  /** Поворот моба: [x, y, z] или старое число — только вокруг вертикали. */
+  const rotOf = (r) => (Array.isArray(r) ? [0, 1, 2].map((i) => Number(r[i]) || 0) : [0, Number(r) || 0, 0]);
   /** Поворот как ModelPart в игре: сначала x, потом y, потом z. */
   const rotateXYZ = (v, [rx, ry, rz]) => rotate(rotate(rotate(v, [rx, 0, 0]), [0, ry, 0]), [0, 0, rz]);
 
@@ -573,6 +577,36 @@
       return { angles: out, lift: p.lift };
     }
     return { angles: (def.quad && def.quad[k]) || {}, lift: 0 };
+  }
+
+  const boxes = new WeakMap();
+  /** Границы модели моба в обычной позе (без его масштаба scale): { lo, hi } — по её коробкам. */
+  function mobBox(def) {
+    if (!boxes.has(def)) {
+      const chains = partChains(def.parts, mobAngles(def, def.pose).angles);
+      let lo = [Infinity, Infinity, Infinity];
+      let hi = [-Infinity, -Infinity, -Infinity];
+      for (const p of def.parts) {
+        for (const b of p.boxes) {
+          for (const x of [b.from[0], b.to[0]]) for (const y of [b.from[1], b.to[1]]) for (const z of [b.from[2], b.to[2]]) {
+            const q = chains[p.name]([x, y, z]);
+            lo = lo.map((v, i) => Math.min(v, q[i]));
+            hi = hi.map((v, i) => Math.max(v, q[i]));
+          }
+        }
+      }
+      boxes.set(def, { lo, hi });
+    }
+    return boxes.get(def);
+  }
+
+  /** Высота середины моба над его ногами (до размера size): вокруг неё он вращается. Игрок — середина роста, 16. */
+  function mobMid(e) {
+    if (e.type === 'player') return 16;
+    const def = window.McMobs && window.McMobs.mob(e.type);
+    if (!def) return 12;
+    const { lo, hi } = mobBox(def);
+    return ((lo[1] + hi[1]) / 2) * def.scale;
   }
 
   /** Моб на сцене → грани. world — точка модели моба (ноги на y = 0) → вид. */
@@ -951,15 +985,17 @@
 
   /**
    * Скелет игрока: персонаж или другой игрок на сцене. angles — поза (pose() или customPose()),
-   * place — { pos, size, turn }: где стоит, размер, поворот вокруг себя; view — мир → вид.
+   * place — { pos, size, rot, center }: где стоит, размер, поворот [x, y, z] (или число — только вокруг вертикали)
+   * вокруг точки на высоте center (середина фигуры: наклон не уводит её под пол); view — мир → вид.
    * Часть тела → фигура: поворот вокруг сустава, крепление к телу, подъём (сидит). Фигура → мир (place) → вид.
    * Голова и руки крепятся к телу: наклонили тело — они наклоняются вместе с ним (ноги — нет).
    */
   function rig(angles, slim, place, view) {
     const pos = Array.isArray(place.pos) ? place.pos.map((v) => Number(v) || 0) : [0, 0, 0];
     const size = Number(place.size) > 0 ? Number(place.size) : 1;
-    const turn = Number(place.turn) || 0;
-    const fig = (p) => add(rotate(mul(p, size), [0, turn, 0]), pos);
+    const rot = rotOf(place.rot);
+    const pivot = [0, (Number(place.center) || 0) * size, 0];
+    const fig = (p) => add(add(rotate(sub(mul(p, size), pivot), rot), pivot), pos);
     const bodyTurned = angles.body.some((x) => x);
     const parts = model(slim);
     const byKey = Object.fromEntries(parts.map((p) => [p.key, p]));
@@ -998,7 +1034,7 @@
       local[1] += angles.lift + ground;
       return fig(local);
     };
-    return { angles, parts, byKey, toWorld, toView: (part, p, anchor) => view(toWorld(part, p, anchor)), fig, size, turn, ground, bodyTurned, view };
+    return { angles, parts, byKey, toWorld, toView: (part, p, anchor) => view(toWorld(part, p, anchor)), fig, size, rot, ground, bodyTurned, view };
   }
 
   /** Коробки частей скелета и второй слой (у второго слоя видна и изнанка — как у шапки в игре). prefix — начало ключа. */
@@ -1016,7 +1052,7 @@
   /** Как скелет лёг в вид — для ручек редактора: суставы, середины, оси частей и всей фигуры. */
   function rigApi(r, camera, toWorldDir) {
     const { angles, byKey } = r;
-    const figDir = (d) => rotate(d, [0, r.turn, 0]);
+    const figDir = (d) => rotate(d, r.rot);
     // Направление из системы родителя части в вид.
     const fromParent = (key, d) => camera(figDir(r.bodyTurned && ATTACHED.has(key) ? rotate(d, angles.body) : d));
     return {
@@ -1049,7 +1085,7 @@
       /** «Вниз» фигуры (вид) на единицу подъёма lift — для стрелки «присесть». */
       down: () => camera(figDir(mul([0, -1, 0], r.size))),
       /** Направление из вида в систему фигуры (сдвиг части тела мышью): с её поворотом и размером. */
-      toFigureDir: (v) => mul(rotate(toWorldDir(v), [0, -r.turn, 0]), 1 / r.size),
+      toFigureDir: (v) => mul(unrotate(toWorldDir(v), r.rot), 1 / r.size),
     };
   }
 
@@ -1092,7 +1128,7 @@
     const toWorldDir = (v) => rotate(rotate(v, [-pitch, 0, 0]), [0, -yaw, 0]);
 
     // Персонаж: где стоит, какого размера, куда повёрнут.
-    const me = rig(angles, opts.slim, { pos: opts.pos, size: opts.size, turn: opts.figTurn }, view);
+    const me = rig(angles, opts.slim, { pos: opts.pos, size: opts.size, rot: [0, Number(opts.figTurn) || 0, 0] }, view);
     const { byKey, toWorld } = me;
 
     const Q = [];
@@ -1101,6 +1137,7 @@
     // Предметы в руках и на голове, блоки, мобы.
     const heldXf = {};
     const mobRigs = [];
+    const mobPivots = [];
     if (window.McArt) {
       const held = opts.held || {};
       for (const slot of HELD_SLOTS) {
@@ -1130,17 +1167,22 @@
         if (!e || !e.type) return;
         const k = e.size || 1;
         const at = e.at || [0, 0, 0];
+        // Поворот по трём осям — вокруг середины моба (наклонённый не уходит под пол и не взлетает).
+        const rot = rotOf(e.rot);
+        const c = mobMid(e);
+        mobPivots[i] = add(at, [0, c * k, 0]);
         if (e.type === 'player') {
           // Другой игрок — тот же скелет, что у персонажа: свои углы, сдвиг и растяжение каждой части.
           const tex = skinTexture(e.skin, opts.onModel);
           if (!tex) return;
           const a = e.pose === 'custom' && e.angles ? customPose(e.angles) : pose(MOB_POSE_KEYS.includes(e.pose) ? e.pose : 'stand', null);
-          const r = rig(a, e.slim || /^slim\//.test(e.skin || ''), { pos: at, size: k, turn: e.rot || 0 }, view);
+          const r = rig(a, e.slim || /^slim\//.test(e.skin || ''), { pos: at, size: k, rot, center: c }, view);
           mobRigs[i] = r;
           rigQuads(Q, r, tex, `mob:${i}:`);
           return;
         }
-        mobQuads(Q, e, (p) => view(add(rotate(mul(p, k), [0, e.rot || 0, 0]), at)), opts.onModel, 'mob:' + i);
+        const pivot = [0, c * k, 0];
+        mobQuads(Q, e, (p) => view(add(add(rotate(sub(mul(p, k), pivot), rot), pivot), at)), opts.onModel, 'mob:' + i);
       });
     }
 
@@ -1179,6 +1221,8 @@
       ...rigApi(me, camera, toWorldDir),
       /** Другой игрок на сцене (моб 'player' с номером i) — то же, что у персонажа; null — нет или не загрузился. */
       mobRig: (i) => (mobRigs[i] ? rigApi(mobRigs[i], camera, toWorldDir) : null),
+      /** Середина моба i (вид) — вокруг неё он вращается; null — моба нет. */
+      mobPivot: (i) => (mobPivots[i] ? view(mobPivots[i]) : null),
       /** Оси мира (вид): вдоль них двигаются блоки, мобы и вся фигура. Длина — на единицу сдвига. */
       worldAxes: () => [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((d) => camera(d)),
       /**
@@ -1242,19 +1286,7 @@
     g.clearRect(0, 0, canvas.width, canvas.height);
     const def = window.McMobs && window.McMobs.mob(type, slim);
     if (!def) return false;
-    // Размер модели — по её коробкам.
-    const chains = partChains(def.parts, mobAngles(def, def.pose).angles);
-    let lo = [Infinity, Infinity, Infinity];
-    let hi = [-Infinity, -Infinity, -Infinity];
-    for (const p of def.parts) {
-      for (const b of p.boxes) {
-        for (const x of [b.from[0], b.to[0]]) for (const y of [b.from[1], b.to[1]]) for (const z of [b.from[2], b.to[2]]) {
-          const q = chains[p.name]([x, y, z]);
-          lo = lo.map((v, i) => Math.min(v, q[i]));
-          hi = hi.map((v, i) => Math.max(v, q[i]));
-        }
-      }
-    }
+    const { lo, hi } = mobBox(def);
     const cam = (p) => rotate(rotate(sub(p, mul(add(lo, hi), 0.5)), [0, 35, 0]), [12, 0, 0]);
     const span = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 1.1 || 1;
     const k = canvas.width / span;
@@ -1683,10 +1715,18 @@
         if (!held) return null;
         c = held.center;
         axes = held.axes.map((A, i) => ({ i, A }));
-      } else if (kind === 'block' || kind === 'mob' || kind === 'figure') {
+      } else if (kind === 'mob') {
+        // Моб крутится по трём осям («гимбал», как у предметов: поворот rz → rx → ry, ry — вертикаль).
         c = centerOf(kind);
         if (!c) return null;
-        const size = kind === 'figure' ? look.size || 1 : (thingOf(state.part).size || 1) * (kind === 'mob' ? 1.5 : 1);
+        const m = mobOf(state.part);
+        R = Math.max(R * 0.8, 19 * (m.size || 1));
+        const [rx, ry] = rotOf(m.rot);
+        axes = [rotate([1, 0, 0], [0, ry, 0]), [0, 1, 0], rotate([0, 0, 1], [rx, ry, 0])].map((d, i) => ({ i, A: norm(info.camera(d)) }));
+      } else if (kind === 'block' || kind === 'figure') {
+        c = centerOf(kind);
+        if (!c) return null;
+        const size = kind === 'figure' ? look.size || 1 : thingOf(state.part).size || 1;
         R = Math.max(R * 0.8, 13 * size);
         axes = [{ i: 1, A: norm(info.camera([0, 1, 0])) }];
       } else {
@@ -1761,10 +1801,7 @@
         const b = blockOf(state.part);
         return b ? info.view(add(b.at, [0, 8 * (b.size || 1) * (BLOCK / 16), 0])) : null;
       }
-      if (kind === 'mob') {
-        const m = mobOf(state.part);
-        return m ? info.view(add(m.at, [0, 12 * (m.size || 1), 0])) : null;
-      }
+      if (kind === 'mob') return info.mobPivot(Number(state.part.split(':')[1]));
       return null;
     }
 
@@ -1883,6 +1920,7 @@
       if (isLimb(state.part)) return anglesOf(state.part)[limbOf(state.part)][i];
       if (kind === 'held') return (heldOf(state.part).rot || [0, 0, 0])[i];
       if (kind === 'figure') return state.look.turn || 0;
+      if (kind === 'mob') return rotOf(thingOf(state.part).rot)[i];
       return thingOf(state.part).rot || 0;
     }
     function setRing(i, v) {
@@ -1893,7 +1931,11 @@
         e.rot = (e.rot || [0, 0, 0]).slice();
         e.rot[i] = v;
       } else if (kind === 'figure') state.look.turn = v;
-      else thingOf(state.part).rot = v;
+      else if (kind === 'mob') {
+        const m = thingOf(state.part);
+        m.rot = rotOf(m.rot);
+        m.rot[i] = v;
+      } else thingOf(state.part).rot = v;
     }
     const arrowValue = () => (kindOf(state.part) === 'block' ? blockOf(state.part).at[1] : anglesOf(state.part).lift || 0);
     function setArrow(v, free) {
