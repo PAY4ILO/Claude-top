@@ -193,7 +193,8 @@ function lookError(v) {
       if (!isObj(b) || typeof b.id !== 'string' || (!known.blocks.has(b.id) && !tex(b.id) && !head(b.id))) return 'Такого блока нет.';
       if (!skinOk(b)) return 'Неверный скин головы.';
       if (!vec(b.at, 3, (k, i) => (i === 1 ? inRange(k, ...B.y) : inRange(k, -B.side, B.side)))) return 'Блок слишком далеко.';
-      if (b.rot !== undefined && !inRange(b.rot, -180, 180)) return 'Поворот блока — от −180° до 180°.';
+      // Поворот блока — [x, y, z] (старые карточки: одно число — вокруг вертикали).
+      if (b.rot !== undefined && !(inRange(b.rot, -180, 180) || vec(b.rot, 3, (k) => inRange(k, -180, 180)))) return 'Поворот блока — от −180° до 180°.';
       if (b.size !== undefined && !inRange(b.size, ...B.size)) return `Размер блока — от ${B.size[0]} до ${B.size[1]}.`;
     }
   }
@@ -254,7 +255,8 @@ export function normalizeLook(v) {
     }
     if (Object.keys(held).length) out.held = held;
   }
-  if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => withSkin({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: b.rot === undefined ? 0 : round(b.rot), size: b.size === undefined ? 1 : round(b.size, 100) }, b));
+  const rot3 = (r) => (Array.isArray(r) ? r.map((x) => round(x)) : [0, r === undefined ? 0 : round(r), 0]);
+  if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => withSkin({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: rot3(b.rot), size: b.size === undefined ? 1 : round(b.size, 100) }, b));
   if (v.mobs && v.mobs.length) {
     out.mobs = v.mobs.map((m) => {
       const rot = Array.isArray(m.rot) ? m.rot.map((x) => round(x)) : [0, m.rot === undefined ? 0 : round(m.rot), 0];

@@ -311,7 +311,7 @@
     const state = {};
     const on = {};
     for (const [dir, v] of Object.entries(dirs)) {
-      const want = add(b.at, rotate(mul(v, 16 * size), [0, b.rot || 0, 0]));
+      const want = add(b.at, rotate(mul(v, 16 * size), rotOf(b.rot)));
       const n = blocks.find((o, j) => j !== i && o && Math.abs((o.size || 1) - size) < 0.01 && Math.abs(o.at[0] - want[0]) < 1 && Math.abs(o.at[1] - want[1]) < 1 && Math.abs(o.at[2] - want[2]) < 1);
       on[dir] = !!n && ((JOINS[fam] || []).includes(FAMILY(n.id)) || isFullBlock(modelOf(n)));
     }
@@ -1159,7 +1159,9 @@
         if (!m) return;
         const k = (b.size || 1) * (BLOCK / 16);
         const at = b.at || [0, 0, 0];
-        const xf = (p) => view(add(rotate([(p[0] - 8) * k, p[1] * k, (p[2] - 8) * k], [0, b.rot || 0, 0]), at));
+        // Поворот по трём осям — вокруг центра блока (at — середина низа).
+        const rot = rotOf(b.rot);
+        const xf = (p) => view(add(add(rotate([(p[0] - 8) * k, (p[1] - 8) * k, (p[2] - 8) * k], rot), [0, 8 * k, 0]), at));
         const state = m.kind === 'block' && m.parts.some((p) => p.when) ? connectState(blocks, i, modelOf) : null;
         modelQuads(Q, m, xf, { key: 'block:' + i, state });
       });
@@ -1715,19 +1717,18 @@
         if (!held) return null;
         c = held.center;
         axes = held.axes.map((A, i) => ({ i, A }));
-      } else if (kind === 'mob') {
-        // Моб крутится по трём осям («гимбал», как у предметов: поворот rz → rx → ry, ry — вертикаль).
+      } else if (kind === 'mob' || kind === 'block') {
+        // Моб и блок крутятся по трём осям («гимбал», как у предметов: поворот rz → rx → ry, ry — вертикаль).
         c = centerOf(kind);
         if (!c) return null;
-        const m = mobOf(state.part);
-        R = Math.max(R * 0.8, 19 * (m.size || 1));
+        const m = thingOf(state.part);
+        R = Math.max(R * 0.8, (kind === 'mob' ? 19 : 13) * (m.size || 1));
         const [rx, ry] = rotOf(m.rot);
         axes = [rotate([1, 0, 0], [0, ry, 0]), [0, 1, 0], rotate([0, 0, 1], [rx, ry, 0])].map((d, i) => ({ i, A: norm(info.camera(d)) }));
-      } else if (kind === 'block' || kind === 'figure') {
+      } else if (kind === 'figure') {
         c = centerOf(kind);
         if (!c) return null;
-        const size = kind === 'figure' ? look.size || 1 : thingOf(state.part).size || 1;
-        R = Math.max(R * 0.8, 13 * size);
+        R = Math.max(R * 0.8, 13 * (look.size || 1));
         axes = [{ i: 1, A: norm(info.camera([0, 1, 0])) }];
       } else {
         return null;
@@ -1920,8 +1921,7 @@
       if (isLimb(state.part)) return anglesOf(state.part)[limbOf(state.part)][i];
       if (kind === 'held') return (heldOf(state.part).rot || [0, 0, 0])[i];
       if (kind === 'figure') return state.look.turn || 0;
-      if (kind === 'mob') return rotOf(thingOf(state.part).rot)[i];
-      return thingOf(state.part).rot || 0;
+      return rotOf(thingOf(state.part).rot)[i];
     }
     function setRing(i, v) {
       const kind = kindOf(state.part);
@@ -1931,11 +1931,11 @@
         e.rot = (e.rot || [0, 0, 0]).slice();
         e.rot[i] = v;
       } else if (kind === 'figure') state.look.turn = v;
-      else if (kind === 'mob') {
+      else {
         const m = thingOf(state.part);
         m.rot = rotOf(m.rot);
         m.rot[i] = v;
-      } else thingOf(state.part).rot = v;
+      }
     }
     const arrowValue = () => (kindOf(state.part) === 'block' ? blockOf(state.part).at[1] : anglesOf(state.part).lift || 0);
     function setArrow(v, free) {
@@ -1959,7 +1959,8 @@
     function paintBox(g, box, dpr) {
       const s = (box.size || 1) * (box.mob ? 0.75 : BLOCK / 16);
       const hgt = box.mob ? 32 * (box.size || 1) : 16 * s;
-      const corner = (sx, y, sz) => info.toScreen(info.view(add(rotate([sx * 8 * s, y, sz * 8 * s], [0, box.rot || 0, 0]), box.at)));
+      const mid = hgt / 2;
+      const corner = (sx, y, sz) => info.toScreen(info.view(add(add(rotate([sx * 8 * s, y - mid, sz * 8 * s], box.mob ? [0, 0, 0] : rotOf(box.rot)), [0, mid, 0]), box.at)));
       const lo = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => corner(a, 0, b));
       const hi = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => corner(a, hgt, b));
       g.strokeStyle = 'rgba(255, 255, 255, 0.9)';

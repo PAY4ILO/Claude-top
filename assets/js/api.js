@@ -272,7 +272,7 @@
         if (!isObj(b) || typeof b.id !== 'string' || !exists(b.id, ['blocks'])) return 'Такого блока нет.';
         if (!skinOk(b)) return 'Неверный скин головы.';
         if (!vec(b.at, 3, (k, i) => (i === 1 ? inRange(k, ...B.y) : inRange(k, -B.side, B.side)))) return 'Блок слишком далеко.';
-        if (b.rot !== undefined && !inRange(b.rot, -180, 180)) return 'Поворот блока — от −180° до 180°.';
+        if (b.rot !== undefined && !(inRange(b.rot, -180, 180) || vec(b.rot, 3, (k) => inRange(k, -180, 180)))) return 'Поворот блока — от −180° до 180°.';
         if (b.size !== undefined && !inRange(b.size, ...B.size)) return `Размер блока — от ${B.size[0]} до ${B.size[1]}.`;
       }
     }

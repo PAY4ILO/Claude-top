@@ -93,7 +93,7 @@
       }
       if (Object.keys(held).length) out.held = held;
     }
-    if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => withSkin({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: b.rot === undefined ? 0 : round(b.rot), size: b.size === undefined ? 1 : round(b.size, 100) }, b));
+    if (v.blocks && v.blocks.length) out.blocks = v.blocks.map((b) => withSkin({ id: b.id, at: b.at.map((x) => round(x, 10)), rot: rotArr(b.rot).map((x) => round(x)), size: b.size === undefined ? 1 : round(b.size, 100) }, b));
     if (v.mobs && v.mobs.length) {
       out.mobs = v.mobs.map((m) => {
         const rot = Array.isArray(m.rot) ? m.rot.map((x) => round(x)) : [0, m.rot === undefined ? 0 : round(m.rot), 0];
@@ -749,7 +749,7 @@
         if (!b) return null;
         const bs = b.size || 1;
         const n = u.normal;
-        rot = b.rot || 0;
+        rot = rotArr(b.rot);
         if (Math.abs(n[1]) > 0.7) {
           at = [b.at[0], n[1] > 0 ? b.at[1] + 16 * bs : b.at[1] - 16 * size, b.at[2]];
         } else {
@@ -1846,6 +1846,11 @@
         x.at = x.at.slice();
         x.at[i] = v;
       };
+      const setBlockRot = (i, v) => {
+        const x = bk();
+        x.rot = rotArr(x.rot);
+        x.rot[i] = v;
+      };
       const selected =
         b &&
         group(
@@ -1853,7 +1858,11 @@
           slider({ label: 'Вбок (X)', min: -256, max: 256, value: b.at[0], format: num, group: 'block-x', read: () => bk() && bk().at[0], onInput: (v) => setAt(0, v) }),
           slider({ label: 'Высота (Y)', min: -128, max: 256, value: b.at[1], format: num, group: 'block-y', read: () => bk() && bk().at[1], onInput: (v) => setAt(1, v) }),
           slider({ label: 'Вперёд (Z)', min: -256, max: 256, value: b.at[2], format: num, group: 'block-z', read: () => bk() && bk().at[2], onInput: (v) => setAt(2, v) }),
-          slider({ label: 'Поворот', min: -180, max: 180, value: b.rot || 0, unit: '°', axis: 1, group: 'block-rot', read: () => bk() && (bk().rot || 0), onInput: (v) => (bk().rot = v) }),
+          // Поворот по трём осям вокруг центра блока (у старых — одно число, вокруг вертикали).
+          h('p', { class: 'studio__sub', text: 'Поворот' }),
+          ['Наклон вперёд', 'Поворот', 'Наклон вбок'].map((label, i) =>
+            slider({ label, axis: i, min: -180, max: 180, value: rotArr(b.rot)[i], unit: '°', group: `block-rot:${i}`, read: () => bk() && rotArr(bk().rot)[i], onInput: (v) => setBlockRot(i, v) })
+          ),
           slider({ label: 'Размер', log: true, min: Math.round(B.size[0] * 100), max: Math.round(B.size[1] * 100), value: Math.round((b.size || 1) * 100), unit: '%', group: 'block-size', read: () => bk() && Math.round((bk().size || 1) * 100), onInput: (v) => (bk().size = v / 100) }),
           b.id === 'player_head' &&
             skinPicker({
@@ -1876,7 +1885,7 @@
               onclick: () => {
                 const s = b.size || 1;
                 const x = b.at[0] + 16 * s <= B.side ? b.at[0] + 16 * s : b.at[0] - 16 * s;
-                const copy = { id: b.id, at: [round(x, 10), b.at[1], b.at[2]], rot: b.rot || 0, size: s };
+                const copy = { id: b.id, at: [round(x, 10), b.at[1], b.at[2]], rot: rotArr(b.rot), size: s };
                 if (b.skin) copy.skin = b.skin;
                 if (addBlock(copy)) renderTools();
               },

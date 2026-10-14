@@ -1250,6 +1250,8 @@ test('карточки: предметы в руках, блоки вокруг 
     [{ blocks: Array(65).fill(stone) }, 'Блоков — не больше 64.'],
     [{ blocks: [{ id: 'stone', at: [0, 2000, 0] }] }, 'Блок слишком далеко.'],
     [{ blocks: [{ id: 'stone' }] }, 'Блок слишком далеко.'], // без места
+    [{ blocks: [{ id: 'stone', at: [0, 0, 0], rot: [0, 0, 181] }] }, 'Поворот блока — от −180° до 180°.'],
+    [{ blocks: [{ id: 'stone', at: [0, 0, 0], rot: [0, 0] }] }, 'Поворот блока — от −180° до 180°.'],
     [{ held: { head: { id: 'carved_pumpkin', size: 9 } } }, 'Размер предмета — от 0.1 до 8.'],
     [{ held: { foot: { id: 'diamond_sword' } } }, 'Предмет можно держать только в руках или на голове.'],
     [{ offset: [2500, 0] }, 'Сдвиг — от −2000 до 2000.'],
@@ -1288,7 +1290,7 @@ test('карточки: предметы в руках, блоки вокруг 
         offset: [12.34, -5],
         textures: [tex],
         held: { rightHand: { id: 'diamond_sword', rot: [10.4, -20, 0], size: 1.234, at: [1.25, 0, -2] }, leftHand: null, head: { id: 'carved_pumpkin' } },
-        blocks: [stone, { id: 'grass_block', at: [-16.04, -16, 32], rot: 89.6, size: 0.5, extra: 1 }, { id: 'tex1', at: [16, 0, 0] }],
+        blocks: [stone, { id: 'grass_block', at: [-16.04, -16, 32], rot: 89.6, size: 0.5, extra: 1 }, { id: 'tex1', at: [16, 0, 0] }, { id: 'stone', at: [0, 32, 0], rot: [30.4, -45, 179.6] }],
         extra: true,
       },
     },
@@ -1308,9 +1310,10 @@ test('карточки: предметы в руках, блоки вокруг 
         head: { id: 'carved_pumpkin', rot: [0, 0, 0], size: 1, at: [0, 0, 0] },
       },
       blocks: [
-        { id: 'stone', at: [0, 0, 0], rot: 0, size: 1 },
-        { id: 'grass_block', at: [-16, -16, 32], rot: 90, size: 0.5 },
-        { id: 'tex1', at: [16, 0, 0], rot: 0, size: 1 },
+        { id: 'stone', at: [0, 0, 0], rot: [0, 0, 0], size: 1 },
+        { id: 'grass_block', at: [-16, -16, 32], rot: [0, 90, 0], size: 0.5 },
+        { id: 'tex1', at: [16, 0, 0], rot: [0, 0, 0], size: 1 },
+        { id: 'stone', at: [0, 32, 0], rot: [30, -45, 180], size: 1 },
       ],
     },
     'округлено, лишнее и пустые слоты выброшены'
@@ -1522,7 +1525,7 @@ test('карточки: модерация своих картинок 16×16 �
         leftHand: { id: 'diamond_sword', rot: [0, 0, 0], size: 1, at: [0, 0, 0] },
         head: { id: 'carved_pumpkin', rot: [0, 0, 0], size: 1, at: [0, 0, 0] },
       },
-      blocks: [{ id: 'stone', at: [0, 0, 0], rot: 0, size: 1 }],
+      blocks: [{ id: 'stone', at: [0, 0, 0], rot: [0, 0, 0], size: 1 }],
     },
   };
   assert.deepEqual(mod.data.player.looks, expected, 'картинки и ссылки на них убраны, остальное осталось');
